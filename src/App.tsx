@@ -22,8 +22,7 @@ import {
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
-// Helper to determine if current path is /admin
-function checkIsAdminPath() {
+function checkIsAdminPath(): boolean {
   if (typeof window === 'undefined') return false;
   const path = window.location.pathname.toLowerCase();
   return path === '/admin' || path.startsWith('/admin/');
@@ -31,7 +30,7 @@ function checkIsAdminPath() {
 
 export default function App() {
   // URL Route Detection: "/" -> Driver Portal, "/admin" -> Admin Command Center
-  const [isAdminRoute, setIsAdminRoute] = useState(checkIsAdminPath);
+  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminPath);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -43,7 +42,7 @@ export default function App() {
   }, []);
 
   // Admin Authentication State (persists across refreshes on /admin)
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
     try {
       const session = localStorage.getItem(ADMIN_SESSION_KEY);
       return Boolean(session);
@@ -53,12 +52,12 @@ export default function App() {
   });
 
   // Data State
-  const [drivers, setDrivers] = useState([]);
-  const [orders, setOrders] = useState([]);
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Authenticated Driver State
-  const [currentDriver, setCurrentDriver] = useState(() => {
+  const [currentDriver, setCurrentDriver] = useState<any>(() => {
     try {
       const saved = localStorage.getItem(LOGGED_IN_DRIVER_KEY);
       return saved ? JSON.parse(saved) : null;
@@ -73,9 +72,9 @@ export default function App() {
   const [isDbInfoOpen, setIsDbInfoOpen] = useState(false);
 
   // Toast Notification
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
 
-  const showToast = useCallback((message, type = 'success') => {
+  const showToast = useCallback((message: string, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
@@ -122,46 +121,46 @@ export default function App() {
   };
 
   // Add Delivery Boy (Admin)
-  const handleAddDriver = async ({ name, phone, pin }) => {
+  const handleAddDriver = async ({ name, phone, pin }: { name: string; phone: string; pin: string }) => {
     try {
       const created = await addDriver({ name, phone, pin });
       setDrivers((prev) => [created, ...prev]);
       showToast(`Driver ${created.name} registered successfully!`, 'success');
       return created;
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Error registering driver', 'error');
       throw err;
     }
   };
 
   // Create Delivery Task (Admin)
-  const handleCreateTask = async (taskData) => {
+  const handleCreateTask = async (taskData: any) => {
     try {
       const created = await createOrder(taskData);
       setOrders((prev) => [created, ...prev]);
       showToast(`Task #${created.order_number} dispatched successfully!`, 'success');
       return created;
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Error creating task', 'error');
       throw err;
     }
   };
 
   // Update Status (Admin)
-  const handleUpdateStatus = async (orderId, newStatus) => {
+  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
     try {
       await updateOrderStatus(orderId, newStatus);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
       );
       showToast(`Order status updated to "${newStatus}"`, 'success');
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Failed to update order status', 'error');
     }
   };
 
   // Assign Driver (Admin)
-  const handleAssignDriver = async (orderId, driverId, driverName) => {
+  const handleAssignDriver = async (orderId: string, driverId: string, driverName: string) => {
     try {
       const newStatus = driverId ? 'Out for Delivery' : 'Pending';
       await updateOrderStatus(orderId, newStatus);
@@ -183,13 +182,13 @@ export default function App() {
           : 'Order set to unassigned',
         'info'
       );
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Failed to assign driver', 'error');
     }
   };
 
   // Driver Login (Driver Portal)
-  const handleDriverLogin = async (phone, pin) => {
+  const handleDriverLogin = async (phone: string, pin: string) => {
     const driver = await driverLogin(phone, pin);
     if (!driver) {
       throw new Error('Invalid mobile phone number or 4-digit PIN');
@@ -208,34 +207,34 @@ export default function App() {
   };
 
   // Pin Current Location (GPS)
-  const handlePinLocation = async (orderId, latitude, longitude) => {
+  const handlePinLocation = async (orderId: string, latitude: number, longitude: number) => {
     try {
       await updateOrderLocation(orderId, latitude, longitude);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, latitude, longitude } : o))
       );
       showToast(`📍 Location pinned successfully (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`, 'success');
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Failed to update location coordinates', 'error');
     }
   };
 
   // Complete Delivery with POD (Driver Portal)
-  const handleCompleteDelivery = async (orderId, podData) => {
+  const handleCompleteDelivery = async (orderId: string, podData: any) => {
     try {
       const updated = await completeDelivery(orderId, podData);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
       );
       showToast(`🎉 Order marked as Delivered! POD captured.`, 'success');
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Failed to save proof of delivery', 'error');
       throw err;
     }
   };
 
   // Accept Open Pool Order (Driver Portal)
-  const handleAcceptOrder = async (orderId, estimatedMinutes) => {
+  const handleAcceptOrder = async (orderId: string, estimatedMinutes: number) => {
     try {
       if (!currentDriver) {
         showToast('Please log in as a driver first', 'error');
@@ -258,7 +257,7 @@ export default function App() {
         )
       );
       showToast('Order accepted! Status updated to Out for Delivery', 'success');
-    } catch (err) {
+    } catch (err: any) {
       showToast(err.message || 'Failed to accept order', 'error');
     }
   };
