@@ -22,23 +22,58 @@ import {
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
-function checkIsAdminPath(): boolean {
+// Robust helper to determine if current URL path, hash, or query points to admin
+function checkIsAdminUrl(): boolean {
   if (typeof window === 'undefined') return false;
-  const path = window.location.pathname.toLowerCase();
-  return path === '/admin' || path.startsWith('/admin/');
+  try {
+    const pathname = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
+    const hash = (window.location.hash || '').toLowerCase().replace(/\/+$/, '');
+    const search = (window.location.search || '').toLowerCase();
+
+    // 1. Path check: /admin, .../admin, ending in "admin"
+    const isPathAdmin =
+      pathname === '/admin' ||
+      pathname.endsWith('/admin') ||
+      pathname.endsWith('admin') ||
+      pathname.split('/').includes('admin');
+
+    // 2. Hash check (supports hash routing e.g. #/admin, #admin)
+    const isHashAdmin =
+      hash === '#/admin' ||
+      hash === '#admin' ||
+      hash.endsWith('/admin') ||
+      hash.endsWith('admin');
+
+    // 3. Search query check (e.g. ?admin or ?view=admin)
+    const isSearchAdmin =
+      search === '?admin' ||
+      search.includes('admin');
+
+    return Boolean(isPathAdmin || isHashAdmin || isSearchAdmin);
+  } catch {
+    return false;
+  }
 }
 
 export default function App() {
-  // URL Route Detection: "/" -> Driver Portal, "/admin" -> Admin Command Center
-  const [isAdminRoute, setIsAdminRoute] = useState<boolean>(checkIsAdminPath);
+  // Admin View State: true when visiting /admin or any URL ending in "admin"
+  const [isAdminView, setIsAdminView] = useState<boolean>(() => checkIsAdminUrl());
+  // Alias for backward compatibility
+  const isAdminRoute = isAdminView;
 
+  // Listen to popstate, hashchange, and navigation events
   useEffect(() => {
-    const handleLocationChange = () => {
-      setIsAdminRoute(checkIsAdminPath());
+    const handleUrlChange = () => {
+      setIsAdminView(checkIsAdminUrl());
     };
 
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
   }, []);
 
   // Admin Authentication State (persists across refreshes on /admin)
@@ -266,7 +301,8 @@ export default function App() {
     <div className="min-h-full flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
-        isAdminRoute={isAdminRoute}
+        isAdminView={isAdminView}
+        isAdminRoute={isAdminView}
         currentDriver={currentDriver}
         onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
@@ -276,8 +312,8 @@ export default function App() {
 
       {/* Main Container: Distinct Routes */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:py-6">
-        {isAdminRoute ? (
-          /* ROUTE /admin: ADMIN PANEL VIEW */
+        {isAdminView ? (
+          /* ROUTE /admin OR ENDING IN "admin": ADMIN PANEL VIEW */
           isAdminLoggedIn ? (
             <AdminDashboard
               orders={orders}

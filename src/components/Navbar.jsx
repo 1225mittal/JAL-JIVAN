@@ -4,12 +4,15 @@ import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
   isAdminRoute = false,
+  isAdminView = false,
   currentDriver = null,
   onDriverLogout,
   onOpenDbInfo,
   isAdminLoggedIn = false,
   onAdminLogout
 }) {
+  const isViewAdmin = Boolean(isAdminView || isAdminRoute);
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
       <div className="max-w-6xl mx-auto px-4 py-2.5 sm:py-3 flex items-center justify-between gap-3">
@@ -23,16 +26,16 @@ export default function Navbar({
               <span className="font-extrabold text-base tracking-tight text-white">JAL-JIVAN</span>
               <span
                 className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${
-                  isAdminRoute
+                  isViewAdmin
                     ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
                     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                 }`}
               >
-                {isAdminRoute ? 'Admin Command' : 'Driver Dispatch'}
+                {isViewAdmin ? 'Admin Command' : 'Driver Dispatch'}
               </span>
             </div>
             <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
-              {isAdminRoute
+              {isViewAdmin
                 ? 'Fleet Logistics & Command Center'
                 : 'Delivery & Logistics System'}
             </p>
@@ -61,7 +64,7 @@ export default function Navbar({
           </button>
 
           {/* DRIVER VIEW (/): Driver Profile & Logout */}
-          {!isAdminRoute && currentDriver && (
+          {!isViewAdmin && currentDriver && (
             <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
               <div className="text-right hidden sm:block">
                 <p className="text-xs font-semibold text-slate-200 flex items-center gap-1 justify-end">
@@ -82,7 +85,7 @@ export default function Navbar({
           )}
 
           {/* ADMIN VIEW (/admin): Admin Logout Button */}
-          {isAdminRoute && (
+          {isViewAdmin && (
             isAdminLoggedIn ? (
               <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
                 <button
