@@ -22,9 +22,12 @@ import {
   Award,
   Star,
   TrendingUp,
-  Check
+  Check,
+  BookOpen,
+  Building2
 } from 'lucide-react';
 import { fetchRewardSettings, saveRewardSettings } from '../lib/supabase';
+import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 
 export function AdminPanel({
   orders = [],
@@ -39,8 +42,12 @@ export function AdminPanel({
 }) {
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'Pending' | 'Out for Delivery' | 'Delivered'
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'analytics'
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'addresses' | 'analytics'
   const [viewProofOrder, setViewProofOrder] = useState(null);
+  const [selectedAddressForDetail, setSelectedAddressForDetail] = useState(null);
+
+  // Aggregated addresses from orders for address book & badges
+  const addresses = useMemo(() => aggregateAddressesFromOrders(orders), [orders]);
 
   // Reward Rules State
   const [rewardMinDeliv, setRewardMinDeliv] = useState(5);
@@ -274,6 +281,19 @@ export function AdminPanel({
           </button>
 
           <button
+            id="admin-addresses-tab"
+            onClick={() => setActiveTab('addresses')}
+            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+              activeTab === 'addresses'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Address Book ({addresses.length})</span>
+          </button>
+
+          <button
             id="admin-analytics-tab"
             onClick={() => setActiveTab('analytics')}
             className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
@@ -369,9 +389,47 @@ export function AdminPanel({
 
                     {/* Address & Landmark */}
                     <div className="mt-2.5 space-y-1 text-xs">
-                      <div className="flex items-start gap-1.5 text-slate-300">
-                        <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
-                        <span className="line-clamp-2">{order.address}</span>
+                      <div
+                        onClick={() => {
+                          const matchingAddr = addresses.find(
+                            (a) => a.key === (order.address || '').trim().toLowerCase()
+                          );
+                          if (matchingAddr) {
+                            setSelectedAddressForDetail(matchingAddr);
+                          } else {
+                            setSelectedAddressForDetail({
+                              id: order.id,
+                              fullAddress: order.address,
+                              landmark: order.landmark || '',
+                              customerNames: order.customer_name ? [order.customer_name] : [],
+                              customerPhones: order.customer_phone ? [order.customer_phone] : [],
+                              latitude: order.latitude,
+                              longitude: order.longitude,
+                              isPinned: order.latitude !== null && order.longitude !== null,
+                              totalOrders: 1,
+                              deliveredCount: order.status === 'Delivered' ? 1 : 0,
+                              totalSpent: parseFloat(order.amount) || 0,
+                              orders: [order]
+                            });
+                          }
+                        }}
+                        className="flex items-start gap-1.5 text-slate-300 hover:text-emerald-300 cursor-pointer group/addr transition-colors"
+                        title="Click to view full address details & order history"
+                      >
+                        <MapPin className="w-3.5 h-3.5 text-slate-500 group-hover/addr:text-emerald-400 shrink-0 mt-0.5" />
+                        <span className="line-clamp-2 underline decoration-slate-700/60 group-hover/addr:decoration-emerald-400 font-medium">
+                          {order.address}
+                        </span>
+                        {order.latitude !== null && order.latitude !== undefined && order.longitude !== null && order.longitude !== undefined ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0 ml-1">
+                            📍 Pinned
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0 ml-1">
+                            ⚠️ Not Pinned
+                          </span>
+                        )}
+                        <ChevronRight className="w-3 h-3 text-slate-600 group-hover/addr:text-emerald-400 shrink-0 mt-0.5 ml-auto" />
                       </div>
 
                       {order.landmark && (
@@ -529,7 +587,15 @@ export function AdminPanel({
         </div>
       )}
 
-      {/* TAB 3: DELIVERY ANALYTICS & VARIANCE */}
+      {/* TAB 3: ADDRESS BOOK DIRECTORY */}
+      {activeTab === 'addresses' && (
+        <AddressBook
+          orders={orders}
+          onViewProof={(order) => setViewProofOrder(order)}
+        />
+      )}
+
+      {/* TAB 4: DELIVERY ANALYTICS & VARIANCE */}
       {activeTab === 'analytics' && (
         <div className="space-y-5 animate-fade-in">
           {/* 1. Driver Star Reward Rules Configuration */}
@@ -702,6 +768,18 @@ export function AdminPanel({
             );
           })()}
         </div>
+      )}
+
+      {/* Address Detail Viewer Modal for Admin */}
+      {selectedAddressForDetail && (
+        <AddressDetailModal
+          address={selectedAddressForDetail}
+          onClose={() => setSelectedAddressForDetail(null)}
+          onViewProof={(order) => {
+            setSelectedAddressForDetail(null);
+            setViewProofOrder(order);
+          }}
+        />
       )}
 
       {/* Proof of Delivery Viewer Modal for Admin */}
