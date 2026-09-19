@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
-import AdminPanel from './components/AdminPanel';
+import AdminPanel, { AdminDashboard } from './components/AdminPanel';
+import AdminLogin from './components/AdminLogin';
 import DriverPortal from './components/DriverPortal';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
@@ -18,10 +19,21 @@ import {
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
+const ADMIN_SESSION_KEY = 'admin_session';
 
 export default function App() {
   // Navigation State
   const [activeView, setActiveView] = useState('admin'); // 'admin' | 'driver'
+
+  // Admin Authentication State (persists on page refresh)
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
+    try {
+      const session = localStorage.getItem(ADMIN_SESSION_KEY);
+      return Boolean(session);
+    } catch {
+      return false;
+    }
+  });
 
   // Data State
   const [drivers, setDrivers] = useState([]);
@@ -74,6 +86,23 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Admin Login & Logout handlers
+  const handleAdminLoginSuccess = () => {
+    setIsAdminLoggedIn(true);
+    showToast('Welcome back, Admin Mittal!', 'success');
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdminLoggedIn(false);
+    try {
+      localStorage.removeItem(ADMIN_SESSION_KEY);
+      localStorage.removeItem('jal_jivan_admin_logged_in');
+    } catch (e) {
+      console.error('Failed to clear admin session', e);
+    }
+    showToast('Logged out of Admin Panel', 'info');
+  };
 
   // Add Delivery Boy
   const handleAddDriver = async ({ name, phone, pin }) => {
@@ -197,21 +226,29 @@ export default function App() {
         currentDriver={currentDriver}
         onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
+        isAdminLoggedIn={isAdminLoggedIn}
+        onAdminLogout={handleAdminLogout}
+        onLogout={handleAdminLogout}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:py-6">
         {activeView === 'admin' ? (
-          <AdminPanel
-            orders={orders}
-            drivers={drivers}
-            loading={loading}
-            onOpenAddDriver={() => setIsAddDriverOpen(true)}
-            onOpenCreateTask={() => setIsCreateTaskOpen(true)}
-            onUpdateStatus={handleUpdateStatus}
-            onAssignDriver={handleAssignDriver}
-            onRefresh={loadInitialData}
-          />
+          isAdminLoggedIn ? (
+            <AdminDashboard
+              orders={orders}
+              drivers={drivers}
+              loading={loading}
+              onOpenAddDriver={() => setIsAddDriverOpen(true)}
+              onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+              onUpdateStatus={handleUpdateStatus}
+              onAssignDriver={handleAssignDriver}
+              onRefresh={loadInitialData}
+              onLogout={handleAdminLogout}
+            />
+          ) : (
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+          )
         ) : (
           <DriverPortal
             currentDriver={currentDriver}

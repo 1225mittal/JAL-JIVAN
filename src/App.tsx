@@ -1,0 +1,288 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import Navbar from './components/Navbar';
+import AdminPanel, { AdminDashboard } from './components/AdminPanel';
+import AdminLogin from './components/AdminLogin';
+import DriverPortal from './components/DriverPortal';
+import AddDriverModal from './components/AddDriverModal';
+import CreateTaskModal from './components/CreateTaskModal';
+import SupabaseInfoModal from './components/SupabaseInfoModal';
+import Toast from './components/Toast';
+import {
+  fetchDrivers,
+  addDriver,
+  driverLogin,
+  fetchOrders,
+  createOrder,
+  updateOrderStatus,
+  updateOrderLocation,
+  completeDelivery
+} from './lib/supabase';
+
+const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
+const ADMIN_SESSION_KEY = 'admin_session';
+
+export default function App() {
+  // Navigation State
+  const [activeView, setActiveView] = useState<'admin' | 'driver'>('admin');
+
+  // Admin Authentication State (persists on page refresh)
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
+    try {
+      const session = localStorage.getItem(ADMIN_SESSION_KEY);
+      return Boolean(session);
+    } catch {
+      return false;
+    }
+  });
+
+  // Data State
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Authenticated Driver State
+  const [currentDriver, setCurrentDriver] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem(LOGGED_IN_DRIVER_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Modals
+  const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isDbInfoOpen, setIsDbInfoOpen] = useState(false);
+
+  // Toast Notification
+  const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
+
+  const showToast = useCallback((message: string, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  }, []);
+
+  // Load Data
+  const loadInitialData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [driversData, ordersData] = await Promise.all([
+        fetchDrivers(),
+        fetchOrders()
+      ]);
+      setDrivers(driversData || []);
+      setOrders(ordersData || []);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      showToast('Failed to load live data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // Admin Login & Logout handlers
+  const handleAdminLoginSuccess = () => {
+    setIsAdminLoggedIn(true);
+    showToast('Welcome back, Admin Mittal!', 'success');
+  };
+
+  const handleAdminLogout = () => {
+    setIsAdminLoggedIn(false);
+    try {
+      localStorage.removeItem(ADMIN_SESSION_KEY);
+      localStorage.removeItem('jal_jivan_admin_logged_in');
+    } catch (e) {
+      console.error('Failed to clear admin session', e);
+    }
+    showToast('Logged out of Admin Panel', 'info');
+  };
+
+  // Add Delivery Boy
+  const handleAddDriver = async ({ name, phone, pin }: { name: string; phone: string; pin: string }) => {
+    try {
+      const created = await addDriver({ name, phone, pin });
+      setDrivers((prev) => [created, ...prev]);
+      showToast(`Driver ${created.name} registered successfully!`, 'success');
+      return created;
+    } catch (err: any) {
+      showToast(err.message || 'Error registering driver', 'error');
+      throw err;
+    }
+  };
+
+  // Create Delivery Task
+  const handleCreateTask = async (taskData: any) => {
+    try {
+      const created = await createOrder(taskData);
+      setOrders((prev) => [created, ...prev]);
+      showToast(`Task #${created.order_number} dispatched successfully!`, 'success');
+      return created;
+    } catch (err: any) {
+      showToast(err.message || 'Error creating task', 'error');
+      throw err;
+    }
+  };
+
+  // Update Status
+  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+    try {
+      await updateOrderStatus(orderId, newStatus);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+      );
+      showToast(`Order status updated to "${newStatus}"`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update order status', 'error');
+    }
+  };
+
+  // Assign Driver
+  const handleAssignDriver = async (orderId: string, driverId: string, driverName: string) => {
+    try {
+      const newStatus = driverId ? 'Out for Delivery' : 'Pending';
+      await updateOrderStatus(orderId, newStatus);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                assigned_driver_id: driverId,
+                driver_name: driverName || 'Unassigned',
+                status: newStatus
+              }
+            : o
+        )
+      );
+      showToast(
+        driverId
+          ? `Order assigned to ${driverName}`
+          : 'Order set to unassigned',
+        'info'
+      );
+    } catch (err: any) {
+      showToast(err.message || 'Failed to assign driver', 'error');
+    }
+  };
+
+  // Driver Login
+  const handleDriverLogin = async (phone: string, pin: string) => {
+    const driver = await driverLogin(phone, pin);
+    if (!driver) {
+      throw new Error('Invalid mobile phone number or 4-digit PIN');
+    }
+    setCurrentDriver(driver);
+    localStorage.setItem(LOGGED_IN_DRIVER_KEY, JSON.stringify(driver));
+    showToast(`Welcome back, ${driver.name}!`, 'success');
+    return driver;
+  };
+
+  // Driver Logout
+  const handleDriverLogout = () => {
+    setCurrentDriver(null);
+    localStorage.removeItem(LOGGED_IN_DRIVER_KEY);
+    showToast('Logged out of driver portal', 'info');
+  };
+
+  // Pin Current Location (GPS)
+  const handlePinLocation = async (orderId: string, latitude: number, longitude: number) => {
+    try {
+      await updateOrderLocation(orderId, latitude, longitude);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, latitude, longitude } : o))
+      );
+      showToast(`📍 Location pinned successfully (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update location coordinates', 'error');
+    }
+  };
+
+  // Complete Delivery with POD
+  const handleCompleteDelivery = async (orderId: string, podData: any) => {
+    try {
+      const updated = await completeDelivery(orderId, podData);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
+      );
+      showToast(`🎉 Order marked as Delivered! POD captured.`, 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save proof of delivery', 'error');
+      throw err;
+    }
+  };
+
+  return (
+    <div className="min-h-full flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
+      {/* Top Navbar */}
+      <Navbar
+        activeView={activeView}
+        setActiveView={setActiveView}
+        currentDriver={currentDriver}
+        onDriverLogout={handleDriverLogout}
+        onOpenDbInfo={() => setIsDbInfoOpen(true)}
+        isAdminLoggedIn={isAdminLoggedIn}
+        onAdminLogout={handleAdminLogout}
+        onLogout={handleAdminLogout}
+      />
+
+      {/* Main Container */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:py-6">
+        {activeView === 'admin' ? (
+          isAdminLoggedIn ? (
+            <AdminDashboard
+              orders={orders}
+              drivers={drivers}
+              loading={loading}
+              onOpenAddDriver={() => setIsAddDriverOpen(true)}
+              onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+              onUpdateStatus={handleUpdateStatus}
+              onAssignDriver={handleAssignDriver}
+              onRefresh={loadInitialData}
+              onLogout={handleAdminLogout}
+            />
+          ) : (
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+          )
+        ) : (
+          <DriverPortal
+            currentDriver={currentDriver}
+            drivers={drivers}
+            orders={orders}
+            onLogin={handleDriverLogin}
+            onLogout={handleDriverLogout}
+            onPinLocation={handlePinLocation}
+            onCompleteDelivery={handleCompleteDelivery}
+          />
+        )}
+      </main>
+
+      {/* Modals */}
+      <AddDriverModal
+        isOpen={isAddDriverOpen}
+        onClose={() => setIsAddDriverOpen(false)}
+        onAddDriver={handleAddDriver}
+      />
+
+      <CreateTaskModal
+        isOpen={isCreateTaskOpen}
+        onClose={() => setIsCreateTaskOpen(false)}
+        drivers={drivers}
+        onCreateTask={handleCreateTask}
+      />
+
+      <SupabaseInfoModal
+        isOpen={isDbInfoOpen}
+        onClose={() => setIsDbInfoOpen(false)}
+      />
+
+      {/* Toast Feedback */}
+      <Toast toast={toast} onClose={() => setToast(null)} />
+    </div>
+  );
+}
