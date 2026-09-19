@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   UserPlus,
   PackagePlus,
@@ -17,8 +17,14 @@ import {
   RefreshCw,
   Phone,
   KeyRound,
-  LogOut
+  LogOut,
+  BarChart3,
+  Award,
+  Star,
+  TrendingUp,
+  Check
 } from 'lucide-react';
+import { fetchRewardSettings, saveRewardSettings } from '../lib/supabase';
 
 export function AdminPanel({
   orders = [],
@@ -33,8 +39,42 @@ export function AdminPanel({
 }) {
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'Pending' | 'Out for Delivery' | 'Delivered'
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers'
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'analytics'
   const [viewProofOrder, setViewProofOrder] = useState(null);
+
+  // Reward Rules State
+  const [rewardMinDeliv, setRewardMinDeliv] = useState(5);
+  const [rewardStars, setRewardStars] = useState(1);
+  const [rewardSaved, setRewardSaved] = useState(false);
+  const [savingReward, setSavingReward] = useState(false);
+
+  useEffect(() => {
+    async function loadRewards() {
+      const res = await fetchRewardSettings();
+      if (res) {
+        setRewardMinDeliv(res.min_deliveries || 5);
+        setRewardStars(res.stars_rewarded || 1);
+      }
+    }
+    loadRewards();
+  }, []);
+
+  const handleSaveRewardSettings = async (e) => {
+    e?.preventDefault();
+    setSavingReward(true);
+    try {
+      await saveRewardSettings({
+        minDeliveries: rewardMinDeliv,
+        starsRewarded: rewardStars
+      });
+      setRewardSaved(true);
+      setTimeout(() => setRewardSaved(false), 2500);
+    } catch (err) {
+      console.error('Failed saving reward settings', err);
+    } finally {
+      setSavingReward(false);
+    }
+  };
 
   // Computed Metrics
   const metrics = useMemo(() => {
@@ -231,6 +271,19 @@ export function AdminPanel({
           >
             <Users className="w-4 h-4" />
             <span>Delivery Boys ({drivers.length})</span>
+          </button>
+
+          <button
+            id="admin-analytics-tab"
+            onClick={() => setActiveTab('analytics')}
+            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+              activeTab === 'analytics'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>Delivery Analytics</span>
           </button>
         </div>
 
@@ -473,6 +526,181 @@ export function AdminPanel({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB 3: DELIVERY ANALYTICS & VARIANCE */}
+      {activeTab === 'analytics' && (
+        <div className="space-y-5 animate-fade-in">
+          {/* 1. Driver Star Reward Rules Configuration */}
+          <div className="glass-card p-5 rounded-2xl border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Driver Star Reward Milestone Rules</h3>
+                  <p className="text-xs text-slate-400">
+                    Configure the delivery milestone formula stored in reward_settings for driver awards.
+                  </p>
+                </div>
+              </div>
+
+              {rewardSaved && (
+                <span className="text-xs font-semibold text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-3 py-1 rounded-full flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Rule Saved & Active!</span>
+                </span>
+              )}
+            </div>
+
+            <form onSubmit={handleSaveRewardSettings} className="flex flex-wrap items-center gap-3 pt-2">
+              <div className="flex items-center gap-2 text-xs text-slate-300">
+                <span className="font-medium">Every</span>
+                <input
+                  id="admin-reward-min-deliv"
+                  type="number"
+                  min="1"
+                  required
+                  value={rewardMinDeliv}
+                  onChange={(e) => setRewardMinDeliv(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-16 px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-white text-center font-bold focus:border-emerald-500 focus:outline-none"
+                />
+                <span className="font-medium">Deliveries =</span>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-slate-300">
+                <input
+                  id="admin-reward-stars-count"
+                  type="number"
+                  min="1"
+                  required
+                  value={rewardStars}
+                  onChange={(e) => setRewardStars(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-16 px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-amber-400 text-center font-bold focus:border-emerald-500 focus:outline-none"
+                />
+                <span className="font-bold text-amber-400 flex items-center gap-1">
+                  <span>Star(s)</span>
+                  <Star className="w-3.5 h-3.5 fill-amber-400" />
+                </span>
+              </div>
+
+              <button
+                id="admin-save-reward-rule-btn"
+                type="submit"
+                disabled={savingReward}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20 active:scale-[0.98] disabled:opacity-50"
+              >
+                {savingReward ? 'Saving...' : 'Save Rule'}
+              </button>
+            </form>
+          </div>
+
+          {/* 2. Comparative Table for Delivery Performance & ETA Variance */}
+          {(() => {
+            const deliveredOrders = orders.filter((o) => o.status === 'Delivered');
+
+            return (
+              <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-xl space-y-4">
+                <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      <span>Delivery Performance & ETA Variance Analysis</span>
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Actual delivery completion duration (delivered_at - accepted_at) compared against calculated road speed ETA.
+                    </p>
+                  </div>
+                  <span className="text-xs text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
+                    {deliveredOrders.length} completed tasks
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-950/60 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="p-3.5">Order #</th>
+                        <th className="p-3.5">Driver</th>
+                        <th className="p-3.5">Estimated Time</th>
+                        <th className="p-3.5">Actual Time</th>
+                        <th className="p-3.5">Variance</th>
+                        <th className="p-3.5">Completed At</th>
+                        <th className="p-3.5 text-right">Proof</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {deliveredOrders.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="p-8 text-center text-slate-500">
+                            No delivered orders recorded yet. As orders are completed, comparative performance data will display here.
+                          </td>
+                        </tr>
+                      ) : (
+                        deliveredOrders.map((order) => {
+                          const start = order.accepted_at
+                            ? new Date(order.accepted_at).getTime()
+                            : new Date(order.created_at).getTime();
+                          const end = order.delivered_at
+                            ? new Date(order.delivered_at).getTime()
+                            : Date.now();
+                          const actualMins = Math.max(1, Math.round((end - start) / 60000));
+                          const estMins = order.estimated_minutes || 15;
+                          const variance = actualMins - estMins;
+
+                          return (
+                            <tr key={order.id} className="hover:bg-slate-800/30 transition-colors">
+                              <td className="p-3.5 font-bold text-white">#{order.order_number}</td>
+                              <td className="p-3.5 font-semibold text-slate-200">
+                                {order.driver_name || 'Unassigned'}
+                              </td>
+                              <td className="p-3.5 text-slate-300">~{estMins} mins</td>
+                              <td className="p-3.5 font-bold text-white">{actualMins} mins</td>
+                              <td className="p-3.5">
+                                {variance <= 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold text-[11px]">
+                                    {variance === 0 ? 'On time' : `${Math.abs(variance)} mins early`}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold text-[11px]">
+                                    +{variance} mins late
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3.5 text-slate-400">
+                                {order.delivered_at
+                                  ? new Date(order.delivered_at).toLocaleTimeString([], {
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })
+                                  : '-'}
+                              </td>
+                              <td className="p-3.5 text-right">
+                                {order.delivery_proof_url ? (
+                                  <button
+                                    onClick={() => setViewProofOrder(order)}
+                                    className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs font-semibold inline-flex items-center gap-1"
+                                    title="View Delivery Proof"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Proof</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-600 text-[11px]">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

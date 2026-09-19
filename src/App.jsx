@@ -15,7 +15,8 @@ import {
   createOrder,
   updateOrderStatus,
   updateOrderLocation,
-  completeDelivery
+  completeDelivery,
+  acceptOrderDelivery
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
@@ -217,6 +218,35 @@ export default function App() {
     }
   };
 
+  // Accept Pool Order
+  const handleAcceptOrder = async (orderId, estimatedMinutes) => {
+    try {
+      if (!currentDriver) {
+        showToast('Please log in as a driver first', 'error');
+        return;
+      }
+      await acceptOrderDelivery(orderId, currentDriver.id, currentDriver.name, estimatedMinutes);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                assigned_driver_id: currentDriver.id,
+                driver_id: currentDriver.id,
+                driver_name: currentDriver.name,
+                status: 'Out for Delivery',
+                accepted_at: new Date().toISOString(),
+                estimated_minutes: estimatedMinutes
+              }
+            : o
+        )
+      );
+      showToast('Order accepted! Status updated to Out for Delivery', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to accept order', 'error');
+    }
+  };
+
   return (
     <div className="min-h-full flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
@@ -258,6 +288,7 @@ export default function App() {
             onLogout={handleDriverLogout}
             onPinLocation={handlePinLocation}
             onCompleteDelivery={handleCompleteDelivery}
+            onAcceptOrder={handleAcceptOrder}
           />
         )}
       </main>

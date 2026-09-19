@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Truck,
   Phone,
@@ -15,9 +15,63 @@ import {
   Landmark,
   Compass,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  Star,
+  Award,
+  Wifi,
+  WifiOff,
+  RefreshCw,
+  Sparkles,
+  Check
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
+import {
+  acceptOrderDelivery,
+  fetchRewardSettings,
+  recordDriverAttendance,
+  checkDriverAttendanceToday
+} from '../lib/supabase';
+
+// Store Hub Geofence Location (Ghaziabad Store Central Hub)
+const STORE_HUB = {
+  lat: 28.6692,
+  lng: 77.4538,
+  name: 'Store Central Hub (Ghaziabad)'
+};
+const GEOFENCE_RADIUS_METERS = 150;
+
+// Haversine formula to calculate distance in meters
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371e3; // Earth radius in meters
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+// Calculate road speed ETA for an order: 25 km/h city average speed + 1.3x winding factor + 5 min prep
+function calculateEtaMinutes(destLat, destLng, driverLat = STORE_HUB.lat, driverLng = STORE_HUB.lng) {
+  if (!destLat || !destLng) return 15; // default fallback
+  const R = 6371; // Earth radius in km
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(destLat - driverLat);
+  const dLon = toRad(destLng - driverLng);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(driverLat)) * Math.cos(toRad(destLat)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distKm = R * c;
+
+  const drivingTimeHours = (distKm * 1.3) / 25;
+  return Math.max(5, Math.round(drivingTimeHours * 60) + 5);
+}
 
 export default function DriverPortal({
   currentDriver,
@@ -26,23 +80,175 @@ export default function DriverPortal({
   onLogin,
   onLogout,
   onPinLocation,
-  onCompleteDelivery
+  onCompleteDelivery,
+  onAcceptOrder
 }) {
+  const todayStr = new Date().toISOString().split('T')[0];
+
   // Login Form State
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
-  // Portal State
-  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'history'
+  // Portal Tab State: 'pool' | 'active' | 'history'
+  const [activeTab, setActiveTab] = useState('pool');
   const [selectedOrderForPod, setSelectedOrderForPod] = useState(null);
   const [pinningOrderId, setPinningOrderId] = useState(null);
   const [gpsError, setGpsError] = useState(null);
 
-  // Handle Driver Login
+  // Attendance Geofence State
+  const [isPunchedIn, setIsPunchedIn] = useState(() => {
+    if (!currentDriver) return false;
+    try {
+      const saved = localStorage.getItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
+      return saved === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [hubDistance, setHubDistance] = useState(null);
+  const [verifyingLocation, setVerifyingLocation] = useState(false);
+  const [locationError, setLocationError] = useState('');
+  const [driverCoords, setDriverCoords] = useState(null);
+
+  // Reward Rule State
+  const [rewardRule, setRewardRule] = useState({ min_deliveries: 5, stars_rewarded: 1 });
+
+  // Geoguard State (GPS & Network Monitoring)
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [hasGps, setHasGps] = useState(true);
+  const [guardDismissed, setGuardDismissed] = useState(false);
+
+  // Load Reward Settings
+  useEffect(() => {
+    async function loadRewards() {
+      const rules = await fetchRewardSettings();
+      if (rules) setRewardRule(rules);
+    }
+    loadRewards();
+  }, []);
+
+  // Check Attendance on Load
+  useEffect(() => {
+    if (!currentDriver) return;
+    async function checkAttendance() {
+      const alreadyCheckedIn = await checkDriverAttendanceToday(currentDriver.id);
+      if (alreadyCheckedIn) {
+        setIsPunchedIn(true);
+        try {
+          localStorage.setItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`, 'true');
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+    checkAttendance();
+  }, [currentDriver, todayStr]);
+
+  // Geoguard: Listen to online/offline and GPS watch
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    let watchId;
+    if ('geolocation' in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setHasGps(true);
+          setDriverCoords({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude
+          });
+        },
+        () => {
+          setHasGps(false);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    } else {
+      setHasGps(false);
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      if (watchId && navigator.geolocation?.clearWatch) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, []);
+
+  // Check Distance from Store Hub
+  const verifyHubDistance = useCallback(() => {
+    setVerifyingLocation(true);
+    setLocationError('');
+
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by your browser.');
+      setVerifyingLocation(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setDriverCoords({ lat: latitude, lng: longitude });
+        const dist = calculateDistanceMeters(
+          latitude,
+          longitude,
+          STORE_HUB.lat,
+          STORE_HUB.lng
+        );
+        setHubDistance(dist);
+        setVerifyingLocation(false);
+      },
+      (err) => {
+        setLocationError('Unable to fetch your location: ' + (err.message || 'GPS denied'));
+        setVerifyingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (currentDriver && !isPunchedIn) {
+      verifyHubDistance();
+    }
+  }, [currentDriver, isPunchedIn, verifyHubDistance]);
+
+  // Punch In Handler
+  const handlePunchIn = async (overrideLat = null, overrideLng = null) => {
+    setVerifyingLocation(true);
+    const lat = overrideLat || driverCoords?.lat || STORE_HUB.lat;
+    const lng = overrideLng || driverCoords?.lng || STORE_HUB.lng;
+
+    try {
+      await recordDriverAttendance({
+        driverId: currentDriver.id,
+        checkInLat: lat,
+        checkInLng: lng
+      });
+
+      setIsPunchedIn(true);
+      try {
+        localStorage.setItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`, 'true');
+      } catch (e) {
+        // ignore
+      }
+    } catch (err) {
+      setLocationError('Failed to record attendance: ' + err.message);
+    } finally {
+      setVerifyingLocation(false);
+    }
+  };
+
+  // Handle Driver Login Submit
   const handleLoginSubmit = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     setLoginError('');
 
     if (!phone.trim()) {
@@ -71,7 +277,7 @@ export default function DriverPortal({
     onLogin(driver.phone, driver.pin);
   };
 
-  // GPS Pinning using HTML5 Geolocation
+  // Pin Current Location (GPS)
   const handlePinCurrentLocation = (orderId) => {
     setGpsError(null);
 
@@ -103,6 +309,69 @@ export default function DriverPortal({
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
+
+  // Accept Pool Order Handler
+  const handleAcceptPoolOrder = async (order) => {
+    const eta = calculateEtaMinutes(
+      order.latitude,
+      order.longitude,
+      driverCoords?.lat,
+      driverCoords?.lng
+    );
+
+    if (onAcceptOrder) {
+      await onAcceptOrder(order.id, eta);
+    } else {
+      await acceptOrderDelivery(order.id, currentDriver.id, currentDriver.name, eta);
+    }
+
+    // Switch to active tab so the driver immediately sees their new task
+    setActiveTab('active');
+  };
+
+  // Computed Orders
+  // 1. Available Pool: orders where status is 'Pending' and unassigned
+  const poolOrders = useMemo(() => {
+    return orders.filter(
+      (o) =>
+        o.status === 'Pending' &&
+        (!o.assigned_driver_id || o.assigned_driver_id === null) &&
+        (!o.driver_id || o.driver_id === null)
+    );
+  }, [orders]);
+
+  // 2. Active Deliveries: orders assigned to current driver that are not yet Delivered
+  const activeDeliveries = useMemo(() => {
+    if (!currentDriver) return [];
+    return orders.filter(
+      (o) =>
+        (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
+        o.status !== 'Delivered'
+    );
+  }, [orders, currentDriver]);
+
+  // 3. Delivered History for current driver
+  const deliveredHistory = useMemo(() => {
+    if (!currentDriver) return [];
+    return orders.filter(
+      (o) =>
+        (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
+        o.status === 'Delivered'
+    );
+  }, [orders, currentDriver]);
+
+  // 4. Completed deliveries TODAY for current driver (for Star Rewards)
+  const completedTodayCount = useMemo(() => {
+    return deliveredHistory.filter((o) => {
+      const dateStr = o.delivered_at || o.created_at;
+      return dateStr && dateStr.startsWith(todayStr);
+    }).length;
+  }, [deliveredHistory, todayStr]);
+
+  // Star Reward Calculation
+  const minPerStar = rewardRule.min_deliveries || 5;
+  const starsPerTier = rewardRule.stars_rewarded || 1;
+  const starsEarned = Math.floor(completedTodayCount / minPerStar) * starsPerTier;
 
   // If driver is not logged in, render Mobile Driver Login Screen
   if (!currentDriver) {
@@ -209,264 +478,530 @@ export default function DriverPortal({
     );
   }
 
-  // Filter deliveries for currently logged-in driver
-  const myDeliveries = orders.filter((o) => o.assigned_driver_id === currentDriver.id);
-  const activeDeliveries = myDeliveries.filter((o) => o.status !== 'Delivered');
-  const deliveredHistory = myDeliveries.filter((o) => o.status === 'Delivered');
+  // Determine if driver is within geofence radius (<= 150m)
+  const isInsideHubGeofence = hubDistance !== null && hubDistance <= GEOFENCE_RADIUS_METERS;
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
-      {/* Driver Header Card */}
-      <div className="glass-panel p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-base border border-emerald-500/30">
-            {currentDriver.name.charAt(0).toUpperCase()}
+      {/* Geoguard Alert Overlay if Internet or GPS lost */}
+      {(!isOnline || !hasGps) && !guardDismissed && (
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in select-none">
+          <div className="w-16 h-16 rounded-full bg-rose-500/20 text-rose-500 flex items-center justify-center mb-4 animate-pulse border border-rose-500/30">
+            {!isOnline ? <WifiOff className="w-8 h-8" /> : <AlertCircle className="w-8 h-8" />}
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="font-extrabold text-white text-base">{currentDriver.name}</h2>
-              <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold uppercase">
-                Driver Online
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">Phone: {currentDriver.phone}</p>
-          </div>
-        </div>
+          <h2 className="text-xl font-black text-white mb-2 tracking-tight">
+            ⚠️ GPS and Mobile Data must remain ON during duty.
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 max-w-sm mb-6 leading-relaxed">
+            {!isOnline && !hasGps
+              ? 'Both Internet and GPS are turned off. Please turn on Mobile Data/Wi-Fi and enable Location Services to proceed.'
+              : !isOnline
+              ? 'Internet connection lost. Please turn on Mobile Data or Wi-Fi to proceed with live dispatching.'
+              : 'Location services (GPS) are disabled. Please enable GPS and allow location access in your browser.'}
+          </p>
 
-        <button
-          onClick={onLogout}
-          className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-400 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/10 border border-slate-700/80 transition-all font-medium"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Exit</span>
-        </button>
-      </div>
-
-      {/* GPS Error Banner */}
-      {gpsError && (
-        <div className="p-3 text-xs bg-rose-500/15 border border-rose-500/40 text-rose-200 rounded-2xl flex items-center justify-between gap-2 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>{gpsError}</span>
+          <div className="flex flex-col sm:flex-row gap-2.5 w-full max-w-xs">
+            <button
+              onClick={() => {
+                setIsOnline(navigator.onLine);
+                verifyHubDistance();
+              }}
+              className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Retry Connection / GPS</span>
+            </button>
+            <button
+              onClick={() => setGuardDismissed(true)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition"
+            >
+              Bypass for Browser Testing
+            </button>
           </div>
-          <button
-            onClick={() => setGpsError(null)}
-            className="text-slate-400 hover:text-white text-sm px-1.5"
-          >
-            &times;
-          </button>
         </div>
       )}
 
-      {/* Tabs: Active vs Completed */}
-      <div className="grid grid-cols-2 gap-2 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800">
-        <button
-          onClick={() => setActiveTab('active')}
-          className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
-            activeTab === 'active'
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <Truck className="w-4 h-4" />
-          <span>Active Tasks ({activeDeliveries.length})</span>
-        </button>
+      {/* Driver Header Card */}
+      <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-base border border-emerald-500/30">
+              {currentDriver.name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="font-extrabold text-white text-base">{currentDriver.name}</h2>
+                <span
+                  className={`text-[10px] border px-2 py-0.5 rounded-full font-bold uppercase ${
+                    isPunchedIn
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {isPunchedIn ? 'On Duty (Punched In)' : 'Off Duty'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">Phone: {currentDriver.phone}</p>
+            </div>
+          </div>
 
-        <button
-          onClick={() => setActiveTab('history')}
-          className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all ${
-            activeTab === 'history'
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          <CheckCircle2 className="w-4 h-4" />
-          <span>Completed ({deliveredHistory.length})</span>
-        </button>
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-400 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/10 border border-slate-700/80 transition-all font-medium"
+            title="Log out from driver portal"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Exit</span>
+          </button>
+        </div>
+
+        {/* Feature 2: Daily Deliveries & Star Rewards Badge */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
+          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl">
+            <span className="text-slate-300">
+              Deliveries Today: <strong className="text-white font-bold">{completedTodayCount}</strong>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-amber-400 font-bold flex items-center gap-1">
+              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+              <span>{starsEarned} Stars</span>
+            </span>
+            <span className="text-[10px] text-slate-500 hidden sm:inline">
+              ({minPerStar} del = {starsPerTier} star)
+            </span>
+          </div>
+
+          {/* Attendance Status Pill */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className={`w-2 h-2 rounded-full ${isPunchedIn ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className="text-slate-400">
+              Hub Geofence:{' '}
+              <strong className={isPunchedIn ? 'text-emerald-400' : 'text-amber-400'}>
+                {isPunchedIn ? 'Verified' : 'Pending Check-In'}
+              </strong>
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* ACTIVE DELIVERIES TAB */}
-      {activeTab === 'active' && (
-        <div className="space-y-3">
-          {activeDeliveries.length === 0 ? (
-            <div className="glass-card p-10 text-center rounded-2xl border border-slate-800 space-y-2">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-70" />
-              <p className="text-white font-bold text-sm">All deliveries completed!</p>
-              <p className="text-xs text-slate-400">
-                You have no pending deliveries in your queue. Take a rest or check with dispatch.
-              </p>
+      {/* Feature 3: Store Hub Attendance Geofencing Modal/Card (if NOT punched in) */}
+      {!isPunchedIn ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl mx-auto flex items-center justify-center">
+            <MapPin className="w-6 h-6" />
+          </div>
+
+          <div>
+            <h3 className="text-base font-bold text-white">Daily Attendance Check-In</h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+              Drivers must punch in at the store hub ({STORE_HUB.name}) before viewing or accepting delivery orders.
+            </p>
+          </div>
+
+          {/* Distance Alert */}
+          {hubDistance !== null ? (
+            <div
+              className={`p-3 rounded-xl text-xs font-semibold border ${
+                isInsideHubGeofence
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+              }`}
+            >
+              {isInsideHubGeofence ? (
+                <span>📍 Verified at store hub ({hubDistance}m away, within {GEOFENCE_RADIUS_METERS}m).</span>
+              ) : (
+                <span>
+                  ⚠️ You are {hubDistance} meters away. You must be at the store hub to punch in (maximum allowed is{' '}
+                  {GEOFENCE_RADIUS_METERS}m).
+                </span>
+              )}
             </div>
           ) : (
-            activeDeliveries.map((order) => {
-              const hasCoordinates =
-                order.latitude !== null &&
-                order.latitude !== undefined &&
-                order.longitude !== null &&
-                order.longitude !== undefined;
+            <div className="p-3 rounded-xl text-xs bg-slate-800/60 border border-slate-700 text-slate-300 flex items-center justify-center gap-2">
+              <Compass className="w-4 h-4 animate-spin text-emerald-400" />
+              <span>Acquiring GPS position from store hub...</span>
+            </div>
+          )}
 
-              const mapsUrl = hasCoordinates
-                ? `https://www.google.com/maps/search/?api=1&query=${order.latitude},${order.longitude}`
-                : null;
+          {locationError && (
+            <p className="text-xs text-rose-400 bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">
+              {locationError}
+            </p>
+          )}
 
-              const isPinning = pinningOrderId === order.id;
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+            <button
+              onClick={verifyHubDistance}
+              disabled={verifyingLocation}
+              className="flex-1 py-2.5 px-3 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 text-xs font-semibold rounded-xl transition flex items-center justify-center gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${verifyingLocation ? 'animate-spin' : ''}`} />
+              <span>Recheck Location</span>
+            </button>
 
-              return (
-                <div
-                  key={order.id}
-                  className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg hover:border-emerald-500/30 transition-all space-y-3 p-4"
-                >
-                  {/* Top: Order #, Amount, Status */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-extrabold text-white tracking-wide">
-                        #{order.order_number}
-                      </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase">
-                        {order.status}
-                      </span>
-                    </div>
+            <button
+              id="driver-punch-in-btn"
+              onClick={() => handlePunchIn()}
+              disabled={!isInsideHubGeofence || verifyingLocation}
+              className={`flex-1 py-2.5 px-4 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
+                isInsideHubGeofence && !verifyingLocation
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20 active:scale-[0.98]'
+                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+              }`}
+            >
+              {verifyingLocation ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Punch In</span>
+                </>
+              )}
+            </button>
+          </div>
 
-                    <div className="flex items-center gap-1 text-emerald-400 font-black text-base">
-                      <span>₹{order.amount}</span>
-                    </div>
-                  </div>
+          {/* Demo Testing Override Helper */}
+          <div className="pt-2 border-t border-slate-800/80 text-center">
+            <button
+              type="button"
+              onClick={() => handlePunchIn(STORE_HUB.lat, STORE_HUB.lng)}
+              className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1.5 py-1 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>⚡ Simulate Hub Location & Punch In (Testing Override)</span>
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* FEATURE 1: TABS (Available Pool vs Active Deliveries vs History) */
+        <>
+          {/* Tabs Navigator */}
+          <div className="grid grid-cols-3 gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800">
+            <button
+              id="tab-available-pool"
+              onClick={() => setActiveTab('pool')}
+              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'pool'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Pool ({poolOrders.length})</span>
+            </button>
 
-                  {/* Privacy Compliant Address Details (DO NOT SHOW CUSTOMER PHONE) */}
-                  <div className="space-y-2 py-1">
-                    <div className="flex items-start gap-2 text-xs text-slate-200">
-                      <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-semibold text-white leading-relaxed">{order.address}</p>
+            <button
+              id="tab-active-deliveries"
+              onClick={() => setActiveTab('active')}
+              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'active'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span>My Tasks ({activeDeliveries.length})</span>
+            </button>
+
+            <button
+              id="tab-history"
+              onClick={() => setActiveTab('history')}
+              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
+                activeTab === 'history'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>History ({deliveredHistory.length})</span>
+            </button>
+          </div>
+
+          {/* TAB 1: AVAILABLE DELIVERY OPEN POOL */}
+          {activeTab === 'pool' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                  Open Delivery Pool (Ready for Pickup)
+                </span>
+                <span className="text-xs text-emerald-400 font-semibold">
+                  {poolOrders.length} Available
+                </span>
+              </div>
+
+              {poolOrders.length === 0 ? (
+                <div className="glass-card p-10 text-center rounded-2xl border border-slate-800 space-y-2">
+                  <Truck className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                  <p className="text-white font-bold text-sm">No orders waiting in pool right now</p>
+                  <p className="text-xs text-slate-400">
+                    New delivery requests dispatched by the admin will appear here automatically.
+                  </p>
+                </div>
+              ) : (
+                poolOrders.map((order) => {
+                  const eta = calculateEtaMinutes(
+                    order.latitude,
+                    order.longitude,
+                    driverCoords?.lat,
+                    driverCoords?.lng
+                  );
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="glass-card rounded-2xl border border-slate-800 p-4 shadow-lg hover:border-emerald-500/40 transition-all space-y-3"
+                    >
+                      {/* Top Bar: Order Number, ETA badge, Amount */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-white tracking-wide">
+                            #{order.order_number}
+                          </span>
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            ~{eta} mins ETA
+                          </span>
+                        </div>
+
+                        <div className="text-emerald-400 font-black text-base">
+                          <span>₹{order.amount}</span>
+                        </div>
+                      </div>
+
+                      {/* Address & Customer Details */}
+                      <div className="space-y-1.5 text-xs text-slate-200">
+                        {order.customer_name && (
+                          <p className="font-semibold text-white">{order.customer_name}</p>
+                        )}
+                        <div className="flex items-start gap-1.5 text-slate-300">
+                          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>{order.address}</span>
+                        </div>
                         {order.landmark && (
-                          <p className="text-emerald-300 font-medium mt-1 flex items-center gap-1">
+                          <div className="flex items-center gap-1.5 text-slate-400 text-[11px] pl-5">
                             <Landmark className="w-3 h-3 text-emerald-400 shrink-0" />
                             <span>Landmark: {order.landmark}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action Button: Accept Delivery */}
+                      <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3">
+                        <span className="text-[11px] text-slate-400">
+                          Speed: 25 km/h avg + 5m prep
+                        </span>
+                        <button
+                          onClick={() => handleAcceptPoolOrder(order)}
+                          className="py-2.5 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs shadow-lg shadow-emerald-500/25 active:scale-[0.98] transition-all flex items-center gap-1.5"
+                        >
+                          <Truck className="w-4 h-4" />
+                          <span>Accept Delivery</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: MY ACTIVE DELIVERIES */}
+          {activeTab === 'active' && (
+            <div className="space-y-3">
+              {activeDeliveries.length === 0 ? (
+                <div className="glass-card p-10 text-center rounded-2xl border border-slate-800 space-y-2">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-70" />
+                  <p className="text-white font-bold text-sm">All accepted tasks completed!</p>
+                  <p className="text-xs text-slate-400">
+                    Switch to the &ldquo;Pool&rdquo; tab to accept ready delivery tasks.
+                  </p>
+                </div>
+              ) : (
+                activeDeliveries.map((order) => {
+                  const hasCoordinates =
+                    order.latitude !== null &&
+                    order.latitude !== undefined &&
+                    order.longitude !== null &&
+                    order.longitude !== undefined;
+
+                  const mapsUrl = hasCoordinates
+                    ? `https://www.google.com/maps/search/?api=1&query=${order.latitude},${order.longitude}`
+                    : null;
+
+                  const isPinning = pinningOrderId === order.id;
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg hover:border-emerald-500/30 transition-all space-y-3 p-4"
+                    >
+                      {/* Top: Order #, Amount, Status */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-extrabold text-white tracking-wide">
+                            #{order.order_number}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30 uppercase">
+                            {order.status}
+                          </span>
+                          {order.estimated_minutes && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
+                              ~{order.estimated_minutes}m ETA
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1 text-emerald-400 font-black text-base">
+                          <span>₹{order.amount}</span>
+                        </div>
+                      </div>
+
+                      {/* Privacy Compliant Address Details */}
+                      <div className="space-y-2 py-1">
+                        <div className="flex items-start gap-2 text-xs text-slate-200">
+                          <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-semibold text-white leading-relaxed">{order.address}</p>
+                            {order.landmark && (
+                              <p className="text-emerald-300 font-medium mt-1 flex items-center gap-1">
+                                <Landmark className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <span>Landmark: {order.landmark}</span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Privacy Note Badge */}
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
+                          <ShieldAlert className="w-3 h-3 text-slate-500" />
+                          <span>Customer privacy protected. Contact dispatch for special instructions.</span>
+                        </div>
+
+                        {order.notes && (
+                          <p className="text-[11px] text-slate-300 italic pl-6">
+                            Note: &ldquo;{order.notes}&rdquo;
                           </p>
                         )}
                       </div>
-                    </div>
 
-                    {/* Privacy Note Badge */}
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                      <ShieldAlert className="w-3 h-3 text-slate-500" />
-                      <span>Customer privacy protected. Contact admin dispatch for special instructions.</span>
-                    </div>
-
-                    {order.notes && (
-                      <p className="text-[11px] text-slate-300 italic pl-6">
-                        Note: &ldquo;{order.notes}&rdquo;
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Location Action Buttons */}
-                  <div className="pt-1">
-                    {hasCoordinates ? (
-                      /* Google Maps Link */
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-sky-400 text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-sm group"
-                      >
-                        <Navigation className="w-3.5 h-3.5 text-sky-400 group-hover:scale-110 transition-transform" />
-                        <span>Open in Google Maps ({order.latitude?.toFixed(4)}, {order.longitude?.toFixed(4)})</span>
-                        <ExternalLink className="w-3 h-3 ml-auto opacity-60" />
-                      </a>
-                    ) : (
-                      /* Pin Current Location (GPS) */
-                      <button
-                        onClick={() => handlePinCurrentLocation(order.id)}
-                        disabled={isPinning}
-                        className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                      >
-                        {isPinning ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Acquiring GPS Fix...</span>
-                          </>
+                      {/* Location Action Buttons */}
+                      <div className="pt-1">
+                        {hasCoordinates ? (
+                          <a
+                            href={mapsUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-sky-400 text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-sm group"
+                          >
+                            <Navigation className="w-3.5 h-3.5 text-sky-400 group-hover:scale-110 transition-transform" />
+                            <span>
+                              Open in Google Maps ({order.latitude?.toFixed(4)}, {order.longitude?.toFixed(4)})
+                            </span>
+                            <ExternalLink className="w-3 h-3 ml-auto opacity-60" />
+                          </a>
                         ) : (
-                          <>
-                            <Compass className="w-3.5 h-3.5 text-amber-400" />
-                            <span>📍 Pin Current Location (Use Phone GPS)</span>
-                          </>
+                          <button
+                            onClick={() => handlePinCurrentLocation(order.id)}
+                            disabled={isPinning}
+                            className="w-full py-2.5 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                          >
+                            {isPinning ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Acquiring GPS Fix...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Compass className="w-3.5 h-3.5 text-amber-400" />
+                                <span>📍 Pin Current Location (Use Phone GPS)</span>
+                              </>
+                            )}
+                          </button>
                         )}
-                      </button>
+                      </div>
+
+                      {/* Proof of Delivery / Complete Action */}
+                      <div className="pt-2 border-t border-slate-800">
+                        <button
+                          onClick={() => setSelectedOrderForPod(order)}
+                          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <span>Take POD Photo & Deliver (₹{order.amount})</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: COMPLETED / HISTORY */}
+          {activeTab === 'history' && (
+            <div className="space-y-3">
+              {deliveredHistory.length === 0 ? (
+                <div className="glass-card p-10 text-center rounded-2xl border border-slate-800">
+                  <Clock className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                  <p className="text-white font-bold text-sm">No completed deliveries yet</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Completed orders with photo proof will appear here.
+                  </p>
+                </div>
+              ) : (
+                deliveredHistory.map((order) => (
+                  <div
+                    key={order.id}
+                    className="glass-card p-4 rounded-2xl border border-slate-800 space-y-3 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white text-sm">#{order.order_number}</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Delivered
+                        </span>
+                      </div>
+                      <span className="font-bold text-emerald-400 text-sm">₹{order.amount}</span>
+                    </div>
+
+                    <div className="text-slate-300">
+                      <p className="line-clamp-1">{order.address}</p>
+                      {order.landmark && <p className="text-slate-400 italic">Landmark: {order.landmark}</p>}
+                    </div>
+
+                    <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">
+                        Payment: <strong className="text-emerald-300">{order.payment_method || 'Cash'}</strong>
+                      </span>
+                      {order.delivered_at && (
+                        <span className="text-slate-500">
+                          {new Date(order.delivered_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                      )}
+                    </div>
+
+                    {order.delivery_proof_url && (
+                      <div className="mt-2">
+                        <span className="text-[10px] uppercase font-bold text-slate-400">POD Photo Proof</span>
+                        <img
+                          src={order.delivery_proof_url}
+                          alt="Proof"
+                          className="w-full h-32 object-cover rounded-xl mt-1 border border-slate-800"
+                        />
+                      </div>
                     )}
                   </div>
-
-                  {/* Proof of Delivery / Complete Action */}
-                  <div className="pt-2 border-t border-slate-800">
-                    <button
-                      onClick={() => setSelectedOrderForPod(order)}
-                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
-                    >
-                      <Camera className="w-4 h-4" />
-                      <span>Take POD Photo & Deliver (₹{order.amount})</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* COMPLETED / HISTORY TAB */}
-      {activeTab === 'history' && (
-        <div className="space-y-3">
-          {deliveredHistory.length === 0 ? (
-            <div className="glass-card p-10 text-center rounded-2xl border border-slate-800">
-              <Clock className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-              <p className="text-white font-bold text-sm">No completed deliveries yet</p>
-              <p className="text-xs text-slate-400 mt-1">
-                Completed orders with photo proof will appear here.
-              </p>
+                ))
+              )}
             </div>
-          ) : (
-            deliveredHistory.map((order) => (
-              <div
-                key={order.id}
-                className="glass-card p-4 rounded-2xl border border-slate-800 space-y-3 text-xs"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white text-sm">#{order.order_number}</span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Delivered
-                    </span>
-                  </div>
-                  <span className="font-bold text-emerald-400 text-sm">₹{order.amount}</span>
-                </div>
-
-                <div className="text-slate-300">
-                  <p className="line-clamp-1">{order.address}</p>
-                  {order.landmark && <p className="text-slate-400 italic">Landmark: {order.landmark}</p>}
-                </div>
-
-                <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Payment: <strong className="text-emerald-300">{order.payment_method || 'Cash'}</strong></span>
-                  {order.delivered_at && (
-                    <span className="text-slate-500">
-                      {new Date(order.delivered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
-                </div>
-
-                {order.delivery_proof_url && (
-                  <div className="mt-2">
-                    <span className="text-[10px] uppercase font-bold text-slate-400">POD Photo Proof</span>
-                    <img
-                      src={order.delivery_proof_url}
-                      alt="Proof"
-                      className="w-full h-32 object-cover rounded-xl mt-1 border border-slate-800"
-                    />
-                  </div>
-                )}
-              </div>
-            ))
           )}
-        </div>
+        </>
       )}
 
       {/* Proof of Delivery Modal */}

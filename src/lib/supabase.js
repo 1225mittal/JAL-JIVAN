@@ -343,3 +343,177 @@ export async function uploadDeliveryFile(file, folder = 'proofs') {
     reader.readAsDataURL(file);
   });
 }
+
+// ==========================================
+// POOL ORDER ACCEPTANCE
+// ==========================================
+
+export async function acceptOrderDelivery(orderId, driverId, driverName, estimatedMinutes = 15) {
+  const updates = {
+    status: 'Out for Delivery',
+    assigned_driver_id: driverId,
+    driver_id: driverId,
+    driver_name: driverName,
+    accepted_at: new Date().toISOString(),
+    estimated_minutes: estimatedMinutes
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update(updates)
+        .eq('id', orderId)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('Supabase acceptOrderDelivery failed, updating locally:', err.message);
+    }
+  }
+
+  const orders = getLocalOrders();
+  const updated = orders.map((o) =>
+    o.id === orderId ? { ...o, ...updates } : o
+  );
+  saveLocalOrders(updated);
+  return updated.find((o) => o.id === orderId);
+}
+
+// ==========================================
+// REWARD SETTINGS (Driver Stars)
+// ==========================================
+
+const STORAGE_REWARDS = 'jal_jivan_reward_settings';
+
+export async function fetchRewardSettings() {
+  const defaultSettings = { min_deliveries: 5, stars_rewarded: 1 };
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('reward_settings')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          min_deliveries: data.min_deliveries || 5,
+          stars_rewarded: data.stars_rewarded || 1
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase fetchRewardSettings failed, using local store:', err.message);
+    }
+  }
+
+  try {
+    const saved = localStorage.getItem(STORAGE_REWARDS);
+    return saved ? JSON.parse(saved) : defaultSettings;
+  } catch (e) {
+    return defaultSettings;
+  }
+}
+
+export async function saveRewardSettings({ minDeliveries, starsRewarded }) {
+  const settings = {
+    id: 1,
+    min_deliveries: Number(minDeliveries) || 5,
+    stars_rewarded: Number(starsRewarded) || 1,
+    updated_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('reward_settings')
+        .upsert(settings)
+        .select()
+        .single();
+      if (error) throw error;
+      localStorage.setItem(STORAGE_REWARDS, JSON.stringify(settings));
+      return data;
+    } catch (err) {
+      console.warn('Supabase saveRewardSettings failed, saving locally:', err.message);
+    }
+  }
+
+  try {
+    localStorage.setItem(STORAGE_REWARDS, JSON.stringify(settings));
+  } catch (e) {
+    console.error('Failed saving reward settings locally', e);
+  }
+  return settings;
+}
+
+// ==========================================
+// DRIVER ATTENDANCE (Geofencing Store Hub)
+// ==========================================
+
+const STORAGE_ATTENDANCE = 'jal_jivan_driver_attendance';
+
+export async function recordDriverAttendance({ driverId, checkInLat, checkInLng }) {
+  const attendanceRecord = {
+    id: 'att-' + Date.now(),
+    driver_id: driverId,
+    check_in_lat: checkInLat,
+    check_in_lng: checkInLng,
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_attendance')
+        .insert([{
+          driver_id: driverId,
+          check_in_lat: checkInLat,
+          check_in_lng: checkInLng
+        }])
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.warn('Supabase recordDriverAttendance failed, saving locally:', err.message);
+    }
+  }
+
+  try {
+    const existing = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
+    const updated = [attendanceRecord, ...existing];
+    localStorage.setItem(STORAGE_ATTENDANCE, JSON.stringify(updated));
+  } catch (e) {
+    console.error('Failed to save attendance locally', e);
+  }
+  return attendanceRecord;
+}
+
+export async function checkDriverAttendanceToday(driverId) {
+  const today = new Date().toISOString().split('T')[0];
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_attendance')
+        .select('*')
+        .eq('driver_id', driverId)
+        .gte('created_at', `${today}T00:00:00.000Z`)
+        .limit(1);
+      if (!error && data && data.length > 0) {
+        return true;
+      }
+    } catch (err) {
+      console.warn('Supabase checkDriverAttendanceToday failed, checking locally:', err.message);
+    }
+  }
+
+  try {
+    const existing = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
+    return existing.some(
+      (a) => a.driver_id === driverId && a.created_at && a.created_at.startsWith(today)
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
