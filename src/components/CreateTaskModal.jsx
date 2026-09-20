@@ -23,6 +23,7 @@ import {
   Upload
 } from 'lucide-react';
 import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
+import { extractOrderFromSlip } from '../lib/geminiOcr';
 
 export default function CreateTaskModal({
   isOpen,
@@ -56,16 +57,97 @@ export default function CreateTaskModal({
   const [slipFile, setSlipFile] = useState(null);
   const [slipPreview, setSlipPreview] = useState('');
   const slipInputRef = useRef(null);
+  const [isAnalyzingSlip, setIsAnalyzingSlip] = useState(false);
+  const [aiParseSuccess, setAiParseSuccess] = useState(false);
+  const [aiExtractedNotes, setAiExtractedNotes] = useState('');
+  const [customItems, setCustomItems] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSlipChange = (e) => {
+  const handleSlipChange = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setSlipFile(file);
-      const url = URL.createObjectURL(file);
-      setSlipPreview(url);
+    if (!file) return;
+
+    setSlipFile(file);
+    const url = URL.createObjectURL(file);
+    setSlipPreview(url);
+    setAiParseSuccess(false);
+
+    // Automatically trigger AI handwriting extraction with Gemini Flash
+    try {
+      setIsAnalyzingSlip(true);
+      const parsed = await extractOrderFromSlip(file);
+      if (parsed) {
+        if (parsed.customer_name) {
+          setCustomerName(parsed.customer_name);
+        }
+        if (parsed.customer_phone) {
+          setCustomerPhone(parsed.customer_phone);
+        }
+        if (parsed.delivery_address) {
+          setAddress(parsed.delivery_address);
+        }
+        if (parsed.landmark) {
+          setLandmark(parsed.landmark);
+        }
+        if (parsed.notes) {
+          setAiExtractedNotes(parsed.notes);
+        }
+
+        // Map parsed items into order items
+        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+          const updatedQuantities = { ...selectedQuantities };
+          const newCustomList = [];
+
+          parsed.items.forEach((item) => {
+            const rawName = (item.item_name || '').toLowerCase();
+            const matchedProduct = products.find((p) => {
+              const pName = (p.name || '').toLowerCase();
+              return (
+                pName.includes(rawName) ||
+                rawName.includes(pName) ||
+                (rawName.includes('20') && pName.includes('20')) ||
+                (rawName.includes('jar') && pName.includes('can')) ||
+                (rawName.includes('can') && pName.includes('can'))
+              );
+            });
+
+            if (matchedProduct) {
+              updatedQuantities[matchedProduct.id] =
+                (updatedQuantities[matchedProduct.id] || 0) + (Number(item.quantity) || 1);
+            } else {
+              const qty = Number(item.quantity) || 1;
+              const unitPrice = Number(item.price) || 0;
+              newCustomList.push({
+                id: 'ai-item-' + Math.random().toString(36).substring(2, 9),
+                name: item.item_name || 'Handwritten Item',
+                unit: 'Slip Item',
+                quantity: qty,
+                price: unitPrice,
+                total: qty * unitPrice
+              });
+            }
+          });
+
+          setSelectedQuantities(updatedQuantities);
+          if (newCustomList.length > 0) {
+            setCustomItems(newCustomList);
+          }
+        }
+
+        // Set total amount
+        if (parsed.total_amount && Number(parsed.total_amount) > 0) {
+          setAmount(String(parsed.total_amount));
+          setIsAmountManuallyEdited(true);
+        }
+
+        setAiParseSuccess(true);
+      }
+    } catch (ocrErr) {
+      console.warn('AI OCR extraction skipped or encountered an error:', ocrErr?.message || ocrErr);
+    } finally {
+      setIsAnalyzingSlip(false);
     }
   };
 
@@ -78,6 +160,9 @@ export default function CreateTaskModal({
     if (slipInputRef.current) {
       slipInputRef.current.value = '';
     }
+    setAiParseSuccess(false);
+    setIsAnalyzingSlip(false);
+    setAiExtractedNotes('');
   };
 
   // 1. Fetch real saved addresses on modal open
@@ -257,9 +342,9 @@ export default function CreateTaskModal({
     setIsAddressDropdownOpen(false);
   };
 
-  // 2. Calculate dynamic order amount based on chosen products
+  // 2. Calculate dynamic order amount based on chosen products and any AI-extracted custom items
   const calculatedItems = useMemo(() => {
-    return products
+    const catalogItems = products
       .filter((p) => (selectedQuantities[p.id] || 0) > 0)
       .map((p) => ({
         id: p.id,
@@ -269,7 +354,9 @@ export default function CreateTaskModal({
         quantity: selectedQuantities[p.id] || 0,
         total: (Number(p.price) || 0) * (selectedQuantities[p.id] || 0)
       }));
-  }, [products, selectedQuantities]);
+
+    return [...catalogItems, ...customItems];
+  }, [products, selectedQuantities, customItems]);
 
   const calculatedTotal = useMemo(() => {
     return calculatedItems.reduce((acc, item) => acc + item.total, 0);
@@ -362,6 +449,7 @@ export default function CreateTaskModal({
         latitude: pinnedLat,
         longitude: pinnedLng,
         items: finalItems,
+        notes: aiExtractedNotes || '',
         slipImageUrl: uploadedSlipUrl,
         slip_image_url: uploadedSlipUrl
       });
@@ -377,6 +465,8 @@ export default function CreateTaskModal({
       setPinnedLat(null);
       setPinnedLng(null);
       setSelectedQuantities({});
+      setCustomItems([]);
+      setAiExtractedNotes('');
       setIsAmountManuallyEdited(false);
       handleRemoveSlip();
       onClose();
@@ -598,6 +688,42 @@ export default function CreateTaskModal({
                   <X className="w-3.5 h-3.5" />
                   <span>Remove</span>
                 </button>
+              </div>
+            )}
+
+            {/* AI Handwriting Extraction Spinner Badge */}
+            {isAnalyzingSlip && (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold animate-pulse">
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400 shrink-0" />
+                <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                <span>Analyzing handwriting with AI... ✨</span>
+              </div>
+            )}
+
+            {/* AI OCR Success Alert */}
+            {aiParseSuccess && !isAnalyzingSlip && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Parsed! Review and tweak the details if needed.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiParseSuccess(false)}
+                  className="text-emerald-400 hover:text-white text-[11px] underline ml-2 shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Extracted Notes from Slip */}
+            {aiExtractedNotes && (
+              <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-start gap-2">
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold shrink-0">
+                  Note
+                </span>
+                <span className="italic">{aiExtractedNotes}</span>
               </div>
             )}
           </div>
