@@ -28,7 +28,12 @@ import {
   Radio,
   Crosshair,
   Navigation,
-  Package
+  Package,
+  Pencil,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -39,7 +44,14 @@ import {
   fetchDeliveryBoys,
   defaultStoreSettings,
   supabase,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  updateDeliveryBoy,
+  deleteDeliveryBoy,
+  updateOrder,
+  deleteOrder,
+  updateProduct,
+  updateSavedAddress,
+  deleteSavedAddress
 } from '../lib/supabase';
 import { isDriverOnline, formatLastSeen } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
@@ -55,7 +67,14 @@ export function AdminPanel({
   onUpdateStatus,
   onAssignDriver,
   onAddProduct,
+  onUpdateProduct,
   onDeleteProduct,
+  onUpdateOrder,
+  onDeleteOrder,
+  onUpdateDriver,
+  onDeleteDriver,
+  onUpdateAddress,
+  onDeleteAddress,
   onRefresh,
   loading,
   onLogout
@@ -85,6 +104,258 @@ export function AdminPanel({
   const [storeSaved, setStoreSaved] = useState(false);
   const [gpsDetecting, setGpsDetecting] = useState(false);
   const [gpsMessage, setGpsMessage] = useState('');
+
+  // Driver Edit & Delete State
+  const [editingDriver, setEditingDriver] = useState(null);
+  const [editDriverName, setEditDriverName] = useState('');
+  const [editDriverPhone, setEditDriverPhone] = useState('');
+  const [editDriverPin, setEditDriverPin] = useState('');
+  const [editDriverStatus, setEditDriverStatus] = useState('active');
+  const [editDriverIsOnline, setEditDriverIsOnline] = useState(false);
+  const [editDriverLat, setEditDriverLat] = useState('');
+  const [editDriverLng, setEditDriverLng] = useState('');
+  const [editDriverRadius, setEditDriverRadius] = useState(150);
+  const [isDriverSubmitting, setIsDriverSubmitting] = useState(false);
+  const [driverFormError, setDriverFormError] = useState('');
+  const [isDetectingDriverGps, setIsDetectingDriverGps] = useState(false);
+  const [deleteConfirmDriver, setDeleteConfirmDriver] = useState(null);
+  const [isDriverDeleting, setIsDriverDeleting] = useState(false);
+
+  // Order Edit & Delete State
+  const [editingOrder, setEditingOrder] = useState(null);
+  const [editOrderAmount, setEditOrderAmount] = useState('');
+  const [editOrderPhone, setEditOrderPhone] = useState('');
+  const [editOrderName, setEditOrderName] = useState('');
+  const [editOrderAddress, setEditOrderAddress] = useState('');
+  const [editOrderLandmark, setEditOrderLandmark] = useState('');
+  const [editOrderDriverId, setEditOrderDriverId] = useState('');
+  const [editOrderStatus, setEditOrderStatus] = useState('Pending');
+  const [editOrderLat, setEditOrderLat] = useState('');
+  const [editOrderLng, setEditOrderLng] = useState('');
+  const [isOrderSubmitting, setIsOrderSubmitting] = useState(false);
+  const [orderFormError, setOrderFormError] = useState('');
+  const [isDetectingOrderGps, setIsDetectingOrderGps] = useState(false);
+  const [deleteConfirmOrder, setDeleteConfirmOrder] = useState(null);
+  const [isOrderDeleting, setIsOrderDeleting] = useState(false);
+
+  // Driver edit handlers
+  const handleOpenEditDriver = (rider) => {
+    setEditingDriver(rider);
+    setEditDriverName(rider.name || '');
+    setEditDriverPhone(rider.phone || '');
+    setEditDriverPin(rider.pin || '');
+    setEditDriverStatus(rider.status || 'active');
+    setEditDriverIsOnline(Boolean(rider.is_online));
+    setEditDriverLat(rider.current_lat !== null && rider.current_lat !== undefined ? String(rider.current_lat) : '');
+    setEditDriverLng(rider.current_lng !== null && rider.current_lng !== undefined ? String(rider.current_lng) : '');
+    setEditDriverRadius(rider.geofence_radius || 150);
+    setDriverFormError('');
+  };
+
+  const handleDetectDriverGps = () => {
+    if (!navigator.geolocation) {
+      setDriverFormError('Geolocation is not supported by your browser');
+      return;
+    }
+    setIsDetectingDriverGps(true);
+    setDriverFormError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setEditDriverLat(pos.coords.latitude.toFixed(6));
+        setEditDriverLng(pos.coords.longitude.toFixed(6));
+        setIsDetectingDriverGps(false);
+      },
+      (err) => {
+        setIsDetectingDriverGps(false);
+        setDriverFormError('GPS detection failed: ' + (err.message || 'Permission denied'));
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleSubmitEditDriver = async (e) => {
+    e.preventDefault();
+    setDriverFormError('');
+    if (!editDriverName.trim()) {
+      setDriverFormError('Driver name is required');
+      return;
+    }
+    if (!editDriverPhone.trim()) {
+      setDriverFormError('Phone number is required');
+      return;
+    }
+
+    try {
+      setIsDriverSubmitting(true);
+      const payload = {
+        id: editingDriver.id,
+        name: editDriverName.trim(),
+        phone: editDriverPhone.trim(),
+        pin: editDriverPin.trim() || '1234',
+        status: editDriverStatus,
+        is_online: editDriverIsOnline,
+        current_lat: editDriverLat !== '' ? parseFloat(editDriverLat) : null,
+        current_lng: editDriverLng !== '' ? parseFloat(editDriverLng) : null,
+        base_lat: editDriverLat !== '' ? parseFloat(editDriverLat) : null,
+        base_lng: editDriverLng !== '' ? parseFloat(editDriverLng) : null,
+        geofence_radius: Number(editDriverRadius) || 150
+      };
+
+      if (onUpdateDriver) {
+        await onUpdateDriver(payload);
+      } else {
+        await updateDeliveryBoy(editingDriver.id, payload);
+      }
+
+      setDeliveryBoys((prev) =>
+        prev.map((d) => (d.id === editingDriver.id ? { ...d, ...payload } : d))
+      );
+      setEditingDriver(null);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setDriverFormError(err.message || 'Failed to update delivery boy');
+    } finally {
+      setIsDriverSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteDriver = async () => {
+    if (!deleteConfirmDriver) return;
+    try {
+      setIsDriverDeleting(true);
+      if (onDeleteDriver) {
+        await onDeleteDriver(deleteConfirmDriver.id);
+      } else {
+        await deleteDeliveryBoy(deleteConfirmDriver.id);
+      }
+
+      setDeliveryBoys((prev) => prev.filter((d) => d.id !== deleteConfirmDriver.id));
+      setDeleteConfirmDriver(null);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Error removing delivery boy', err);
+    } finally {
+      setIsDriverDeleting(false);
+    }
+  };
+
+  // Order edit handlers
+  const handleOpenEditOrder = (order) => {
+    setEditingOrder(order);
+    setEditOrderAmount(order.amount !== undefined ? String(order.amount) : '');
+    setEditOrderPhone(order.customer_phone || '');
+    setEditOrderName(order.customer_name || '');
+    setEditOrderAddress(order.address || '');
+    setEditOrderLandmark(order.landmark || '');
+    setEditOrderDriverId(order.assigned_driver_id || '');
+    setEditOrderStatus(order.status || 'Pending');
+    setEditOrderLat(order.latitude !== null && order.latitude !== undefined ? String(order.latitude) : '');
+    setEditOrderLng(order.longitude !== null && order.longitude !== undefined ? String(order.longitude) : '');
+    setOrderFormError('');
+  };
+
+  const handleDetectOrderGps = () => {
+    if (!navigator.geolocation) {
+      setOrderFormError('Geolocation is not supported by your browser');
+      return;
+    }
+    setIsDetectingOrderGps(true);
+    setOrderFormError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setEditOrderLat(pos.coords.latitude.toFixed(6));
+        setEditOrderLng(pos.coords.longitude.toFixed(6));
+        setIsDetectingOrderGps(false);
+      },
+      (err) => {
+        setIsDetectingOrderGps(false);
+        setOrderFormError('GPS detection failed: ' + (err.message || 'Permission denied'));
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleSubmitEditOrder = async (e) => {
+    e.preventDefault();
+    setOrderFormError('');
+
+    if (!editOrderAddress.trim()) {
+      setOrderFormError('Delivery address is required');
+      return;
+    }
+    const amt = parseFloat(editOrderAmount);
+    if (isNaN(amt) || amt < 0) {
+      setOrderFormError('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      setIsOrderSubmitting(true);
+      const selectedDriver = drivers.find((d) => d.id === editOrderDriverId) ||
+        deliveryBoys.find((d) => d.id === editOrderDriverId);
+
+      const payload = {
+        amount: amt,
+        address: editOrderAddress.trim(),
+        landmark: editOrderLandmark.trim(),
+        customer_phone: editOrderPhone.trim(),
+        customer_name: editOrderName.trim(),
+        assigned_driver_id: editOrderDriverId || null,
+        driver_name: selectedDriver ? selectedDriver.name : (editOrderDriverId ? 'Assigned' : 'Unassigned'),
+        status: editOrderStatus,
+        latitude: editOrderLat !== '' ? parseFloat(editOrderLat) : null,
+        longitude: editOrderLng !== '' ? parseFloat(editOrderLng) : null
+      };
+
+      if (onUpdateOrder) {
+        await onUpdateOrder(editingOrder.id, payload);
+      } else {
+        await updateOrder(editingOrder.id, payload);
+      }
+
+      setEditingOrder(null);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      setOrderFormError(err.message || 'Failed to update order');
+    } finally {
+      setIsOrderSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteOrder = async () => {
+    if (!deleteConfirmOrder) return;
+    try {
+      setIsOrderDeleting(true);
+      if (onDeleteOrder) {
+        await onDeleteOrder(deleteConfirmOrder.id);
+      } else {
+        await deleteOrder(deleteConfirmOrder.id);
+      }
+
+      setDeleteConfirmOrder(null);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Error deleting order', err);
+    } finally {
+      setIsOrderDeleting(false);
+    }
+  };
+
+  // Fallbacks for address & product operations if parent didn't provide props
+  const handleUpdateAddressFallback = async (oldAddress, newAddressData) => {
+    await updateSavedAddress(oldAddress, newAddressData);
+    if (onRefresh) onRefresh();
+  };
+
+  const handleDeleteAddressFallback = async (addressStr, opts) => {
+    await deleteSavedAddress(addressStr, opts);
+    if (onRefresh) onRefresh();
+  };
+
+  const handleUpdateProductFallback = async (productData) => {
+    await updateProduct(productData);
+    if (onRefresh) onRefresh();
+  };
 
   // Helper to strictly filter out any legacy dummy riders
   const filterRealRiders = useCallback((list) => {
@@ -598,10 +869,26 @@ export function AdminPanel({
                         </span>
                         {getStatusBadge(order.status)}
                       </div>
-                      <div className="text-right">
+                      <div className="flex items-center gap-2">
                         <span className="text-base font-black text-emerald-400">
                           ₹{order.amount}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditOrder(order)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                          title="Edit Task / Order"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmOrder(order)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          title="Cancel / Delete Task"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
 
@@ -866,6 +1153,26 @@ export function AdminPanel({
                         <p className="text-base font-bold text-emerald-400 mt-0.5">{completedCount}</p>
                       </div>
                     </div>
+
+                    {/* Rider Card Edit & Remove Buttons */}
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditDriver(rider)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold transition"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Edit Details</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmDriver(rider)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-semibold transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove Boy</span>
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -905,6 +1212,8 @@ export function AdminPanel({
         <AddressBook
           orders={orders}
           onViewProof={(order) => setViewProofOrder(order)}
+          onUpdateAddress={onUpdateAddress || handleUpdateAddressFallback}
+          onDeleteAddress={onDeleteAddress || handleDeleteAddressFallback}
         />
       )}
 
@@ -913,6 +1222,7 @@ export function AdminPanel({
         <ProductCatalog
           products={products}
           onAddProduct={onAddProduct}
+          onUpdateProduct={onUpdateProduct || handleUpdateProductFallback}
           onDeleteProduct={onDeleteProduct}
           loading={loading}
         />
@@ -1296,6 +1606,514 @@ export function AdminPanel({
                 className="w-full py-2.5 bg-slate-800 hover:bg-slate-750 text-white rounded-xl font-semibold mt-2"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Order Modal */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-6 animate-scale-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white text-base">
+                    Edit Task #{editingOrder.order_number}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Update delivery details, amount, address, and assigned driver
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingOrder(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitEditOrder} className="p-5 space-y-4">
+              {orderFormError && (
+                <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{orderFormError}</span>
+                </div>
+              )}
+
+              {/* Amount & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Amount (₹) *
+                  </label>
+                  <div className="relative">
+                    <IndianRupee className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="number"
+                      step="0.50"
+                      min="0"
+                      value={editOrderAmount}
+                      onChange={(e) => setEditOrderAmount(e.target.value)}
+                      required
+                      className="w-full pl-10 pr-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-sm font-semibold text-emerald-400 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Order Status
+                  </label>
+                  <select
+                    value={editOrderStatus}
+                    onChange={(e) => setEditOrderStatus(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="Out for Delivery">Out for Delivery</option>
+                    <option value="Delivered">Delivered</option>
+                    <option value="Cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Customer Contact */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Customer Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editOrderName}
+                    onChange={(e) => setEditOrderName(e.target.value)}
+                    placeholder="e.g. Ramesh Singh"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Customer Phone
+                  </label>
+                  <input
+                    type="tel"
+                    value={editOrderPhone}
+                    onChange={(e) => setEditOrderPhone(e.target.value)}
+                    placeholder="9876543210"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Delivery Address */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Delivery Address *
+                </label>
+                <textarea
+                  rows={2}
+                  value={editOrderAddress}
+                  onChange={(e) => setEditOrderAddress(e.target.value)}
+                  required
+                  placeholder="Doorstep address..."
+                  className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              {/* Landmark & Driver Assignment */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Landmark
+                  </label>
+                  <input
+                    type="text"
+                    value={editOrderLandmark}
+                    onChange={(e) => setEditOrderLandmark(e.target.value)}
+                    placeholder="Near water tank, etc."
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Assigned Driver
+                  </label>
+                  <select
+                    value={editOrderDriverId}
+                    onChange={(e) => setEditOrderDriverId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="">Unassigned</option>
+                    {drivers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.phone})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Coordinates */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    GPS Coordinates
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleDetectOrderGps}
+                    disabled={isDetectingOrderGps}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <Navigation className={`w-3 h-3 ${isDetectingOrderGps ? 'animate-spin' : ''}`} />
+                    <span>{isDetectingOrderGps ? 'Detecting...' : 'Use Current GPS'}</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={editOrderLat}
+                    onChange={(e) => setEditOrderLat(e.target.value)}
+                    placeholder="Latitude"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={editOrderLng}
+                    onChange={(e) => setEditOrderLng(e.target.value)}
+                    placeholder="Longitude"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingOrder(null)}
+                  disabled={isOrderSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isOrderSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all disabled:opacity-50"
+                >
+                  {isOrderSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <span>Save Order Changes</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Order Confirmation Modal */}
+      {deleteConfirmOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Cancel & Delete Task?</h3>
+                <p className="text-xs text-slate-400">Order #{deleteConfirmOrder.order_number}</p>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+              Are you sure you want to permanently delete order <strong className="text-white">#{deleteConfirmOrder.order_number}</strong> (₹{deleteConfirmOrder.amount}) for <span className="text-emerald-300">{deleteConfirmOrder.address}</span>?
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmOrder(null)}
+                disabled={isOrderDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteOrder}
+                disabled={isOrderDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all disabled:opacity-50"
+              >
+                {isOrderDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Task</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Driver Modal */}
+      {editingDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-6 animate-scale-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white text-base">
+                    Edit Delivery Boy: {editingDriver.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Modify profile, contact, 4-digit PIN, active status, and geofence
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingDriver(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitEditDriver} className="p-5 space-y-4">
+              {driverFormError && (
+                <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{driverFormError}</span>
+                </div>
+              )}
+
+              {/* Name & Phone */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={editDriverName}
+                    onChange={(e) => setEditDriverName(e.target.value)}
+                    required
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Phone Number *
+                  </label>
+                  <input
+                    type="tel"
+                    value={editDriverPhone}
+                    onChange={(e) => setEditDriverPhone(e.target.value)}
+                    required
+                    placeholder="9876543210"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* PIN & Status */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    4-Digit Login PIN *
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={editDriverPin}
+                      onChange={(e) => setEditDriverPin(e.target.value)}
+                      placeholder="1234"
+                      required
+                      className="w-full pl-9 pr-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs font-mono font-bold text-amber-300 tracking-widest focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Rider Status
+                  </label>
+                  <select
+                    value={editDriverStatus}
+                    onChange={(e) => setEditDriverStatus(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="active">Active (Eligible)</option>
+                    <option value="inactive">Inactive (Disabled)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Online Status Toggle & Geofence Radius */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-2.5 bg-slate-800/60 border border-slate-700/70 rounded-xl flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-semibold text-white block">Online Status</span>
+                    <span className="text-[10px] text-slate-400">Heartbeat override</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editDriverIsOnline}
+                      onChange={(e) => setEditDriverIsOnline(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600" />
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Geofence Radius (m)
+                  </label>
+                  <input
+                    type="number"
+                    min="20"
+                    max="5000"
+                    value={editDriverRadius}
+                    onChange={(e) => setEditDriverRadius(e.target.value)}
+                    placeholder="150"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Base Coordinates */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Base / Current Coordinates
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleDetectDriverGps}
+                    disabled={isDetectingDriverGps}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <Navigation className={`w-3 h-3 ${isDetectingDriverGps ? 'animate-spin' : ''}`} />
+                    <span>{isDetectingDriverGps ? 'Detecting...' : 'Use Current GPS'}</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={editDriverLat}
+                    onChange={(e) => setEditDriverLat(e.target.value)}
+                    placeholder="Latitude"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={editDriverLng}
+                    onChange={(e) => setEditDriverLng(e.target.value)}
+                    placeholder="Longitude"
+                    className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDriver(null)}
+                  disabled={isDriverSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDriverSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all disabled:opacity-50"
+                >
+                  {isDriverSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save Driver Details</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Driver Confirmation Modal */}
+      {deleteConfirmDriver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Remove Delivery Boy?</h3>
+                <p className="text-xs text-slate-400">Permanently removes driver from fleet</p>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+              Are you sure you want to remove <strong className="text-white">{deleteConfirmDriver.name}</strong> ({deleteConfirmDriver.phone})?
+              <br /><br />
+              <span className="text-amber-300">⚠️ Any active tasks assigned to this driver will be automatically reset to Unassigned (Pending).</span>
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmDriver(null)}
+                disabled={isDriverDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteDriver}
+                disabled={isDriverDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all disabled:opacity-50"
+              >
+                {isDriverDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Removing...</span>
+                  </>
+                ) : (
+                  <span>Remove Boy</span>
+                )}
               </button>
             </div>
           </div>

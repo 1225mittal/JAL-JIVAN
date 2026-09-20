@@ -16,14 +16,24 @@ import {
   updateOrderStatus,
   updateOrderLocation,
   completeDelivery,
-  acceptOrderDelivery
+  acceptOrderDelivery,
+  fetchProducts,
+  addProduct,
+  updateProduct,
+  deleteProduct,
+  updateOrder,
+  deleteOrder,
+  updateDeliveryBoy,
+  deleteDeliveryBoy,
+  updateSavedAddress,
+  deleteSavedAddress
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
 // Robust helper to determine if current URL path, hash, or query points to admin
-function checkIsAdminUrl(): boolean {
+function checkIsAdminUrl() {
   if (typeof window === 'undefined') return false;
   try {
     const pathname = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
@@ -57,11 +67,11 @@ function checkIsAdminUrl(): boolean {
 
 export default function App() {
   // Admin View State: true when visiting /admin or any URL ending in "admin"
-  const [isAdminView, setIsAdminView] = useState<boolean>(() => checkIsAdminUrl());
+  const [isAdminView, setIsAdminView] = useState(() => checkIsAdminUrl());
   // Alias for backward compatibility
   const isAdminRoute = isAdminView;
 
-  // Listen to popstate, hashchange, and navigation events
+  // Listen to popstate, hashchange, and custom navigation events so refreshes & navigation persist
   useEffect(() => {
     const handleUrlChange = () => {
       setIsAdminView(checkIsAdminUrl());
@@ -77,7 +87,7 @@ export default function App() {
   }, []);
 
   // Admin Authentication State (persists across refreshes on /admin)
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     try {
       const session = localStorage.getItem(ADMIN_SESSION_KEY);
       return Boolean(session);
@@ -87,12 +97,13 @@ export default function App() {
   });
 
   // Data State
-  const [drivers, setDrivers] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
+  const [drivers, setDrivers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Authenticated Driver State
-  const [currentDriver, setCurrentDriver] = useState<any>(() => {
+  const [currentDriver, setCurrentDriver] = useState(() => {
     try {
       const saved = localStorage.getItem(LOGGED_IN_DRIVER_KEY);
       return saved ? JSON.parse(saved) : null;
@@ -107,9 +118,9 @@ export default function App() {
   const [isDbInfoOpen, setIsDbInfoOpen] = useState(false);
 
   // Toast Notification
-  const [toast, setToast] = useState<{ message: string; type?: string } | null>(null);
+  const [toast, setToast] = useState(null);
 
-  const showToast = useCallback((message: string, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => {
       setToast(null);
@@ -120,12 +131,14 @@ export default function App() {
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
-      const [driversData, ordersData] = await Promise.all([
+      const [driversData, ordersData, productsData] = await Promise.all([
         fetchDrivers(),
-        fetchOrders()
+        fetchOrders(),
+        fetchProducts()
       ]);
       setDrivers(driversData || []);
       setOrders(ordersData || []);
+      setProducts(productsData || []);
     } catch (err) {
       console.error('Error loading data:', err);
       showToast('Failed to load live data', 'error');
@@ -156,46 +169,196 @@ export default function App() {
   };
 
   // Add Delivery Boy (Admin)
-  const handleAddDriver = async ({ name, phone, pin }: { name: string; phone: string; pin: string }) => {
+  const handleAddDriver = async ({ name, phone, pin }) => {
     try {
       const created = await addDriver({ name, phone, pin });
       setDrivers((prev) => [created, ...prev]);
       showToast(`Driver ${created.name} registered successfully!`, 'success');
       return created;
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Error registering driver', 'error');
       throw err;
     }
   };
 
   // Create Delivery Task (Admin)
-  const handleCreateTask = async (taskData: any) => {
+  const handleCreateTask = async (taskData) => {
     try {
       const created = await createOrder(taskData);
       setOrders((prev) => [created, ...prev]);
       showToast(`Task #${created.order_number} dispatched successfully!`, 'success');
       return created;
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Error creating task', 'error');
       throw err;
     }
   };
 
+  // Add Product (Admin)
+  const handleAddProduct = async (productData) => {
+    try {
+      const created = await addProduct(productData);
+      setProducts((prev) => [created, ...prev]);
+      showToast(`Product "${created.name}" added to catalog!`, 'success');
+      return created;
+    } catch (err) {
+      showToast(err.message || 'Error adding product', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Product (Admin)
+  const handleDeleteProduct = async (productId) => {
+    try {
+      await deleteProduct(productId);
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      showToast('Product deleted from catalog', 'info');
+    } catch (err) {
+      showToast(err.message || 'Error deleting product', 'error');
+      throw err;
+    }
+  };
+
+  // Update Product (Admin)
+  const handleUpdateProduct = async (productData) => {
+    try {
+      const updated = await updateProduct(productData);
+      setProducts((prev) =>
+        prev.map((p) => (p.id === productData.id ? { ...p, ...updated } : p))
+      );
+      showToast(`Product "${updated.name}" updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Error updating product', 'error');
+      throw err;
+    }
+  };
+
+  // Update Order (Admin)
+  const handleUpdateOrder = async (orderId, orderUpdates) => {
+    try {
+      const updated = await updateOrder(orderId, orderUpdates);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
+      );
+      showToast(`Task details updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Failed to update order', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Order (Admin)
+  const handleDeleteOrder = async (orderId) => {
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      showToast('Delivery task cancelled and deleted', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to delete order', 'error');
+      throw err;
+    }
+  };
+
+  // Update Delivery Boy (Admin)
+  const handleUpdateDriver = async (driverData) => {
+    try {
+      const updated = await updateDeliveryBoy(driverData.id, driverData);
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driverData.id ? { ...d, ...updated } : d))
+      );
+      showToast(`Delivery boy profile updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Failed to update driver', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Delivery Boy (Admin)
+  const handleDeleteDriver = async (driverId) => {
+    try {
+      await deleteDeliveryBoy(driverId);
+      setDrivers((prev) => prev.filter((d) => d.id !== driverId));
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.assigned_driver_id === driverId
+            ? {
+                ...o,
+                assigned_driver_id: null,
+                driver_name: 'Unassigned',
+                status: o.status === 'Delivered' ? 'Delivered' : 'Pending'
+              }
+            : o
+        )
+      );
+      showToast('Delivery boy removed from fleet', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to remove driver', 'error');
+      throw err;
+    }
+  };
+
+  // Update Address (Admin)
+  const handleUpdateAddress = async (oldAddress, newAddressData) => {
+    try {
+      await updateSavedAddress(oldAddress, newAddressData);
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.address || '').trim().toLowerCase() === (oldAddress || '').trim().toLowerCase()
+            ? {
+                ...o,
+                address: newAddressData.address,
+                landmark: newAddressData.landmark,
+                latitude: newAddressData.latitude,
+                longitude: newAddressData.longitude
+              }
+            : o
+        )
+      );
+      showToast('Address updated & synced with past orders!', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to update address', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Address (Admin)
+  const handleDeleteAddress = async (addressStr, opts) => {
+    try {
+      await deleteSavedAddress(addressStr, opts);
+      if (opts?.alsoRemoveFromOrders) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            (o.address || '').trim().toLowerCase() === (addressStr || '').trim().toLowerCase()
+              ? { ...o, address: 'Archived / Removed Address', landmark: '' }
+              : o
+          )
+        );
+      }
+      showToast('Address removed from directory', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to delete address', 'error');
+      throw err;
+    }
+  };
+
   // Update Status (Admin)
-  const handleUpdateStatus = async (orderId: string, newStatus: string) => {
+  const handleUpdateStatus = async (orderId, newStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
       );
       showToast(`Order status updated to "${newStatus}"`, 'success');
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Failed to update order status', 'error');
     }
   };
 
   // Assign Driver (Admin)
-  const handleAssignDriver = async (orderId: string, driverId: string, driverName: string) => {
+  const handleAssignDriver = async (orderId, driverId, driverName) => {
     try {
       const newStatus = driverId ? 'Out for Delivery' : 'Pending';
       await updateOrderStatus(orderId, newStatus);
@@ -217,13 +380,13 @@ export default function App() {
           : 'Order set to unassigned',
         'info'
       );
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Failed to assign driver', 'error');
     }
   };
 
   // Driver Login (Driver Portal)
-  const handleDriverLogin = async (phone: string, pin: string) => {
+  const handleDriverLogin = async (phone, pin) => {
     const driver = await driverLogin(phone, pin);
     if (!driver) {
       throw new Error('Invalid mobile phone number or 4-digit PIN');
@@ -242,34 +405,34 @@ export default function App() {
   };
 
   // Pin Current Location (GPS)
-  const handlePinLocation = async (orderId: string, latitude: number, longitude: number) => {
+  const handlePinLocation = async (orderId, latitude, longitude) => {
     try {
       await updateOrderLocation(orderId, latitude, longitude);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, latitude, longitude } : o))
       );
       showToast(`📍 Location pinned successfully (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`, 'success');
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Failed to update location coordinates', 'error');
     }
   };
 
   // Complete Delivery with POD (Driver Portal)
-  const handleCompleteDelivery = async (orderId: string, podData: any) => {
+  const handleCompleteDelivery = async (orderId, podData) => {
     try {
       const updated = await completeDelivery(orderId, podData);
       setOrders((prev) =>
         prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
       );
       showToast(`🎉 Order marked as Delivered! POD captured.`, 'success');
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Failed to save proof of delivery', 'error');
       throw err;
     }
   };
 
   // Accept Open Pool Order (Driver Portal)
-  const handleAcceptOrder = async (orderId: string, estimatedMinutes: number) => {
+  const handleAcceptOrder = async (orderId, estimatedMinutes) => {
     try {
       if (!currentDriver) {
         showToast('Please log in as a driver first', 'error');
@@ -292,7 +455,7 @@ export default function App() {
         )
       );
       showToast('Order accepted! Status updated to Out for Delivery', 'success');
-    } catch (err: any) {
+    } catch (err) {
       showToast(err.message || 'Failed to accept order', 'error');
     }
   };
@@ -318,11 +481,21 @@ export default function App() {
             <AdminDashboard
               orders={orders}
               drivers={drivers}
+              products={products}
               loading={loading}
               onOpenAddDriver={() => setIsAddDriverOpen(true)}
               onOpenCreateTask={() => setIsCreateTaskOpen(true)}
               onUpdateStatus={handleUpdateStatus}
               onAssignDriver={handleAssignDriver}
+              onAddProduct={handleAddProduct}
+              onUpdateProduct={handleUpdateProduct}
+              onDeleteProduct={handleDeleteProduct}
+              onUpdateOrder={handleUpdateOrder}
+              onDeleteOrder={handleDeleteOrder}
+              onUpdateDriver={handleUpdateDriver}
+              onDeleteDriver={handleDeleteDriver}
+              onUpdateAddress={handleUpdateAddress}
+              onDeleteAddress={handleDeleteAddress}
               onRefresh={loadInitialData}
               onLogout={handleAdminLogout}
             />
@@ -355,6 +528,8 @@ export default function App() {
         isOpen={isCreateTaskOpen}
         onClose={() => setIsCreateTaskOpen(false)}
         drivers={drivers}
+        products={products}
+        orders={orders}
         onCreateTask={handleCreateTask}
       />
 

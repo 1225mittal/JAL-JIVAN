@@ -19,7 +19,14 @@ import {
   acceptOrderDelivery,
   fetchProducts,
   addProduct,
-  deleteProduct
+  updateProduct,
+  deleteProduct,
+  updateOrder,
+  deleteOrder,
+  updateDeliveryBoy,
+  deleteDeliveryBoy,
+  updateSavedAddress,
+  deleteSavedAddress
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
@@ -212,6 +219,131 @@ export default function App() {
     }
   };
 
+  // Update Product (Admin)
+  const handleUpdateProduct = async (productData) => {
+    try {
+      const updated = await updateProduct(productData);
+      setProducts((prev) =>
+        prev.map((p) => (p.id === productData.id ? { ...p, ...updated } : p))
+      );
+      showToast(`Product "${updated.name}" updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Error updating product', 'error');
+      throw err;
+    }
+  };
+
+  // Update Order (Admin)
+  const handleUpdateOrder = async (orderId, orderUpdates) => {
+    try {
+      const updated = await updateOrder(orderId, orderUpdates);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
+      );
+      showToast(`Task details updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Failed to update order', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Order (Admin)
+  const handleDeleteOrder = async (orderId) => {
+    try {
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      showToast('Delivery task cancelled and deleted', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to delete order', 'error');
+      throw err;
+    }
+  };
+
+  // Update Delivery Boy (Admin)
+  const handleUpdateDriver = async (driverData) => {
+    try {
+      const updated = await updateDeliveryBoy(driverData.id, driverData);
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === driverData.id ? { ...d, ...updated } : d))
+      );
+      showToast(`Delivery boy profile updated!`, 'success');
+      return updated;
+    } catch (err) {
+      showToast(err.message || 'Failed to update driver', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Delivery Boy (Admin)
+  const handleDeleteDriver = async (driverId) => {
+    try {
+      await deleteDeliveryBoy(driverId);
+      setDrivers((prev) => prev.filter((d) => d.id !== driverId));
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.assigned_driver_id === driverId
+            ? {
+                ...o,
+                assigned_driver_id: null,
+                driver_name: 'Unassigned',
+                status: o.status === 'Delivered' ? 'Delivered' : 'Pending'
+              }
+            : o
+        )
+      );
+      showToast('Delivery boy removed from fleet', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to remove driver', 'error');
+      throw err;
+    }
+  };
+
+  // Update Address (Admin)
+  const handleUpdateAddress = async (oldAddress, newAddressData) => {
+    try {
+      await updateSavedAddress(oldAddress, newAddressData);
+      setOrders((prev) =>
+        prev.map((o) =>
+          (o.address || '').trim().toLowerCase() === (oldAddress || '').trim().toLowerCase()
+            ? {
+                ...o,
+                address: newAddressData.address,
+                landmark: newAddressData.landmark,
+                latitude: newAddressData.latitude,
+                longitude: newAddressData.longitude
+              }
+            : o
+        )
+      );
+      showToast('Address updated & synced with past orders!', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to update address', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Address (Admin)
+  const handleDeleteAddress = async (addressStr, opts) => {
+    try {
+      await deleteSavedAddress(addressStr, opts);
+      if (opts?.alsoRemoveFromOrders) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            (o.address || '').trim().toLowerCase() === (addressStr || '').trim().toLowerCase()
+              ? { ...o, address: 'Archived / Removed Address', landmark: '' }
+              : o
+          )
+        );
+      }
+      showToast('Address removed from directory', 'info');
+    } catch (err) {
+      showToast(err.message || 'Failed to delete address', 'error');
+      throw err;
+    }
+  };
+
   // Update Status (Admin)
   const handleUpdateStatus = async (orderId, newStatus) => {
     try {
@@ -356,7 +488,14 @@ export default function App() {
               onUpdateStatus={handleUpdateStatus}
               onAssignDriver={handleAssignDriver}
               onAddProduct={handleAddProduct}
+              onUpdateProduct={handleUpdateProduct}
               onDeleteProduct={handleDeleteProduct}
+              onUpdateOrder={handleUpdateOrder}
+              onDeleteOrder={handleDeleteOrder}
+              onUpdateDriver={handleUpdateDriver}
+              onDeleteDriver={handleDeleteDriver}
+              onUpdateAddress={handleUpdateAddress}
+              onDeleteAddress={handleDeleteAddress}
               onRefresh={loadInitialData}
               onLogout={handleAdminLogout}
             />

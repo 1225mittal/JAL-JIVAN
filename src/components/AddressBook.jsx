@@ -21,7 +21,11 @@ import {
   Truck,
   Building2,
   Navigation,
-  ArrowUpDown
+  ArrowUpDown,
+  Pencil,
+  Trash2,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
 /**
@@ -448,13 +452,106 @@ export function AddressDetailModal({
  */
 export default function AddressBook({
   orders = [],
-  onViewProof
+  onViewProof,
+  onUpdateAddress,
+  onDeleteAddress
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [pinFilter, setPinFilter] = useState('ALL'); // 'ALL' | 'PINNED' | 'NOT_PINNED'
   const [sortBy, setSortBy] = useState('orders'); // 'orders' | 'recent' | 'address'
   const [selectedAddress, setSelectedAddress] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+
+  // Edit address state
+  const [editingAddress, setEditingAddress] = useState(null);
+  const [editAddressText, setEditAddressText] = useState('');
+  const [editLandmark, setEditLandmark] = useState('');
+  const [editLat, setEditLat] = useState('');
+  const [editLng, setEditLng] = useState('');
+  const [isDetectingGps, setIsDetectingGps] = useState(false);
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  // Delete address state
+  const [deleteAddressModal, setDeleteAddressModal] = useState(null);
+  const [alsoRemoveFromOrders, setAlsoRemoveFromOrders] = useState(true);
+  const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
+
+  // Open edit address modal
+  const handleOpenEditAddress = (addr) => {
+    setEditingAddress(addr);
+    setEditAddressText(addr.fullAddress || '');
+    setEditLandmark(addr.landmark || '');
+    setEditLat(addr.latitude !== null && addr.latitude !== undefined ? String(addr.latitude) : '');
+    setEditLng(addr.longitude !== null && addr.longitude !== undefined ? String(addr.longitude) : '');
+    setEditError('');
+  };
+
+  // GPS auto-detect for edit address
+  const handleDetectGps = () => {
+    if (!navigator.geolocation) {
+      setEditError('Geolocation is not supported by your browser');
+      return;
+    }
+    setIsDetectingGps(true);
+    setEditError('');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setEditLat(pos.coords.latitude.toFixed(6));
+        setEditLng(pos.coords.longitude.toFixed(6));
+        setIsDetectingGps(false);
+      },
+      (err) => {
+        setIsDetectingGps(false);
+        setEditError('GPS detection failed: ' + (err.message || 'Permission denied'));
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Submit edit address
+  const handleSubmitEditAddress = async (e) => {
+    e.preventDefault();
+    setEditError('');
+
+    if (!editAddressText.trim()) {
+      setEditError('Address text is required');
+      return;
+    }
+
+    try {
+      setIsEditSubmitting(true);
+      if (onUpdateAddress) {
+        await onUpdateAddress(editingAddress.fullAddress, {
+          address: editAddressText.trim(),
+          landmark: editLandmark.trim(),
+          latitude: editLat !== '' ? parseFloat(editLat) : null,
+          longitude: editLng !== '' ? parseFloat(editLng) : null
+        });
+      }
+      setEditingAddress(null);
+    } catch (err) {
+      setEditError(err.message || 'Failed to update address');
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
+  // Confirm delete address
+  const handleConfirmDeleteAddress = async () => {
+    if (!deleteAddressModal) return;
+    try {
+      setIsDeleteSubmitting(true);
+      if (onDeleteAddress) {
+        await onDeleteAddress(deleteAddressModal.fullAddress, { alsoRemoveFromOrders });
+      }
+      setDeleteAddressModal(null);
+    } catch (err) {
+      console.error('Error deleting address', err);
+    } finally {
+      setIsDeleteSubmitting(false);
+    }
+  };
 
   // Aggregate addresses from orders
   const addresses = useMemo(() => {
@@ -668,11 +765,35 @@ export default function AddressBook({
                       </div>
                     </div>
 
-                    {/* Total Order Count Badge */}
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 shrink-0">
-                      <Package className="w-3 h-3" />
-                      {addr.totalOrders} {addr.totalOrders === 1 ? 'Order' : 'Orders'}
-                    </span>
+                    {/* Action Buttons & Order Count Badge */}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                        <Package className="w-3 h-3" />
+                        {addr.totalOrders} {addr.totalOrders === 1 ? 'Order' : 'Orders'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditAddress(addr);
+                        }}
+                        className="p-1 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                        title="Edit address"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteAddressModal(addr);
+                        }}
+                        className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        title="Delete address"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Customer Preview */}
@@ -746,6 +867,194 @@ export default function AddressBook({
           onClose={() => setSelectedAddress(null)}
           onViewProof={onViewProof}
         />
+      )}
+
+      {/* Edit Address Modal */}
+      {editingAddress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-6 animate-scale-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-white text-base">Edit Address & Coordinates</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Modifying this address will sync related past orders & saved locations
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingAddress(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitEditAddress} className="p-5 space-y-4">
+              {editError && (
+                <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{editError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Full Address *
+                </label>
+                <textarea
+                  rows={3}
+                  value={editAddressText}
+                  onChange={(e) => setEditAddressText(e.target.value)}
+                  placeholder="Street, House/Flat No, Colony/Area..."
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Landmark (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={editLandmark}
+                  onChange={(e) => setEditLandmark(e.target.value)}
+                  placeholder="Near temple, opposite park, etc."
+                  className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    GPS Coordinates
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleDetectGps}
+                    disabled={isDetectingGps}
+                    className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <Navigation className={`w-3 h-3 ${isDetectingGps ? 'animate-spin' : ''}`} />
+                    <span>{isDetectingGps ? 'Detecting GPS...' : 'Use Current GPS'}</span>
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={editLat}
+                      onChange={(e) => setEditLat(e.target.value)}
+                      placeholder="Latitude (e.g. 28.6692)"
+                      className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      value={editLng}
+                      onChange={(e) => setEditLng(e.target.value)}
+                      placeholder="Longitude (e.g. 77.4538)"
+                      className="w-full px-3 py-2 bg-slate-800/80 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingAddress(null)}
+                  disabled={isEditSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isEditSubmitting}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition-all disabled:opacity-50"
+                >
+                  {isEditSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Address Confirmation Modal */}
+      {deleteAddressModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Delete Address?</h3>
+                <p className="text-xs text-slate-400">Remove from customer directory</p>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 line-clamp-3">
+              "{deleteAddressModal.fullAddress}"
+            </p>
+
+            {deleteAddressModal.totalOrders > 0 && (
+              <label className="flex items-start gap-2.5 cursor-pointer bg-slate-800/50 p-3 rounded-xl border border-slate-700/60">
+                <input
+                  type="checkbox"
+                  checked={alsoRemoveFromOrders}
+                  onChange={(e) => setAlsoRemoveFromOrders(e.target.checked)}
+                  className="mt-0.5 rounded border-slate-700 text-emerald-600 focus:ring-emerald-500 bg-slate-900"
+                />
+                <span className="text-xs text-slate-300">
+                  Also archive / remove address on <strong>{deleteAddressModal.totalOrders}</strong> past order(s)
+                </span>
+              </label>
+            )}
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteAddressModal(null)}
+                disabled={isDeleteSubmitting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAddress}
+                disabled={isDeleteSubmitting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 transition-all disabled:opacity-50"
+              >
+                {isDeleteSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete Address</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

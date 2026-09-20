@@ -276,6 +276,98 @@ export async function addDriver({ name, phone, pin }) {
   return newDriver;
 }
 
+export async function updateDeliveryBoy(id, updates = {}) {
+  const payload = {};
+  if (updates.name !== undefined) payload.name = updates.name.trim();
+  if (updates.phone !== undefined) payload.phone = updates.phone.trim();
+  if (updates.pin !== undefined) payload.pin = updates.pin.trim();
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.is_online !== undefined) payload.is_online = Boolean(updates.is_online);
+  if (updates.current_lat !== undefined) payload.current_lat = updates.current_lat !== null && updates.current_lat !== '' ? Number(updates.current_lat) : null;
+  if (updates.current_lng !== undefined) payload.current_lng = updates.current_lng !== null && updates.current_lng !== '' ? Number(updates.current_lng) : null;
+  if (updates.base_lat !== undefined) payload.base_lat = updates.base_lat !== null && updates.base_lat !== '' ? Number(updates.base_lat) : null;
+  if (updates.base_lng !== undefined) payload.base_lng = updates.base_lng !== null && updates.base_lng !== '' ? Number(updates.base_lng) : null;
+  if (updates.geofence_radius !== undefined) payload.geofence_radius = Number(updates.geofence_radius) || 150;
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('delivery_boys').update(payload).eq('id', id);
+    } catch (err) {
+      console.warn('Supabase updateDeliveryBoy on delivery_boys warning:', err.message);
+    }
+    try {
+      const driverPayload = {};
+      if (payload.name) driverPayload.name = payload.name;
+      if (payload.phone) driverPayload.phone = payload.phone;
+      if (payload.pin) driverPayload.pin = payload.pin;
+      if (payload.status) driverPayload.status = payload.status;
+      if (Object.keys(driverPayload).length > 0) {
+        await supabase.from('drivers').update(driverPayload).eq('id', id);
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  const drivers = getLocalDrivers();
+  const updated = drivers.map((d) => (d.id === id ? { ...d, ...payload } : d));
+  saveLocalDrivers(updated);
+  return { id, ...payload };
+}
+
+export async function deleteDeliveryBoy(id) {
+  if (isSupabaseConfigured) {
+    // 1. Reset any pending / out for delivery orders assigned to this driver
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          assigned_driver_id: null,
+          driver_name: 'Unassigned',
+          status: 'Pending'
+        })
+        .eq('assigned_driver_id', id);
+    } catch (err) {
+      console.warn('Reset orders on deleteDeliveryBoy error:', err.message);
+    }
+
+    // 2. Delete from delivery_boys
+    try {
+      await supabase.from('delivery_boys').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Delete from delivery_boys error:', err.message);
+    }
+
+    // 3. Delete from drivers
+    try {
+      await supabase.from('drivers').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Delete from drivers error:', err.message);
+    }
+
+    // 4. Delete from driver_locations
+    try {
+      await supabase.from('driver_locations').delete().eq('driver_id', id);
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  const drivers = getLocalDrivers();
+  saveLocalDrivers(drivers.filter((d) => d.id !== id));
+
+  const orders = getLocalOrders();
+  saveLocalOrders(
+    orders.map((o) =>
+      o.assigned_driver_id === id
+        ? { ...o, assigned_driver_id: null, driver_name: 'Unassigned', status: o.status === 'Delivered' ? 'Delivered' : 'Pending' }
+        : o
+    )
+  );
+
+  return true;
+}
+
 export async function driverLogin(phone, pin) {
   const cleanPhone = phone.trim();
   const cleanPin = pin.trim();
@@ -470,6 +562,65 @@ export async function updateOrderLocation(orderId, latitude, longitude) {
   );
   saveLocalOrders(updated);
   return updated.find((o) => o.id === orderId);
+}
+
+export async function updateOrder(orderId, updates = {}) {
+  const payload = {};
+  if (updates.order_number !== undefined) payload.order_number = updates.order_number.trim();
+  if (updates.amount !== undefined) payload.amount = parseFloat(updates.amount) || 0;
+  if (updates.address !== undefined) payload.address = updates.address.trim();
+  if (updates.landmark !== undefined) payload.landmark = updates.landmark ? updates.landmark.trim() : '';
+  if (updates.customer_phone !== undefined) payload.customer_phone = updates.customer_phone ? updates.customer_phone.trim() : '';
+  if (updates.customer_name !== undefined) payload.customer_name = updates.customer_name ? updates.customer_name.trim() : '';
+  if (updates.assigned_driver_id !== undefined) payload.assigned_driver_id = updates.assigned_driver_id || null;
+  if (updates.driver_name !== undefined) payload.driver_name = updates.driver_name || null;
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.latitude !== undefined) payload.latitude = updates.latitude !== null && updates.latitude !== undefined && updates.latitude !== '' ? Number(updates.latitude) : null;
+  if (updates.longitude !== undefined) payload.longitude = updates.longitude !== null && updates.longitude !== undefined && updates.longitude !== '' ? Number(updates.longitude) : null;
+  if (updates.items !== undefined) payload.items = Array.isArray(updates.items) ? updates.items : [];
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .update(payload)
+        .eq('id', orderId)
+        .select()
+        .single();
+      if (!error && data) {
+        const local = getLocalOrders();
+        saveLocalOrders(local.map((o) => (o.id === orderId ? { ...o, ...data } : o)));
+        return data;
+      }
+      if (error) console.warn('Supabase updateOrder error:', error.message);
+    } catch (err) {
+      console.warn('Supabase updateOrder failed, updating locally:', err.message);
+    }
+  }
+
+  const local = getLocalOrders();
+  const updated = local.map((o) => (o.id === orderId ? { ...o, ...payload } : o));
+  saveLocalOrders(updated);
+  return { id: orderId, ...payload };
+}
+
+export async function deleteOrder(orderId) {
+  if (isSupabaseConfigured) {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('id', orderId);
+      if (error) console.warn('Supabase deleteOrder error:', error.message);
+    } catch (err) {
+      console.warn('Supabase deleteOrder failed, deleting locally:', err.message);
+    }
+  }
+
+  const orders = getLocalOrders();
+  const updated = orders.filter((o) => o.id !== orderId);
+  saveLocalOrders(updated);
+  return true;
 }
 
 export async function completeDelivery(orderId, { paymentMethod, paymentProofUrl, deliveryProofUrl, notes }) {
@@ -1082,6 +1233,42 @@ export async function deleteProduct(productId) {
   return true;
 }
 
+export async function updateProduct({ id, name, price, unit = '20L Can', imageUrl, inStock }) {
+  const updates = {
+    name: name.trim(),
+    price: parseFloat(price) || 0,
+    unit: (unit || '20L Can').trim(),
+    in_stock: Boolean(inStock)
+  };
+  if (imageUrl !== undefined && imageUrl !== null) {
+    updates.image_url = imageUrl;
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      if (!error && data) {
+        const local = getLocalProducts();
+        saveLocalProducts(local.map((p) => (p.id === id ? data : p)));
+        return data;
+      }
+      if (error) console.warn('Supabase updateProduct warning:', error.message);
+    } catch (err) {
+      console.warn('Supabase updateProduct failed, updating locally:', err.message);
+    }
+  }
+
+  const local = getLocalProducts();
+  const updated = local.map((p) => (p.id === id ? { ...p, ...updates } : p));
+  saveLocalProducts(updated);
+  return { id, ...updates };
+}
+
 export async function uploadProductImage(file) {
   if (!file) throw new Error('No file provided');
 
@@ -1243,6 +1430,139 @@ export async function saveAddressBookEntry(entry) {
   } catch (e) {
     // ignore
   }
+}
+
+export async function updateSavedAddress(oldAddress, newAddressData = {}) {
+  const cleanOld = (oldAddress || '').trim();
+  const cleanNew = (newAddressData.address || newAddressData.address_line || cleanOld).trim();
+  if (!cleanNew) return;
+
+  const addressPayload = {
+    address_line: cleanNew,
+    landmark: newAddressData.landmark ? newAddressData.landmark.trim() : '',
+    latitude: newAddressData.latitude !== undefined && newAddressData.latitude !== null && newAddressData.latitude !== '' ? Number(newAddressData.latitude) : null,
+    longitude: newAddressData.longitude !== undefined && newAddressData.longitude !== null && newAddressData.longitude !== '' ? Number(newAddressData.longitude) : null
+  };
+
+  if (isSupabaseConfigured) {
+    // 1. Update in addresses table
+    try {
+      if (newAddressData.id && !String(newAddressData.id).startsWith('addr-')) {
+        await supabase.from('addresses').update(addressPayload).eq('id', newAddressData.id);
+      } else {
+        const { error } = await supabase
+          .from('addresses')
+          .update(addressPayload)
+          .ilike('address_line', cleanOld);
+        if (error) {
+          await supabase.from('addresses').insert([addressPayload]);
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase updateSavedAddress on addresses warning:', err.message);
+    }
+
+    // 2. Modify related past entries in orders
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          address: cleanNew,
+          landmark: addressPayload.landmark,
+          latitude: addressPayload.latitude,
+          longitude: addressPayload.longitude
+        })
+        .ilike('address', cleanOld);
+    } catch (err) {
+      console.warn('Supabase updateSavedAddress on orders warning:', err.message);
+    }
+  }
+
+  // Update local address book cache
+  try {
+    const local = getLocalAddressBook();
+    const updatedLocal = local.map((a) => {
+      const current = (a.address_line || a.address || '').trim().toLowerCase();
+      if (current === cleanOld.toLowerCase()) {
+        return { ...a, ...addressPayload, address: cleanNew };
+      }
+      return a;
+    });
+    saveLocalAddressBook(updatedLocal);
+  } catch (e) {}
+
+  // Update local orders cache
+  try {
+    const orders = getLocalOrders();
+    const updatedOrders = orders.map((o) => {
+      if ((o.address || '').trim().toLowerCase() === cleanOld.toLowerCase()) {
+        return {
+          ...o,
+          address: cleanNew,
+          landmark: addressPayload.landmark,
+          latitude: addressPayload.latitude,
+          longitude: addressPayload.longitude
+        };
+      }
+      return o;
+    });
+    saveLocalOrders(updatedOrders);
+  } catch (e) {}
+
+  return addressPayload;
+}
+
+export async function deleteSavedAddress(addressStr, { alsoRemoveFromOrders = false } = {}) {
+  const cleanAddr = (addressStr || '').trim();
+  if (!cleanAddr) return;
+
+  if (isSupabaseConfigured) {
+    // 1. Remove from addresses table
+    try {
+      await supabase.from('addresses').delete().ilike('address_line', cleanAddr);
+    } catch (err) {
+      console.warn('Supabase deleteSavedAddress on addresses error:', err.message);
+    }
+
+    // 2. If requested, also remove / nullify from past orders
+    if (alsoRemoveFromOrders) {
+      try {
+        await supabase
+          .from('orders')
+          .update({
+            address: 'Archived / Removed Address',
+            landmark: ''
+          })
+          .ilike('address', cleanAddr);
+      } catch (err) {
+        console.warn('Supabase deleteSavedAddress on orders error:', err.message);
+      }
+    }
+  }
+
+  // Clean local address book
+  try {
+    const local = getLocalAddressBook();
+    const filtered = local.filter(
+      (a) => (a.address_line || a.address || '').trim().toLowerCase() !== cleanAddr.toLowerCase()
+    );
+    saveLocalAddressBook(filtered);
+  } catch (e) {}
+
+  // Clean local orders if requested
+  if (alsoRemoveFromOrders) {
+    try {
+      const orders = getLocalOrders();
+      const updated = orders.map((o) =>
+        (o.address || '').trim().toLowerCase() === cleanAddr.toLowerCase()
+          ? { ...o, address: 'Archived / Removed Address', landmark: '' }
+          : o
+      );
+      saveLocalOrders(updated);
+    } catch (e) {}
+  }
+
+  return true;
 }
 
 
