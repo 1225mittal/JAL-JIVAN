@@ -26,6 +26,7 @@ export default function CreateTaskModal({
   onClose,
   drivers = [],
   products = [],
+  orders = [],
   onCreateTask
 }) {
   const [orderNumber, setOrderNumber] = useState(`JJ-${Math.floor(1000 + Math.random() * 9000)}`);
@@ -51,7 +52,7 @@ export default function CreateTaskModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // 1. Fetch saved addresses on modal open
+  // 1. Fetch real saved addresses on modal open
   useEffect(() => {
     if (!isOpen) return;
 
@@ -59,9 +60,129 @@ export default function CreateTaskModal({
     const loadAddresses = async () => {
       setIsLoadingAddresses(true);
       try {
-        const addrs = await fetchSavedAddresses();
+        const addressMap = new Map();
+
+        const addRecord = (item) => {
+          if (!item) return;
+          const raw = (item.address || item.full_address || item.fullAddress || '').trim();
+          if (!raw) return;
+
+          // Strictly filter out any legacy dummy mock entries
+          const lower = raw.toLowerCase();
+          const nameLower = (item.name || item.customer_name || '').toLowerCase();
+          if (
+            lower.includes('kavi nagar') ||
+            lower.includes('shanti kunj') ||
+            lower.includes('shanti vihar') ||
+            lower.includes('green avenue') ||
+            lower.includes('royal palms') ||
+            lower.includes('surya enclave') ||
+            lower.includes('shivalik') ||
+            nameLower.includes('anita devi') ||
+            nameLower.includes('sanjay malik') ||
+            nameLower.includes('anil mehra') ||
+            nameLower.includes('vikas gupta') ||
+            nameLower.includes('pooja verma') ||
+            nameLower.includes('ramesh kumar') ||
+            nameLower.includes('suresh sharma') ||
+            nameLower.includes('amit patel')
+          ) {
+            return;
+          }
+
+          const key = lower;
+          const lat =
+            item.latitude !== null && item.latitude !== undefined && !isNaN(Number(item.latitude))
+              ? Number(item.latitude)
+              : null;
+          const lng =
+            item.longitude !== null && item.longitude !== undefined && !isNaN(Number(item.longitude))
+              ? Number(item.longitude)
+              : null;
+
+          if (!addressMap.has(key)) {
+            addressMap.set(key, {
+              id: item.id || `addr-${addressMap.size + 1}`,
+              address: raw,
+              landmark: (item.landmark || '').trim(),
+              phone: (item.customer_phone || item.phone || '').trim(),
+              name: (item.customer_name || item.name || '').trim(),
+              latitude: lat,
+              longitude: lng
+            });
+          } else {
+            const existing = addressMap.get(key);
+            if (existing.latitude === null && lat !== null) {
+              existing.latitude = lat;
+              existing.longitude = lng;
+            }
+            if (!existing.landmark && item.landmark) existing.landmark = item.landmark.trim();
+            if (!existing.phone && (item.customer_phone || item.phone)) {
+              existing.phone = (item.customer_phone || item.phone).trim();
+            }
+            if (!existing.name && (item.customer_name || item.name)) {
+              existing.name = (item.customer_name || item.name).trim();
+            }
+          }
+        };
+
+        if (isSupabaseConfigured) {
+          // 1. Query past orders from Supabase (as requested)
+          try {
+            const { data: orderData } = await supabase
+              .from('orders')
+              .select('address, landmark, customer_phone, customer_name, latitude, longitude')
+              .not('address', 'is', null)
+              .order('created_at', { ascending: false });
+
+            if (Array.isArray(orderData)) {
+              orderData.forEach(addRecord);
+            }
+          } catch (err) {
+            console.warn('Orders query in CreateTaskModal failed:', err);
+          }
+
+          // 2. Query addresses table
+          try {
+            const { data: addrsData } = await supabase.from('addresses').select('*');
+            if (Array.isArray(addrsData)) {
+              addrsData.forEach(addRecord);
+            }
+          } catch (err) {
+            // ignore
+          }
+
+          // 3. Query address_book table
+          try {
+            const { data: bookData } = await supabase
+              .from('address_book')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (Array.isArray(bookData)) {
+              bookData.forEach(addRecord);
+            }
+          } catch (err) {
+            // ignore
+          }
+        }
+
+        // Merge live orders from props
+        if (Array.isArray(orders)) {
+          orders.forEach(addRecord);
+        }
+
+        // Also fetch from helper
+        try {
+          const helperAddrs = await fetchSavedAddresses();
+          if (Array.isArray(helperAddrs)) {
+            helperAddrs.forEach(addRecord);
+          }
+        } catch (e) {
+          // ignore
+        }
+
         if (isMounted) {
-          setSavedAddresses(addrs || []);
+          setSavedAddresses(Array.from(addressMap.values()));
         }
       } catch (err) {
         console.warn('Failed to load saved addresses:', err);
@@ -74,7 +195,7 @@ export default function CreateTaskModal({
     return () => {
       isMounted = false;
     };
-  }, [isOpen]);
+  }, [isOpen, orders]);
 
   // Click outside to close address dropdown
   useEffect(() => {
@@ -91,7 +212,7 @@ export default function CreateTaskModal({
   // Filter saved addresses based on address, name, phone, or landmark
   const filteredAddresses = useMemo(() => {
     if (!address.trim()) {
-      return savedAddresses.slice(0, 6);
+      return savedAddresses;
     }
     const q = address.toLowerCase().trim();
     return savedAddresses.filter((item) => {
@@ -487,7 +608,7 @@ export default function CreateTaskModal({
 
                 {filteredAddresses.length === 0 ? (
                   <div className="p-4 text-center text-xs text-slate-400">
-                    No matching saved address found. The typed address will be saved for future orders.
+                    No saved addresses match. Type to enter a new location.
                   </div>
                 ) : (
                   filteredAddresses.map((item) => {

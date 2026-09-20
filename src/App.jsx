@@ -390,6 +390,7 @@ export default function App() {
         onClose={() => setIsCreateTaskOpen(false)}
         drivers={drivers}
         products={products}
+        orders={orders}
         onCreateTask={handleCreateTask}
       />
 

@@ -58,22 +58,61 @@ const saveLocalProducts = (products) => {
   }
 };
 
+const DUMMY_NAMES_AND_ADDRESSES = [
+  'anita devi',
+  'sanjay malik',
+  'anil mehra',
+  'vikas gupta',
+  'pooja verma',
+  'deepak sethi',
+  'rajesh tyagi',
+  'meena sharma',
+  'sunil yadav',
+  'ravi kumar',
+  'rohit verma',
+  'ramesh kumar',
+  'suresh sharma',
+  'amit patel',
+  'kavi nagar',
+  'shanti kunj',
+  'shanti vihar',
+  'green avenue',
+  'royal palms',
+  'surya enclave',
+  'shivalik',
+  'patel nagar',
+  'ganga heights',
+  'silver oak',
+  'navrang plaza'
+];
+
+export function isDummyEntry(item) {
+  if (!item) return false;
+  const str = `${item.name || ''} ${item.customer_name || ''} ${item.address || ''} ${item.fullAddress || ''} ${item.landmark || ''}`.toLowerCase();
+  return DUMMY_NAMES_AND_ADDRESSES.some((dummy) => str.includes(dummy));
+}
+
 const getLocalAddressBook = () => {
   try {
     const saved = localStorage.getItem(STORAGE_ADDRESS_BOOK);
     if (!saved) {
-      localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(initialAddressBook));
-      return initialAddressBook;
+      return [];
     }
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    const cleaned = Array.isArray(parsed) ? parsed.filter((a) => !isDummyEntry(a)) : [];
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (e) {
-    return initialAddressBook;
+    return [];
   }
 };
 
 const saveLocalAddressBook = (entries) => {
   try {
-    localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(entries));
+    const cleaned = Array.isArray(entries) ? entries.filter((a) => !isDummyEntry(a)) : [];
+    localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(cleaned));
   } catch (e) {
     console.error('Failed to save address book locally', e);
   }
@@ -116,18 +155,23 @@ const getLocalOrders = () => {
   try {
     const saved = localStorage.getItem(STORAGE_ORDERS);
     if (!saved) {
-      localStorage.setItem(STORAGE_ORDERS, JSON.stringify(initialOrders));
-      return initialOrders;
+      return [];
     }
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    const cleaned = Array.isArray(parsed) ? parsed.filter((o) => !isDummyEntry(o)) : [];
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_ORDERS, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (e) {
-    return initialOrders;
+    return [];
   }
 };
 
 const saveLocalOrders = (orders) => {
   try {
-    localStorage.setItem(STORAGE_ORDERS, JSON.stringify(orders));
+    const cleaned = Array.isArray(orders) ? orders.filter((o) => !isDummyEntry(o)) : [];
+    localStorage.setItem(STORAGE_ORDERS, JSON.stringify(cleaned));
   } catch (e) {
     console.error('Failed saving orders locally', e);
   }
@@ -1084,89 +1128,103 @@ export async function uploadProductImage(file) {
 // ==========================================
 
 export async function fetchSavedAddresses() {
-  let dbAddresses = [];
-  if (isSupabaseConfigured) {
-    try {
-      const { data, error } = await supabase
-        .from('address_book')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (!error && Array.isArray(data)) {
-        dbAddresses = data;
-      }
-    } catch (err) {
-      console.warn('Supabase fetchSavedAddresses failed:', err.message);
-    }
-  }
-
-  const localAddrs = getLocalAddressBook();
-  const localOrders = getLocalOrders();
-
-  // Combine and deduplicate by address string (case insensitive)
   const map = new Map();
 
-  // 1. Database address_book records
-  for (const a of dbAddresses) {
-    if (!a.address?.trim()) continue;
-    const key = a.address.trim().toLowerCase();
-    if (!map.has(key)) {
-      map.set(key, {
-        id: a.id,
-        name: a.name || '',
-        phone: a.phone || '',
-        address: a.address.trim(),
-        landmark: a.landmark || '',
-        latitude: a.latitude ?? null,
-        longitude: a.longitude ?? null,
-        source: 'address_book'
-      });
-    }
-  }
+  const addRecord = (item, source) => {
+    if (!item) return;
+    const rawAddr = (item.address || item.full_address || item.fullAddress || '').trim();
+    if (!rawAddr) return;
 
-  // 2. Local address book records
-  for (const a of localAddrs) {
-    if (!a.address?.trim()) continue;
-    const key = a.address.trim().toLowerCase();
-    if (!map.has(key)) {
-      map.set(key, {
-        id: a.id,
-        name: a.name || '',
-        phone: a.phone || '',
-        address: a.address.trim(),
-        landmark: a.landmark || '',
-        latitude: a.latitude ?? null,
-        longitude: a.longitude ?? null,
-        source: 'local'
-      });
+    // Defensively exclude any legacy dummy test addresses
+    if (isDummyEntry(item) || isDummyEntry({ address: rawAddr })) {
+      return;
     }
-  }
 
-  // 3. Past unique order addresses
-  for (const o of localOrders) {
-    if (!o.address?.trim()) continue;
-    const key = o.address.trim().toLowerCase();
+    const key = rawAddr.toLowerCase();
+    const lat = item.latitude !== null && item.latitude !== undefined && !isNaN(Number(item.latitude))
+      ? Number(item.latitude)
+      : null;
+    const lng = item.longitude !== null && item.longitude !== undefined && !isNaN(Number(item.longitude))
+      ? Number(item.longitude)
+      : null;
+
     if (!map.has(key)) {
       map.set(key, {
-        id: 'ord-addr-' + (o.id || Math.random().toString(36).slice(2)),
-        name: o.customer_name || '',
-        phone: o.customer_phone || '',
-        address: o.address.trim(),
-        landmark: o.landmark || '',
-        latitude: o.latitude ?? null,
-        longitude: o.longitude ?? null,
-        source: 'past_order'
+        id: item.id || `addr-${map.size + 1}`,
+        address: rawAddr,
+        landmark: item.landmark?.trim() || '',
+        phone: item.customer_phone?.trim() || item.phone?.trim() || '',
+        name: item.customer_name?.trim() || item.name?.trim() || '',
+        latitude: lat,
+        longitude: lng,
+        source
       });
     } else {
       const existing = map.get(key);
-      if ((existing.latitude === null || existing.latitude === undefined) && o.latitude) {
-        existing.latitude = o.latitude;
-        existing.longitude = o.longitude;
+      if (existing.latitude === null && lat !== null) {
+        existing.latitude = lat;
+        existing.longitude = lng;
       }
-      if (!existing.phone && o.customer_phone) existing.phone = o.customer_phone;
-      if (!existing.name && o.customer_name) existing.name = o.customer_name;
-      if (!existing.landmark && o.landmark) existing.landmark = o.landmark;
+      if (!existing.landmark && item.landmark) existing.landmark = item.landmark.trim();
+      if (!existing.phone && (item.customer_phone || item.phone)) {
+        existing.phone = (item.customer_phone || item.phone).trim();
+      }
+      if (!existing.name && (item.customer_name || item.name)) {
+        existing.name = (item.customer_name || item.name).trim();
+      }
+    }
+  };
+
+  if (isSupabaseConfigured) {
+    // 1. Query past orders from Supabase (as requested)
+    try {
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select('address, landmark, customer_phone, customer_name, latitude, longitude, created_at')
+        .not('address', 'is', null)
+        .order('created_at', { ascending: false });
+
+      if (!orderError && Array.isArray(orderData)) {
+        orderData.forEach((o) => addRecord(o, 'orders'));
+      }
+    } catch (err) {
+      console.warn('Supabase fetchSavedAddresses orders query failed:', err.message);
+    }
+
+    // 2. Query addresses table
+    try {
+      const { data: addrsData, error: addrsError } = await supabase
+        .from('addresses')
+        .select('*');
+
+      if (!addrsError && Array.isArray(addrsData)) {
+        addrsData.forEach((a) => addRecord(a, 'addresses'));
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    // 3. Query address_book table
+    try {
+      const { data: bookData, error: bookError } = await supabase
+        .from('address_book')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!bookError && Array.isArray(bookData)) {
+        bookData.forEach((b) => addRecord(b, 'address_book'));
+      }
+    } catch (err) {
+      // ignore
     }
   }
+
+  // 4. Merge clean local orders & address book records
+  const localOrders = getLocalOrders();
+  localOrders.forEach((o) => addRecord(o, 'local_orders'));
+
+  const localAddrs = getLocalAddressBook();
+  localAddrs.forEach((a) => addRecord(a, 'local_address_book'));
 
   return Array.from(map.values());
 }
