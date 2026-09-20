@@ -29,8 +29,54 @@ export function fileToGenerativePart(file) {
 console.log("Gemini Key Exists:", !!import.meta.env.VITE_GEMINI_API_KEY);
 
 /**
- * Analyzes a handwritten paper order slip or note using Gemini 1.5 Flash
- * and returns structured order details.
+ * Parses and normalizes structured order information from Gemini response text
+ * @param {string} responseText
+ * @returns {{
+ *   customer_name: string,
+ *   customer_phone: string,
+ *   delivery_address: string,
+ *   landmark?: string,
+ *   items: Array<{ item_name: string, quantity: number, price: number }>,
+ *   total_amount: number,
+ *   notes: string
+ * }}
+ */
+export function parseGeminiResponse(responseText) {
+  let parsedData = {};
+
+  try {
+    parsedData = JSON.parse(responseText);
+  } catch {
+    // Fallback in case the model wrapped the JSON in markdown fences
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsedData = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error('Model did not return valid JSON');
+    }
+  }
+
+  // Normalize output structure
+  return {
+    customer_name: (parsedData.customer_name || '').trim(),
+    customer_phone: (parsedData.customer_phone || '').replace(/\D/g, '').slice(-10),
+    delivery_address: (parsedData.delivery_address || '').trim(),
+    landmark: (parsedData.landmark || '').trim(),
+    items: Array.isArray(parsedData.items)
+      ? parsedData.items.map((item) => ({
+        item_name: (item.item_name || 'Item').trim(),
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        price: Math.max(0, Number(item.price) || 0)
+      }))
+      : [],
+    total_amount: Math.max(0, Number(parsedData.total_amount) || 0),
+    notes: (parsedData.notes || '').trim()
+  };
+}
+
+/**
+ * Analyzes a handwritten paper order slip or note using Gemini Flash models
+ * (with automatic candidate fallback) and returns structured order details.
  * 
  * @param {File} file - Image file of the paper slip
  * @returns {Promise<{
@@ -55,7 +101,40 @@ export async function extractOrderFromSlip(file) {
     throw new Error('VITE_GEMINI_API_KEY is not configured in .env file');
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const genAI = new GoogleGenAI({ apiKey });
+
+  // Provide compatibility adapter for getGenerativeModel on @google/genai
+  if (typeof genAI.getGenerativeModel !== 'function') {
+    genAI.getGenerativeModel = ({ model: modelName }) => ({
+      generateContent: async (args) => {
+        let payloadContents;
+        if (Array.isArray(args)) {
+          payloadContents = args.map((arg) => {
+            if (typeof arg === 'string') return arg;
+            if (arg?.inlineData) return { inlineData: arg.inlineData };
+            return arg;
+          });
+        } else {
+          payloadContents = args?.contents || args;
+        }
+
+        const res = await genAI.models.generateContent({
+          model: modelName,
+          contents: payloadContents,
+          config: {
+            responseMimeType: 'application/json'
+          }
+        });
+
+        return {
+          response: {
+            text: () => res?.text || ''
+          },
+          text: res?.text || ''
+        };
+      }
+    });
+  }
 
   // 1. Convert file to base64 inlineData
   const { data: base64Data, mimeType } = await fileToGenerativePart(file);
@@ -87,60 +166,39 @@ Guidelines:
 4. If a field cannot be deciphered or is absent, leave it as an empty string ("") or 0.
 5. Return ONLY the JSON object. Do not include markdown code block backticks.`;
 
-  const requestPayload = {
-    contents: [
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType
-        }
-      },
-      prompt
-    ],
-    config: {
-      responseMimeType: 'application/json'
+  const imagePart = {
+    inlineData: {
+      data: base64Data,
+      mimeType
     }
   };
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      ...requestPayload
-    });
+  const candidateModels = [
+    "gemini-2.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash-8b",
+    "gemini-2.0-flash"
+  ];
 
-    const responseText = response?.text || '';
-    let parsedData = {};
-
+  for (const modelName of candidateModels) {
     try {
-      parsedData = JSON.parse(responseText);
-    } catch {
-      // Fallback in case the model wrapped the JSON in markdown fences
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('Model did not return valid JSON');
-      }
-    }
+      console.log(`Trying Gemini model: ${modelName}...`);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([prompt, imagePart]);
+      const responseText = typeof result?.response?.text === 'function'
+        ? result.response.text()
+        : (result?.text || '');
 
-    // Normalize output structure
-    return {
-      customer_name: (parsedData.customer_name || '').trim(),
-      customer_phone: (parsedData.customer_phone || '').replace(/\D/g, '').slice(-10),
-      delivery_address: (parsedData.delivery_address || '').trim(),
-      landmark: (parsedData.landmark || '').trim(),
-      items: Array.isArray(parsedData.items)
-        ? parsedData.items.map((item) => ({
-          item_name: (item.item_name || 'Item').trim(),
-          quantity: Math.max(1, Number(item.quantity) || 1),
-          price: Math.max(0, Number(item.price) || 0)
-        }))
-        : [],
-      total_amount: Math.max(0, Number(parsedData.total_amount) || 0),
-      notes: (parsedData.notes || '').trim()
-    };
-  } catch (err) {
-    console.error('Gemini OCR extraction failed:', err);
-    throw err;
+      if (responseText) {
+        // Parse and return the structured JSON data
+        return parseGeminiResponse(responseText);
+      }
+    } catch (err) {
+      console.warn(`Model ${modelName} failed or not found:`, err?.message || err);
+      // continue to next model
+    }
   }
+
+  throw new Error("All Gemini model candidates failed.");
 }

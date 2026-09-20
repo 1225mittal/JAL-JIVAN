@@ -74,7 +74,7 @@ export default function CreateTaskModal({
     setSlipPreview(url);
     setAiParseSuccess(false);
 
-    // Automatically trigger AI handwriting extraction with Gemini 1.5 Flash
+    // Automatically trigger AI handwriting extraction with Gemini Flash (with candidate fallback)
     console.log("Gemini Key Exists:", !!import.meta.env.VITE_GEMINI_API_KEY);
     try {
       setIsAnalyzingSlip(true);
@@ -697,7 +697,7 @@ export default function CreateTaskModal({
               <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold animate-pulse">
                 <Loader2 className="w-4 h-4 animate-spin text-amber-400 shrink-0" />
                 <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
-                <span>Analyzing handwriting with Gemini 1.5 Flash... ✨</span>
+                <span>Analyzing handwriting with Gemini Flash... ✨</span>
               </div>
             )}
 
