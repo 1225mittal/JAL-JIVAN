@@ -29,7 +29,7 @@ export function fileToGenerativePart(file) {
 console.log("Gemini Key Exists:", !!import.meta.env.VITE_GEMINI_API_KEY);
 
 /**
- * Analyzes a handwritten paper order slip or note using Gemini 2.0 Flash
+ * Analyzes a handwritten paper order slip or note using Gemini 2.5 Flash
  * and returns structured order details.
  * 
  * @param {File} file - Image file of the paper slip
@@ -104,7 +104,7 @@ Guidelines:
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       ...requestPayload
     });
 
