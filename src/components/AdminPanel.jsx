@@ -708,98 +708,100 @@ export function AdminPanel({
         </div>
       </div>
 
-      {/* Main Tabs (Live Orders vs Drivers Roster) */}
-      <div className="flex items-center justify-between border-b border-slate-800 pt-1">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'orders'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Truck className="w-4 h-4" />
-            <span>Live Status Board ({orders.length})</span>
-          </button>
+      {/* Main Tabs Navigation */}
+      <div className="flex items-center justify-between border-b border-slate-800 pt-1 gap-2">
+        <div className="overflow-x-auto w-full no-scrollbar min-w-0">
+          <div className="flex items-center space-x-2 min-w-max pb-1">
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'orders'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Truck className="w-4 h-4" />
+              <span>Live Status Board ({orders.length})</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('drivers')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'drivers'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>Delivery Boys ({drivers.length})</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('drivers')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'drivers'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Delivery Boys ({drivers.length})</span>
+            </button>
 
-          <button
-            id="admin-fleet-tab"
-            onClick={() => setActiveTab('fleet')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'fleet'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Radio className="w-4 h-4" />
-            <span>Live Fleet Tracker</span>
-            {onlineDriversCount > 0 ? (
-              <span className="flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {onlineDriversCount}
-              </span>
-            ) : (
-              <span className="text-[10px] text-slate-500 font-normal">({drivers.length})</span>
-            )}
-          </button>
+            <button
+              id="admin-fleet-tab"
+              onClick={() => setActiveTab('fleet')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'fleet'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Radio className="w-4 h-4" />
+              <span>Live Fleet Tracker</span>
+              {onlineDriversCount > 0 ? (
+                <span className="flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {onlineDriversCount}
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-500 font-normal">({drivers.length})</span>
+              )}
+            </button>
 
-          <button
-            id="admin-addresses-tab"
-            onClick={() => setActiveTab('addresses')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'addresses'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>Address Book ({addresses.length})</span>
-          </button>
+            <button
+              id="admin-addresses-tab"
+              onClick={() => setActiveTab('addresses')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'addresses'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Address Book ({addresses.length})</span>
+            </button>
 
-          <button
-            id="admin-products-tab"
-            onClick={() => setActiveTab('products')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'products'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Products ({products.length})</span>
-          </button>
+            <button
+              id="admin-products-tab"
+              onClick={() => setActiveTab('products')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'products'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>Products ({products.length})</span>
+            </button>
 
-          <button
-            id="admin-analytics-tab"
-            onClick={() => setActiveTab('analytics')}
-            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
-              activeTab === 'analytics'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span>Settings & Analytics</span>
-          </button>
+            <button
+              id="admin-analytics-tab"
+              onClick={() => setActiveTab('analytics')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'analytics'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Settings & Analytics</span>
+            </button>
+          </div>
         </div>
 
         <button
           onClick={onRefresh}
           disabled={loading}
-          className="pb-3 text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition-colors"
+          className="pb-3 text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1 transition-colors flex-shrink-0"
           title="Refresh live data"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
