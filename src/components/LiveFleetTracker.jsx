@@ -55,15 +55,18 @@ export default function LiveFleetTracker({
 
       const lat = loc?.latitude !== undefined && loc?.latitude !== null
         ? Number(loc.latitude)
-        : (driver.current_lat ? Number(driver.current_lat) : null);
+        : (driver.current_lat !== undefined && driver.current_lat !== null ? Number(driver.current_lat) : null);
 
       const lng = loc?.longitude !== undefined && loc?.longitude !== null
         ? Number(loc.longitude)
-        : (driver.current_lng ? Number(driver.current_lng) : null);
+        : (driver.current_lng !== undefined && driver.current_lng !== null ? Number(driver.current_lng) : null);
 
       const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-      const lastSeenAt = loc?.last_seen_at || loc?.updated_at || null;
-      const isOnline = isDriverOnline(lastSeenAt, 120000); // 2 minutes window
+      const lastSeenAt = loc?.updated_at || loc?.last_seen_at || driver.updated_at || driver.last_seen_at || null;
+      // Calculate 'Online' if (new Date() - new Date(driver.updated_at || driver.last_seen_at)) < 3 * 60 * 1000 (within 3 minutes)
+      const isOnline = Boolean(
+        lastSeenAt && (new Date() - new Date(lastSeenAt)) < 3 * 60 * 1000
+      );
 
       // Active order currently being delivered by this rider
       const activeOrder = orders.find(
@@ -257,7 +260,7 @@ export default function LiveFleetTracker({
             Online (Active)
           </span>
           <p className="text-xl font-black text-emerald-400 mt-0.5">{metrics.online}</p>
-          <span className="text-[10px] text-emerald-500/80">Heartbeat &lt; 2 mins</span>
+          <span className="text-[10px] text-emerald-500/80">Heartbeat &lt; 3 mins</span>
         </div>
 
         <div className="glass-card p-3 rounded-xl border border-sky-500/20 bg-sky-950/20">

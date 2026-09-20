@@ -1,3 +1,6 @@
+const now = Date.now();
+const minutesAgo = (m) => new Date(now - m * 60000).toISOString();
+
 export const initialDrivers = [
   {
     id: 'd1a10001-0000-0000-0000-000000000001',
@@ -5,6 +8,11 @@ export const initialDrivers = [
     phone: '9876543210',
     pin: '1234',
     status: 'active',
+    is_online: true,
+    current_lat: 28.6655,
+    current_lng: 77.4502,
+    last_seen_at: minutesAgo(0.3),
+    updated_at: minutesAgo(0.3),
     created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
   },
   {
@@ -13,6 +21,11 @@ export const initialDrivers = [
     phone: '9811223344',
     pin: '5678',
     status: 'active',
+    is_online: true,
+    current_lat: 28.6681,
+    current_lng: 77.4525,
+    last_seen_at: minutesAgo(0.8),
+    updated_at: minutesAgo(0.8),
     created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
   },
   {
@@ -21,12 +34,14 @@ export const initialDrivers = [
     phone: '9899001122',
     pin: '9999',
     status: 'active',
+    is_online: false,
+    current_lat: 28.6720,
+    current_lng: 77.4410,
+    last_seen_at: minutesAgo(25),
+    updated_at: minutesAgo(25),
     created_at: new Date(Date.now() - 86400000 * 4).toISOString(),
   },
 ];
-
-const now = Date.now();
-const minutesAgo = (m) => new Date(now - m * 60000).toISOString();
 
 export const initialStoreSettings = {
   id: 'main_store',
@@ -43,21 +58,24 @@ export const initialDriverLocations = [
     driver_name: 'Ramesh Kumar',
     latitude: 28.6655,
     longitude: 77.4502,
-    last_seen_at: minutesAgo(0.3)
+    last_seen_at: minutesAgo(0.3),
+    updated_at: minutesAgo(0.3)
   },
   {
     driver_id: 'd1a10002-0000-0000-0000-000000000002',
     driver_name: 'Suresh Sharma',
     latitude: 28.6681,
     longitude: 77.4525,
-    last_seen_at: minutesAgo(0.8)
+    last_seen_at: minutesAgo(0.8),
+    updated_at: minutesAgo(0.8)
   },
   {
     driver_id: 'd1a10003-0000-0000-0000-000000000003',
     driver_name: 'Amit Patel',
     latitude: 28.6720,
     longitude: 77.4410,
-    last_seen_at: minutesAgo(25)
+    last_seen_at: minutesAgo(25),
+    updated_at: minutesAgo(25)
   }
 ];
 

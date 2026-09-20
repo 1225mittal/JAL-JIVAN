@@ -611,16 +611,78 @@ export async function saveStoreSettings({ storeName, latitude, longitude, radius
 const STORAGE_DRIVER_LOCATIONS = 'jal_jivan_driver_locations';
 
 export async function fetchDriverLocations() {
+  const mergedMap = new Map();
+
   if (isSupabaseConfigured) {
+    // 1. Fetch from 'driver_locations'
     try {
-      const { data, error } = await supabase
+      const { data: dlData, error: dlError } = await supabase
         .from('driver_locations')
         .select('*');
-      if (!error && data && data.length > 0) {
-        return data;
+      if (!dlError && Array.isArray(dlData)) {
+        dlData.forEach((row) => {
+          mergedMap.set(row.driver_id, {
+            driver_id: row.driver_id,
+            driver_name: row.driver_name || '',
+            latitude: row.latitude,
+            longitude: row.longitude,
+            updated_at: row.updated_at || row.last_seen_at,
+            last_seen_at: row.last_seen_at || row.updated_at
+          });
+        });
       }
     } catch (err) {
-      console.warn('Supabase fetchDriverLocations failed, checking local store:', err.message);
+      console.warn('Supabase fetch driver_locations error:', err.message);
+    }
+
+    // 2. Fetch from 'delivery_boys' to join/enrich
+    try {
+      const { data: dbData, error: dbError } = await supabase
+        .from('delivery_boys')
+        .select('*');
+      if (!dbError && Array.isArray(dbData)) {
+        dbData.forEach((row) => {
+          const existing = mergedMap.get(row.id) || {};
+          mergedMap.set(row.id, {
+            driver_id: row.id,
+            driver_name: row.name || existing.driver_name || '',
+            latitude: existing.latitude !== undefined && existing.latitude !== null ? existing.latitude : row.current_lat,
+            longitude: existing.longitude !== undefined && existing.longitude !== null ? existing.longitude : row.current_lng,
+            is_online: row.is_online !== undefined ? row.is_online : existing.is_online,
+            updated_at: existing.updated_at || row.updated_at || row.last_seen_at,
+            last_seen_at: existing.last_seen_at || row.last_seen_at || row.updated_at
+          });
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    // 3. Also check 'drivers' table
+    try {
+      const { data: dData, error: dError } = await supabase
+        .from('drivers')
+        .select('*');
+      if (!dError && Array.isArray(dData)) {
+        dData.forEach((row) => {
+          const existing = mergedMap.get(row.id) || {};
+          mergedMap.set(row.id, {
+            driver_id: row.id,
+            driver_name: row.name || existing.driver_name || '',
+            latitude: existing.latitude !== undefined && existing.latitude !== null ? existing.latitude : row.current_lat,
+            longitude: existing.longitude !== undefined && existing.longitude !== null ? existing.longitude : row.current_lng,
+            is_online: row.is_online !== undefined ? row.is_online : existing.is_online,
+            updated_at: existing.updated_at || row.updated_at || row.last_seen_at,
+            last_seen_at: existing.last_seen_at || row.last_seen_at || row.updated_at
+          });
+        });
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    if (mergedMap.size > 0) {
+      return Array.from(mergedMap.values());
     }
   }
 
@@ -644,22 +706,60 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
   }
 
   const now = new Date().toISOString();
+  const latNum = Number(latitude);
+  const lngNum = Number(longitude);
+
   const locationRecord = {
     driver_id: driverId,
     driver_name: driverName || '',
-    latitude: Number(latitude),
-    longitude: Number(longitude),
-    last_seen_at: now,
-    updated_at: now
+    latitude: latNum,
+    longitude: lngNum,
+    updated_at: now,
+    last_seen_at: now
   };
 
+  console.log('Location heartbeat sent:', latNum, lngNum);
+
   if (isSupabaseConfigured) {
+    // 1. Upsert into driver_locations
     try {
       await supabase
         .from('driver_locations')
         .upsert([locationRecord]);
     } catch (err) {
-      console.warn('Supabase updateDriverLocation failed, updating local store:', err.message);
+      console.warn('Supabase update driver_locations failed:', err.message);
+    }
+
+    // 2. Also update delivery_boys table
+    try {
+      await supabase
+        .from('delivery_boys')
+        .update({
+          is_online: true,
+          current_lat: latNum,
+          current_lng: lngNum,
+          last_seen_at: now,
+          updated_at: now
+        })
+        .eq('id', driverId);
+    } catch (err) {
+      // ignore
+    }
+
+    // 3. Also update drivers table
+    try {
+      await supabase
+        .from('drivers')
+        .update({
+          is_online: true,
+          current_lat: latNum,
+          current_lng: lngNum,
+          last_seen_at: now,
+          updated_at: now
+        })
+        .eq('id', driverId);
+    } catch (err) {
+      // ignore
     }
   }
 
@@ -669,6 +769,22 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
       const filtered = existing.filter((item) => item.driver_id !== driverId);
       const updated = [locationRecord, ...filtered];
       localStorage.setItem(STORAGE_DRIVER_LOCATIONS, JSON.stringify(updated));
+
+      // Also update driver in local drivers cache
+      const localDrivers = JSON.parse(localStorage.getItem(STORAGE_DRIVERS) || '[]');
+      const updatedDrivers = localDrivers.map((d) =>
+        d.id === driverId
+          ? {
+              ...d,
+              is_online: true,
+              current_lat: latNum,
+              current_lng: lngNum,
+              last_seen_at: now,
+              updated_at: now
+            }
+          : d
+      );
+      localStorage.setItem(STORAGE_DRIVERS, JSON.stringify(updatedDrivers));
     }
   } catch (e) {
     console.error('Failed updating driver location locally', e);

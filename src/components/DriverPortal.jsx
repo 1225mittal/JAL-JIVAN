@@ -199,15 +199,16 @@ export default function DriverPortal({
     }
   }, [currentDriver, isPunchedIn, verifyHubDistance]);
 
-  // Real-Time Rider Location Tracking (Active on Duty)
+  // Real-Time Rider Location Tracking (Active on Login or Punch In)
   useEffect(() => {
-    if (!currentDriver || !isPunchedIn) return;
+    if (!currentDriver) return;
 
     let watchId = null;
     let timerId = null;
 
     const pushLocation = (lat, lng) => {
       if (lat === null || lat === undefined || lng === null || lng === undefined) return;
+      console.log('Location heartbeat sent:', lat, lng);
       updateDriverLocation({
         driverId: currentDriver.id,
         driverName: currentDriver.name,
@@ -225,6 +226,7 @@ export default function DriverPortal({
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords;
+          console.log('Location heartbeat sent:', latitude, longitude);
           setDriverCoords({ lat: latitude, lng: longitude });
           pushLocation(latitude, longitude);
         },
@@ -239,6 +241,7 @@ export default function DriverPortal({
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const { latitude, longitude } = pos.coords;
+            console.log('Location heartbeat sent:', latitude, longitude);
             setDriverCoords({ lat: latitude, lng: longitude });
             pushLocation(latitude, longitude);
           },
@@ -262,7 +265,7 @@ export default function DriverPortal({
         clearInterval(timerId);
       }
     };
-  }, [currentDriver, isPunchedIn, driverCoords?.lat, driverCoords?.lng]);
+  }, [currentDriver]);
 
   // Punch In Handler
   const handlePunchIn = async (overrideLat = null, overrideLng = null) => {

@@ -70,32 +70,34 @@ export function formatDistance(meters) {
 }
 
 /**
- * Determines whether a rider is online based on last_seen_at timestamp.
- * Defaults to 2 minutes threshold (120,000 ms).
+ * Determines whether a rider is online based on updated_at or last_seen_at timestamp.
+ * Defaults to 3 minutes threshold (3 * 60 * 1000 ms) as specified.
  */
-export function isDriverOnline(lastSeenAt, thresholdMs = 120000) {
+export function isDriverOnline(lastSeenAt, thresholdMs = 3 * 60 * 1000) {
   if (!lastSeenAt) return false;
   try {
     const diff = Date.now() - new Date(lastSeenAt).getTime();
-    return diff >= 0 && diff <= thresholdMs;
+    return diff >= -15000 && diff < thresholdMs;
   } catch {
     return false;
   }
 }
 
 /**
- * Formats a relative time string (e.g. "Just now", "45s ago", "2m ago").
+ * Formats a relative time string (e.g. "Just now", "25 seconds ago", "2m ago").
  */
 export function formatLastSeen(dateStr) {
-  if (!dateStr) return 'Never';
+  if (!dateStr) return 'Offline (No GPS signal)';
   try {
-    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+    const time = new Date(dateStr).getTime();
+    if (isNaN(time)) return 'Offline (No GPS signal)';
+    const diff = Math.floor((Date.now() - time) / 1000);
     if (diff < 10) return 'Just now';
-    if (diff < 60) return `${diff}s ago`;
+    if (diff < 60) return `${diff} seconds ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
     return new Date(dateStr).toLocaleDateString();
   } catch {
-    return 'Unknown';
+    return 'Offline (No GPS signal)';
   }
 }
