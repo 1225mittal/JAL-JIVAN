@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import {
+  supabase,
   acceptOrderDelivery,
   fetchRewardSettings,
   recordDriverAttendance,
@@ -206,9 +207,27 @@ export default function DriverPortal({
     let watchId = null;
     let timerId = null;
 
-    const pushLocation = (lat, lng) => {
+    const pushLocation = async (lat, lng) => {
       if (lat === null || lat === undefined || lng === null || lng === undefined) return;
       console.log('Location heartbeat sent:', lat, lng);
+
+      // Directly update delivery_boys table if punched in
+      if (isPunchedIn) {
+        try {
+          await supabase
+            .from('delivery_boys')
+            .update({
+              is_online: true,
+              current_lat: lat,
+              current_lng: lng,
+              last_seen_at: new Date().toISOString()
+            })
+            .eq('id', currentDriver.id);
+        } catch (err) {
+          console.warn('Direct delivery_boys update error:', err);
+        }
+      }
+
       updateDriverLocation({
         driverId: currentDriver.id,
         driverName: currentDriver.name,
@@ -224,11 +243,11 @@ export default function DriverPortal({
 
     if ('geolocation' in navigator) {
       watchId = navigator.geolocation.watchPosition(
-        (pos) => {
+        async (pos) => {
           const { latitude, longitude } = pos.coords;
           console.log('Location heartbeat sent:', latitude, longitude);
           setDriverCoords({ lat: latitude, lng: longitude });
-          pushLocation(latitude, longitude);
+          await pushLocation(latitude, longitude);
         },
         (err) => console.warn('Driver geolocation watch warning:', err),
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -239,11 +258,11 @@ export default function DriverPortal({
     timerId = setInterval(() => {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
-          (pos) => {
+          async (pos) => {
             const { latitude, longitude } = pos.coords;
             console.log('Location heartbeat sent:', latitude, longitude);
             setDriverCoords({ lat: latitude, lng: longitude });
-            pushLocation(latitude, longitude);
+            await pushLocation(latitude, longitude);
           },
           () => {
             if (driverCoords?.lat && driverCoords?.lng) {
@@ -265,7 +284,7 @@ export default function DriverPortal({
         clearInterval(timerId);
       }
     };
-  }, [currentDriver]);
+  }, [currentDriver, isPunchedIn]);
 
   // Punch In Handler
   const handlePunchIn = async (overrideLat = null, overrideLng = null) => {
@@ -279,6 +298,21 @@ export default function DriverPortal({
         checkInLat: lat,
         checkInLng: lng
       });
+
+      // Update delivery_boys directly right after geofence verification succeeds
+      try {
+        await supabase
+          .from('delivery_boys')
+          .update({
+            is_online: true,
+            current_lat: lat,
+            current_lng: lng,
+            last_seen_at: new Date().toISOString()
+          })
+          .eq('id', currentDriver.id);
+      } catch (err) {
+        console.warn('Direct delivery_boys punchIn update error:', err);
+      }
 
       // Immediately sync driver location
       await updateDriverLocation({
@@ -302,12 +336,23 @@ export default function DriverPortal({
   };
 
   // Punch Out Handler
-  const handlePunchOut = () => {
+  const handlePunchOut = async () => {
     setIsPunchedIn(false);
     try {
       localStorage.removeItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
     } catch (e) {
       // ignore
+    }
+    try {
+      await supabase
+        .from('delivery_boys')
+        .update({
+          is_online: false,
+          last_seen_at: new Date().toISOString()
+        })
+        .eq('id', currentDriver.id);
+    } catch (err) {
+      console.warn('Punch out delivery_boys update error:', err);
     }
   };
 

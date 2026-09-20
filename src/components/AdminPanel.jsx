@@ -35,7 +35,10 @@ import {
   fetchStoreSettings,
   saveStoreSettings,
   fetchDriverLocations,
-  defaultStoreSettings
+  fetchDeliveryBoys,
+  defaultStoreSettings,
+  supabase,
+  isSupabaseConfigured
 } from '../lib/supabase';
 import { isDriverOnline, formatLastSeen } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
@@ -78,15 +81,31 @@ export function AdminPanel({
   const [gpsDetecting, setGpsDetecting] = useState(false);
   const [gpsMessage, setGpsMessage] = useState('');
 
-  // Live Driver Locations
+  // Live Driver Locations & Delivery Boys List
   const [driverLocations, setDriverLocations] = useState([]);
+  const [deliveryBoys, setDeliveryBoys] = useState(drivers);
+
+  // Sync if parent drivers prop updates
+  useEffect(() => {
+    if (drivers && drivers.length > 0) {
+      setDeliveryBoys((prev) => {
+        if (!prev || prev.length === 0) return drivers;
+        const prevMap = new Map(prev.map((d) => [d.id, d]));
+        return drivers.map((d) => {
+          const live = prevMap.get(d.id);
+          return live ? { ...d, ...live } : d;
+        });
+      });
+    }
+  }, [drivers]);
 
   useEffect(() => {
     async function loadAdminData() {
-      const [res, hub, locs] = await Promise.all([
+      const [res, hub, locs, dBoys] = await Promise.all([
         fetchRewardSettings(),
         fetchStoreSettings(),
-        fetchDriverLocations()
+        fetchDriverLocations(),
+        fetchDeliveryBoys()
       ]);
       if (res) {
         setRewardMinDeliv(res.min_deliveries || 5);
@@ -102,16 +121,48 @@ export function AdminPanel({
       if (locs) {
         setDriverLocations(locs);
       }
+      if (dBoys && dBoys.length > 0) {
+        setDeliveryBoys(dBoys);
+      }
     }
     loadAdminData();
 
-    // 12-second live location refresh interval
-    const interval = setInterval(async () => {
-      const locs = await fetchDriverLocations();
+    // 10-second auto-poll interval for live radar refresh
+    const pollInterval = setInterval(async () => {
+      const [locs, dBoys] = await Promise.all([
+        fetchDriverLocations(),
+        fetchDeliveryBoys()
+      ]);
       if (locs) setDriverLocations(locs);
-    }, 12000);
+      if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
+    }, 10000);
 
-    return () => clearInterval(interval);
+    // Supabase Realtime subscription on delivery_boys
+    let channel = null;
+    if (isSupabaseConfigured) {
+      try {
+        channel = supabase
+          .channel('public:delivery_boys_admin')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'delivery_boys' },
+            async () => {
+              const dBoys = await fetchDeliveryBoys();
+              if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
+            }
+          )
+          .subscribe();
+      } catch (e) {
+        console.warn('Realtime subscription on delivery_boys failed:', e);
+      }
+    }
+
+    return () => {
+      clearInterval(pollInterval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
   const handleSaveRewardSettings = async (e) => {
@@ -180,14 +231,15 @@ export function AdminPanel({
     );
   };
 
-  // Online drivers count for badge (joining driver_locations and delivery_boys)
+  // Online drivers count for badge (using exact rider status formula)
   const onlineDriversCount = useMemo(() => {
-    return drivers.filter((d) => {
-      const loc = driverLocations.find((l) => l.driver_id === d.id || l.driver_name === d.name);
-      const lastSeen = loc?.updated_at || loc?.last_seen_at || d.updated_at || d.last_seen_at;
-      return Boolean(lastSeen && (new Date() - new Date(lastSeen)) < 3 * 60 * 1000);
+    return deliveryBoys.filter((rider) => {
+      const diffMinutes = rider.last_seen_at 
+        ? (Date.now() - new Date(rider.last_seen_at).getTime()) / (1000 * 60) 
+        : 999;
+      return rider.is_online && diffMinutes < 5;
     }).length;
-  }, [drivers, driverLocations]);
+  }, [deliveryBoys]);
 
   // Computed Metrics
   const metrics = useMemo(() => {
@@ -650,57 +702,58 @@ export function AdminPanel({
             </button>
           </div>
 
-          {drivers.length === 0 ? (
+          {deliveryBoys.length === 0 ? (
             <div className="glass-card p-8 text-center rounded-2xl border border-slate-800">
               <Users className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-              <p className="text-slate-300 font-semibold text-sm">No drivers registered yet</p>
+              <p className="text-slate-300 font-semibold text-sm">No delivery boys registered yet</p>
               <p className="text-slate-500 text-xs mt-1">
                 Add your first delivery boy with name, phone, and 4-digit PIN.
               </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {drivers.map((driver) => {
+              {deliveryBoys.map((rider) => {
                 const assignedCount = orders.filter(
-                  (o) => o.assigned_driver_id === driver.id && o.status !== 'Delivered'
+                  (o) => o.assigned_driver_id === rider.id && o.status !== 'Delivered'
                 ).length;
                 const completedCount = orders.filter(
-                  (o) => o.assigned_driver_id === driver.id && o.status === 'Delivered'
+                  (o) => o.assigned_driver_id === rider.id && o.status === 'Delivered'
                 ).length;
 
-                const loc = driverLocations.find(
-                  (l) => l.driver_id === driver.id || l.driver_name === driver.name
-                );
-                const lat = loc?.latitude !== undefined && loc?.latitude !== null
-                  ? Number(loc.latitude)
-                  : (driver.current_lat !== undefined && driver.current_lat !== null ? Number(driver.current_lat) : null);
-                const lng = loc?.longitude !== undefined && loc?.longitude !== null
-                  ? Number(loc.longitude)
-                  : (driver.current_lng !== undefined && driver.current_lng !== null ? Number(driver.current_lng) : null);
+                const diffMinutes = rider.last_seen_at 
+                  ? (Date.now() - new Date(rider.last_seen_at).getTime()) / (1000 * 60) 
+                  : 999;
+                const isOnline = Boolean(rider.is_online) && diffMinutes < 5;
+
+                const lat = rider.current_lat !== undefined && rider.current_lat !== null
+                  ? Number(rider.current_lat)
+                  : null;
+                const lng = rider.current_lng !== undefined && rider.current_lng !== null
+                  ? Number(rider.current_lng)
+                  : null;
                 const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-                const lastSeen = loc?.updated_at || loc?.last_seen_at || driver.updated_at || driver.last_seen_at;
-                const isOnline = Boolean(lastSeen && (new Date() - new Date(lastSeen)) < 3 * 60 * 1000);
+                const lastSeenText = diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`;
 
                 return (
                   <div
-                    key={driver.id}
+                    key={rider.id}
                     className={`glass-card p-4 rounded-2xl border space-y-3 transition-all ${
                       isOnline ? 'border-emerald-500/30 bg-slate-900/90' : 'border-slate-800 bg-slate-950/60'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <h4 className="text-sm font-bold text-white">{driver.name}</h4>
+                        <h4 className="text-sm font-bold text-white">{rider.name}</h4>
                         <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
                           <Phone className="w-3 h-3 text-slate-500" />
-                          <span>{driver.phone}</span>
+                          <span>{rider.phone}</span>
                         </div>
                       </div>
                       <div className="text-right">
                         {isOnline ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            <span>Online</span>
+                            <span>Online (Active)</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
@@ -709,7 +762,7 @@ export function AdminPanel({
                           </span>
                         )}
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          {formatLastSeen(lastSeen)}
+                          {rider.last_seen_at ? lastSeenText : 'No GPS recorded'}
                         </p>
                       </div>
                     </div>
@@ -720,7 +773,7 @@ export function AdminPanel({
                         <span>Driver PIN:</span>
                       </div>
                       <span className="font-mono font-bold tracking-widest text-amber-300 px-2 py-0.5 bg-amber-500/10 rounded-md border border-amber-500/20">
-                        {driver.pin}
+                        {rider.pin || '••••'}
                       </span>
                     </div>
 
@@ -730,7 +783,7 @@ export function AdminPanel({
                         <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
                         {hasCoords ? (
                           <span className="font-mono text-slate-300">
-                            {lat.toFixed(5)}, {lng.toFixed(5)}
+                            {lat.toFixed(4)}, {lng.toFixed(4)}
                           </span>
                         ) : (
                           <span className="text-slate-500 italic">No GPS signal</span>
@@ -771,13 +824,17 @@ export function AdminPanel({
       {/* TAB 3: LIVE FLEET TRACKER */}
       {activeTab === 'fleet' && (
         <LiveFleetTracker
-          drivers={drivers}
+          drivers={deliveryBoys}
           orders={orders}
           driverLocations={driverLocations}
           storeSettings={storeSettings}
           onRefresh={async () => {
-            const locs = await fetchDriverLocations();
+            const [locs, dBoys] = await Promise.all([
+              fetchDriverLocations(),
+              fetchDeliveryBoys()
+            ]);
             if (locs) setDriverLocations(locs);
+            if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
           }}
           loading={loading}
           onOpenStoreSettings={() => {

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Navigation,
   Phone,
@@ -45,6 +45,15 @@ export default function LiveFleetTracker({
   const storeName = storeSettings.store_name || 'Store Central Hub (Ghaziabad)';
   const storeRadius = storeSettings.radius_meters || 150;
 
+  // 10-second auto-poll interval for live radar refresh
+  useEffect(() => {
+    if (!onRefresh) return;
+    const interval = setInterval(() => {
+      onRefresh();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [onRefresh]);
+
   // Build enriched rider data
   const riderCards = useMemo(() => {
     return drivers.map((driver) => {
@@ -53,20 +62,25 @@ export default function LiveFleetTracker({
         (l) => l.driver_id === driver.id || l.driver_name === driver.name
       );
 
-      const lat = loc?.latitude !== undefined && loc?.latitude !== null
-        ? Number(loc.latitude)
-        : (driver.current_lat !== undefined && driver.current_lat !== null ? Number(driver.current_lat) : null);
+      const lat = driver.current_lat !== undefined && driver.current_lat !== null
+        ? Number(driver.current_lat)
+        : (loc?.latitude !== undefined && loc?.latitude !== null ? Number(loc.latitude) : null);
 
-      const lng = loc?.longitude !== undefined && loc?.longitude !== null
-        ? Number(loc.longitude)
-        : (driver.current_lng !== undefined && driver.current_lng !== null ? Number(driver.current_lng) : null);
+      const lng = driver.current_lng !== undefined && driver.current_lng !== null
+        ? Number(driver.current_lng)
+        : (loc?.longitude !== undefined && loc?.longitude !== null ? Number(loc.longitude) : null);
 
       const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-      const lastSeenAt = loc?.updated_at || loc?.last_seen_at || driver.updated_at || driver.last_seen_at || null;
-      // Calculate 'Online' if (new Date() - new Date(driver.updated_at || driver.last_seen_at)) < 3 * 60 * 1000 (within 3 minutes)
-      const isOnline = Boolean(
-        lastSeenAt && (new Date() - new Date(lastSeenAt)) < 3 * 60 * 1000
-      );
+      const lastSeenAt = driver.last_seen_at || loc?.last_seen_at || loc?.updated_at || driver.updated_at || null;
+
+      // Exact rider status formula requested:
+      const diffMinutes = lastSeenAt 
+        ? (Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60) 
+        : 999;
+      const isOnline = Boolean(driver.is_online) && diffMinutes < 5;
+      const lastSeenText = lastSeenAt 
+        ? (diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`)
+        : 'Offline (No GPS signal)';
 
       // Active order currently being delivered by this rider
       const activeOrder = orders.find(
@@ -131,6 +145,8 @@ export default function LiveFleetTracker({
         lng,
         hasCoords,
         lastSeenAt,
+        diffMinutes,
+        lastSeenText,
         isOnline,
         activeOrder,
         pendingAssignedCount: pendingAssigned.length,
@@ -380,7 +396,7 @@ export default function LiveFleetTracker({
                       {isOnline ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>Online</span>
+                          <span>Online (Active)</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
@@ -389,7 +405,7 @@ export default function LiveFleetTracker({
                         </span>
                       )}
                       <p className="text-[10px] text-slate-500 mt-0.5">
-                        {formatLastSeen(rider.lastSeenAt)}
+                        {rider.lastSeenText}
                       </p>
                     </div>
                   </div>
@@ -400,7 +416,7 @@ export default function LiveFleetTracker({
                       <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                       {hasCoords ? (
                         <span className="font-mono text-slate-300 font-semibold text-[11px]">
-                          {rider.lat.toFixed(5)}, {rider.lng.toFixed(5)}
+                          {rider.lat.toFixed(4)}, {rider.lng.toFixed(4)}
                         </span>
                       ) : (
                         <span className="text-slate-500 italic text-[11px]">

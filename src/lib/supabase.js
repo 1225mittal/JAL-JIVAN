@@ -79,8 +79,49 @@ const saveLocalOrders = (orders) => {
 // DRIVER OPERATIONS
 // ==========================================
 
+export async function fetchDeliveryBoys() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_boys')
+        .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
+        .order('name', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchDeliveryBoys error:', err.message);
+    }
+
+    try {
+      const { data: dData, error: dError } = await supabase
+        .from('drivers')
+        .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
+        .order('name', { ascending: true });
+      if (!dError && dData && dData.length > 0) {
+        return dData;
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+  return getLocalDrivers();
+}
+
 export async function fetchDrivers() {
   if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('delivery_boys')
+        .select('*')
+        .order('name', { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    } catch (err) {
+      // ignore
+    }
+
     try {
       const { data, error } = await supabase
         .from('drivers')
