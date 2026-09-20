@@ -88,7 +88,7 @@ const DUMMY_NAMES_AND_ADDRESSES = [
 
 export function isDummyEntry(item) {
   if (!item) return false;
-  const str = `${item.name || ''} ${item.customer_name || ''} ${item.address || ''} ${item.fullAddress || ''} ${item.landmark || ''}`.toLowerCase();
+  const str = `${item.name || ''} ${item.customer_name || ''} ${item.address || ''} ${item.address_line || ''} ${item.fullAddress || ''} ${item.landmark || ''}`.toLowerCase();
   return DUMMY_NAMES_AND_ADDRESSES.some((dummy) => str.includes(dummy));
 }
 
@@ -1132,7 +1132,7 @@ export async function fetchSavedAddresses() {
 
   const addRecord = (item, source) => {
     if (!item) return;
-    const rawAddr = (item.address || item.full_address || item.fullAddress || '').trim();
+    const rawAddr = (item.address_line || item.address || item.full_address || item.fullAddress || '').trim();
     if (!rawAddr) return;
 
     // Defensively exclude any legacy dummy test addresses
@@ -1176,7 +1176,7 @@ export async function fetchSavedAddresses() {
   };
 
   if (isSupabaseConfigured) {
-    // 1. Query past orders from Supabase (as requested)
+    // 1. Query past orders from Supabase (address, landmark, customer_phone, latitude, longitude)
     try {
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
@@ -1191,35 +1191,22 @@ export async function fetchSavedAddresses() {
       console.warn('Supabase fetchSavedAddresses orders query failed:', err.message);
     }
 
-    // 2. Query addresses table
+    // 2. Query addresses table (select id, address_line, landmark, latitude, longitude)
+    // Note: Do NOT order by created_at as it does not exist on addresses table
     try {
       const { data: addrsData, error: addrsError } = await supabase
         .from('addresses')
-        .select('*');
+        .select('id, address_line, landmark, latitude, longitude');
 
       if (!addrsError && Array.isArray(addrsData)) {
         addrsData.forEach((a) => addRecord(a, 'addresses'));
       }
     } catch (err) {
-      // ignore
-    }
-
-    // 3. Query address_book table
-    try {
-      const { data: bookData, error: bookError } = await supabase
-        .from('address_book')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!bookError && Array.isArray(bookData)) {
-        bookData.forEach((b) => addRecord(b, 'address_book'));
-      }
-    } catch (err) {
-      // ignore
+      console.warn('Supabase fetchSavedAddresses addresses query failed:', err.message);
     }
   }
 
-  // 4. Merge clean local orders & address book records
+  // 3. Merge clean local orders & address book records
   const localOrders = getLocalOrders();
   localOrders.forEach((o) => addRecord(o, 'local_orders'));
 
@@ -1230,32 +1217,29 @@ export async function fetchSavedAddresses() {
 }
 
 export async function saveAddressBookEntry(entry) {
-  if (!entry?.address?.trim()) return;
+  const addr = (entry?.address_line || entry?.address || '').trim();
+  if (!addr) return;
   const addressRecord = {
-    id: entry.id || 'addr-' + Date.now(),
-    name: entry.name?.trim() || '',
-    phone: entry.phone?.trim() || '',
-    address: entry.address.trim(),
+    address_line: addr,
     landmark: entry.landmark?.trim() || '',
     latitude: entry.latitude !== undefined && entry.latitude !== null ? Number(entry.latitude) : null,
-    longitude: entry.longitude !== undefined && entry.longitude !== null ? Number(entry.longitude) : null,
-    created_at: new Date().toISOString()
+    longitude: entry.longitude !== undefined && entry.longitude !== null ? Number(entry.longitude) : null
   };
 
   if (isSupabaseConfigured) {
     try {
-      await supabase.from('address_book').insert([addressRecord]);
+      await supabase.from('addresses').insert([addressRecord]);
     } catch (err) {
-      // ignore
+      console.warn('Supabase save address to addresses failed:', err.message);
     }
   }
 
   try {
     const existing = getLocalAddressBook();
     const filtered = existing.filter(
-      (a) => a.address?.trim().toLowerCase() !== addressRecord.address.toLowerCase()
+      (a) => (a.address_line || a.address || '').trim().toLowerCase() !== addressRecord.address_line.toLowerCase()
     );
-    saveLocalAddressBook([addressRecord, ...filtered]);
+    saveLocalAddressBook([{ ...addressRecord, id: entry.id || 'addr-' + Date.now(), address: addressRecord.address_line }, ...filtered]);
   } catch (e) {
     // ignore
   }

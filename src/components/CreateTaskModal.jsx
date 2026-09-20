@@ -64,7 +64,7 @@ export default function CreateTaskModal({
 
         const addRecord = (item) => {
           if (!item) return;
-          const raw = (item.address || item.full_address || item.fullAddress || '').trim();
+          const raw = (item.address_line || item.address || item.full_address || item.fullAddress || '').trim();
           if (!raw) return;
 
           // Strictly filter out any legacy dummy mock entries
@@ -131,7 +131,7 @@ export default function CreateTaskModal({
           try {
             const { data: orderData } = await supabase
               .from('orders')
-              .select('address, landmark, customer_phone, customer_name, latitude, longitude')
+              .select('address, landmark, customer_phone, latitude, longitude')
               .not('address', 'is', null)
               .order('created_at', { ascending: false });
 
@@ -142,27 +142,16 @@ export default function CreateTaskModal({
             console.warn('Orders query in CreateTaskModal failed:', err);
           }
 
-          // 2. Query addresses table
+          // 2. Query addresses table (select id, address_line, landmark, latitude, longitude - NO created_at order)
           try {
-            const { data: addrsData } = await supabase.from('addresses').select('*');
+            const { data: addrsData } = await supabase
+              .from('addresses')
+              .select('id, address_line, landmark, latitude, longitude');
             if (Array.isArray(addrsData)) {
               addrsData.forEach(addRecord);
             }
           } catch (err) {
-            // ignore
-          }
-
-          // 3. Query address_book table
-          try {
-            const { data: bookData } = await supabase
-              .from('address_book')
-              .select('*')
-              .order('created_at', { ascending: false });
-            if (Array.isArray(bookData)) {
-              bookData.forEach(addRecord);
-            }
-          } catch (err) {
-            // ignore
+            console.warn('Addresses query in CreateTaskModal failed:', err);
           }
         }
 
