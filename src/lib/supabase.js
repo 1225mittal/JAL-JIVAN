@@ -3,7 +3,9 @@ import {
   initialDrivers,
   initialOrders,
   initialStoreSettings,
-  initialDriverLocations
+  initialDriverLocations,
+  initialProducts,
+  initialAddressBook
 } from './mockData';
 
 let rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -32,6 +34,50 @@ export const supabase = isSupabaseConfigured
 // Storage keys for demo fallback
 const STORAGE_DRIVERS = 'jal_jivan_drivers';
 const STORAGE_ORDERS = 'jal_jivan_orders';
+const STORAGE_PRODUCTS = 'jal_jivan_products';
+const STORAGE_ADDRESS_BOOK = 'jal_jivan_address_book';
+
+const getLocalProducts = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_PRODUCTS);
+    if (!saved) {
+      localStorage.setItem(STORAGE_PRODUCTS, JSON.stringify(initialProducts));
+      return initialProducts;
+    }
+    return JSON.parse(saved);
+  } catch (e) {
+    return initialProducts;
+  }
+};
+
+const saveLocalProducts = (products) => {
+  try {
+    localStorage.setItem(STORAGE_PRODUCTS, JSON.stringify(products));
+  } catch (e) {
+    console.error('Failed to save products locally', e);
+  }
+};
+
+const getLocalAddressBook = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_ADDRESS_BOOK);
+    if (!saved) {
+      localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(initialAddressBook));
+      return initialAddressBook;
+    }
+    return JSON.parse(saved);
+  } catch (e) {
+    return initialAddressBook;
+  }
+};
+
+const saveLocalAddressBook = (entries) => {
+  try {
+    localStorage.setItem(STORAGE_ADDRESS_BOOK, JSON.stringify(entries));
+  } catch (e) {
+    console.error('Failed to save address book locally', e);
+  }
+};
 
 const getLocalDrivers = () => {
   try {
@@ -234,19 +280,33 @@ export async function fetchOrders() {
   return getLocalOrders();
 }
 
-export async function createOrder({ orderNumber, amount, address, landmark, customerPhone, driverId, driverName, latitude, longitude }) {
+export async function createOrder({
+  orderNumber,
+  amount,
+  address,
+  landmark,
+  customerPhone,
+  customerName,
+  driverId,
+  driverName,
+  latitude,
+  longitude,
+  items = []
+}) {
   const newOrder = {
     id: 'ord-' + Date.now(),
     order_number: orderNumber || `JJ-${Math.floor(1000 + Math.random() * 9000)}`,
     amount: parseFloat(amount) || 0,
     address,
     landmark: landmark || '',
+    customer_name: customerName || '',
     customer_phone: customerPhone || '',
     assigned_driver_id: driverId || null,
     driver_name: driverName || 'Unassigned',
     status: driverId ? 'Out for Delivery' : 'Pending',
     latitude: latitude || null,
     longitude: longitude || null,
+    items: Array.isArray(items) ? items : [],
     payment_method: null,
     payment_proof_url: null,
     delivery_proof_url: null,
@@ -257,24 +317,49 @@ export async function createOrder({ orderNumber, amount, address, landmark, cust
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
+      const insertPayload = {
+        order_number: newOrder.order_number,
+        amount: newOrder.amount,
+        address: newOrder.address,
+        landmark: newOrder.landmark,
+        customer_phone: newOrder.customer_phone,
+        customer_name: newOrder.customer_name,
+        assigned_driver_id: newOrder.assigned_driver_id,
+        driver_name: newOrder.driver_name,
+        status: newOrder.status,
+        latitude: newOrder.latitude,
+        longitude: newOrder.longitude,
+        items: newOrder.items
+      };
+
+      let { data, error } = await supabase
         .from('orders')
-        .insert([{
-          order_number: newOrder.order_number,
-          amount: newOrder.amount,
-          address: newOrder.address,
-          landmark: newOrder.landmark,
-          customer_phone: newOrder.customer_phone,
-          assigned_driver_id: newOrder.assigned_driver_id,
-          driver_name: newOrder.driver_name,
-          status: newOrder.status,
-          latitude: newOrder.latitude,
-          longitude: newOrder.longitude
-        }])
+        .insert([insertPayload])
         .select()
         .single();
+
+      // Graceful retry without items/customer_name if columns are not yet in remote schema
+      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.code === 'PGRST204')) {
+        delete insertPayload.items;
+        delete insertPayload.customer_name;
+        const res = await supabase.from('orders').insert([insertPayload]).select().single();
+        data = res.data;
+        error = res.error;
+      }
+
       if (error) throw error;
-      return data;
+      if (data) {
+        // Also save address book record
+        saveAddressBookEntry({
+          name: newOrder.customer_name,
+          phone: newOrder.customer_phone,
+          address: newOrder.address,
+          landmark: newOrder.landmark,
+          latitude: newOrder.latitude,
+          longitude: newOrder.longitude
+        }).catch(() => {});
+        return { ...newOrder, ...data };
+      }
     } catch (err) {
       console.warn('Supabase createOrder failed, saving locally:', err.message);
     }
@@ -283,6 +368,17 @@ export async function createOrder({ orderNumber, amount, address, landmark, cust
   const orders = getLocalOrders();
   const updated = [newOrder, ...orders];
   saveLocalOrders(updated);
+
+  // Save to local address book
+  saveAddressBookEntry({
+    name: newOrder.customer_name,
+    phone: newOrder.customer_phone,
+    address: newOrder.address,
+    landmark: newOrder.landmark,
+    latitude: newOrder.latitude,
+    longitude: newOrder.longitude
+  }).catch(() => {});
+
   return newOrder;
 }
 
@@ -857,5 +953,255 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
 
   return locationRecord;
 }
+
+// ==========================================
+// PRODUCT CATALOG OPERATIONS
+// ==========================================
+
+export async function fetchProducts() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        if (data.length > 0) return data;
+        // If table exists but empty, check local
+        const local = getLocalProducts();
+        return local.length > 0 ? local : [];
+      }
+    } catch (err) {
+      console.warn('Supabase fetchProducts failed, falling back to local store:', err.message);
+    }
+  }
+  return getLocalProducts();
+}
+
+export async function addProduct({ name, price, unit = '20L Can', imageUrl = '', inStock = true }) {
+  const newProduct = {
+    id: 'prod-' + Date.now(),
+    name: name.trim(),
+    price: parseFloat(price) || 0,
+    unit: unit.trim() || '20L Can',
+    image_url: imageUrl || '',
+    in_stock: Boolean(inStock),
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .insert([{
+          name: newProduct.name,
+          price: newProduct.price,
+          unit: newProduct.unit,
+          image_url: newProduct.image_url,
+          in_stock: newProduct.in_stock
+        }])
+        .select()
+        .single();
+      if (!error && data) {
+        // Also update local
+        const local = getLocalProducts();
+        saveLocalProducts([data, ...local]);
+        return data;
+      }
+      if (error) console.warn('Supabase addProduct warning:', error.message);
+    } catch (err) {
+      console.warn('Supabase addProduct failed, saving locally:', err.message);
+    }
+  }
+
+  const products = getLocalProducts();
+  const updated = [newProduct, ...products];
+  saveLocalProducts(updated);
+  return newProduct;
+}
+
+export async function deleteProduct(productId) {
+  if (isSupabaseConfigured) {
+    try {
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', productId);
+      if (error) console.warn('Supabase deleteProduct error:', error.message);
+    } catch (err) {
+      console.warn('Supabase deleteProduct failed, deleting locally:', err.message);
+    }
+  }
+  const products = getLocalProducts();
+  const updated = products.filter((p) => p.id !== productId);
+  saveLocalProducts(updated);
+  return true;
+}
+
+export async function uploadProductImage(file) {
+  if (!file) throw new Error('No file provided');
+
+  // If Supabase is configured, attempt upload to storage bucket 'product-images'
+  if (isSupabaseConfigured) {
+    try {
+      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const filePath = `catalog/${Date.now()}_${cleanFileName}`;
+
+      const { data, error: uploadError } = await supabase.storage
+        .from('product-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+
+      if (!uploadError && data) {
+        const { data: publicUrlData } = supabase.storage
+          .from('product-images')
+          .getPublicUrl(filePath);
+
+        if (publicUrlData?.publicUrl) {
+          return publicUrlData.publicUrl;
+        }
+      } else if (uploadError) {
+        console.warn('Supabase storage upload failed:', uploadError.message);
+      }
+    } catch (err) {
+      console.warn('uploadProductImage Supabase error, falling back to base64 data URL:', err.message);
+    }
+  }
+
+  // Fallback: read file as Base64 Data URL so images display even without bucket policies
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+// ==========================================
+// ADDRESS BOOK OPERATIONS
+// ==========================================
+
+export async function fetchSavedAddresses() {
+  let dbAddresses = [];
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('address_book')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        dbAddresses = data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchSavedAddresses failed:', err.message);
+    }
+  }
+
+  const localAddrs = getLocalAddressBook();
+  const localOrders = getLocalOrders();
+
+  // Combine and deduplicate by address string (case insensitive)
+  const map = new Map();
+
+  // 1. Database address_book records
+  for (const a of dbAddresses) {
+    if (!a.address?.trim()) continue;
+    const key = a.address.trim().toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        id: a.id,
+        name: a.name || '',
+        phone: a.phone || '',
+        address: a.address.trim(),
+        landmark: a.landmark || '',
+        latitude: a.latitude ?? null,
+        longitude: a.longitude ?? null,
+        source: 'address_book'
+      });
+    }
+  }
+
+  // 2. Local address book records
+  for (const a of localAddrs) {
+    if (!a.address?.trim()) continue;
+    const key = a.address.trim().toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        id: a.id,
+        name: a.name || '',
+        phone: a.phone || '',
+        address: a.address.trim(),
+        landmark: a.landmark || '',
+        latitude: a.latitude ?? null,
+        longitude: a.longitude ?? null,
+        source: 'local'
+      });
+    }
+  }
+
+  // 3. Past unique order addresses
+  for (const o of localOrders) {
+    if (!o.address?.trim()) continue;
+    const key = o.address.trim().toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, {
+        id: 'ord-addr-' + (o.id || Math.random().toString(36).slice(2)),
+        name: o.customer_name || '',
+        phone: o.customer_phone || '',
+        address: o.address.trim(),
+        landmark: o.landmark || '',
+        latitude: o.latitude ?? null,
+        longitude: o.longitude ?? null,
+        source: 'past_order'
+      });
+    } else {
+      const existing = map.get(key);
+      if ((existing.latitude === null || existing.latitude === undefined) && o.latitude) {
+        existing.latitude = o.latitude;
+        existing.longitude = o.longitude;
+      }
+      if (!existing.phone && o.customer_phone) existing.phone = o.customer_phone;
+      if (!existing.name && o.customer_name) existing.name = o.customer_name;
+      if (!existing.landmark && o.landmark) existing.landmark = o.landmark;
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+export async function saveAddressBookEntry(entry) {
+  if (!entry?.address?.trim()) return;
+  const addressRecord = {
+    id: entry.id || 'addr-' + Date.now(),
+    name: entry.name?.trim() || '',
+    phone: entry.phone?.trim() || '',
+    address: entry.address.trim(),
+    landmark: entry.landmark?.trim() || '',
+    latitude: entry.latitude !== undefined && entry.latitude !== null ? Number(entry.latitude) : null,
+    longitude: entry.longitude !== undefined && entry.longitude !== null ? Number(entry.longitude) : null,
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('address_book').insert([addressRecord]);
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  try {
+    const existing = getLocalAddressBook();
+    const filtered = existing.filter(
+      (a) => a.address?.trim().toLowerCase() !== addressRecord.address.toLowerCase()
+    );
+    saveLocalAddressBook([addressRecord, ...filtered]);
+  } catch (e) {
+    // ignore
+  }
+}
+
 
 

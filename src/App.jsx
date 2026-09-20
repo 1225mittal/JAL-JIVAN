@@ -16,7 +16,10 @@ import {
   updateOrderStatus,
   updateOrderLocation,
   completeDelivery,
-  acceptOrderDelivery
+  acceptOrderDelivery,
+  fetchProducts,
+  addProduct,
+  deleteProduct
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
@@ -89,6 +92,7 @@ export default function App() {
   // Data State
   const [drivers, setDrivers] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Authenticated Driver State
@@ -120,12 +124,14 @@ export default function App() {
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
-      const [driversData, ordersData] = await Promise.all([
+      const [driversData, ordersData, productsData] = await Promise.all([
         fetchDrivers(),
-        fetchOrders()
+        fetchOrders(),
+        fetchProducts()
       ]);
       setDrivers(driversData || []);
       setOrders(ordersData || []);
+      setProducts(productsData || []);
     } catch (err) {
       console.error('Error loading data:', err);
       showToast('Failed to load live data', 'error');
@@ -177,6 +183,31 @@ export default function App() {
       return created;
     } catch (err) {
       showToast(err.message || 'Error creating task', 'error');
+      throw err;
+    }
+  };
+
+  // Add Product (Admin)
+  const handleAddProduct = async (productData) => {
+    try {
+      const created = await addProduct(productData);
+      setProducts((prev) => [created, ...prev]);
+      showToast(`Product "${created.name}" added to catalog!`, 'success');
+      return created;
+    } catch (err) {
+      showToast(err.message || 'Error adding product', 'error');
+      throw err;
+    }
+  };
+
+  // Delete Product (Admin)
+  const handleDeleteProduct = async (productId) => {
+    try {
+      await deleteProduct(productId);
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      showToast('Product deleted from catalog', 'info');
+    } catch (err) {
+      showToast(err.message || 'Error deleting product', 'error');
       throw err;
     }
   };
@@ -318,11 +349,14 @@ export default function App() {
             <AdminDashboard
               orders={orders}
               drivers={drivers}
+              products={products}
               loading={loading}
               onOpenAddDriver={() => setIsAddDriverOpen(true)}
               onOpenCreateTask={() => setIsCreateTaskOpen(true)}
               onUpdateStatus={handleUpdateStatus}
               onAssignDriver={handleAssignDriver}
+              onAddProduct={handleAddProduct}
+              onDeleteProduct={handleDeleteProduct}
               onRefresh={loadInitialData}
               onLogout={handleAdminLogout}
             />
@@ -355,6 +389,7 @@ export default function App() {
         isOpen={isCreateTaskOpen}
         onClose={() => setIsCreateTaskOpen(false)}
         drivers={drivers}
+        products={products}
         onCreateTask={handleCreateTask}
       />
 

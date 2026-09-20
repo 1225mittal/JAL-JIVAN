@@ -908,6 +908,18 @@ export default function DriverPortal({
                             <span>Landmark: {order.landmark}</span>
                           </div>
                         )}
+                        {Array.isArray(order.items) && order.items.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1 pl-5">
+                            {order.items.map((item, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-semibold text-emerald-300"
+                              >
+                                {item.quantity}x {item.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Action Button: Accept Delivery */}
@@ -1006,6 +1018,19 @@ export default function DriverPortal({
                           <p className="text-[11px] text-slate-300 italic pl-6">
                             Note: &ldquo;{order.notes}&rdquo;
                           </p>
+                        )}
+
+                        {Array.isArray(order.items) && order.items.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1 pl-6">
+                            {order.items.map((item, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-bold text-emerald-300"
+                              >
+                                {item.quantity}x {item.name}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
 

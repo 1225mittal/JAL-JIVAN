@@ -246,3 +246,114 @@ export const initialOrders = [
     created_at: minutesAgo(430),
   },
 ];
+
+export const initialProducts = [
+  {
+    id: 'prod-001',
+    name: '20L RO Purified Water Jar',
+    price: 50.0,
+    unit: '20L Can',
+    image_url: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'prod-002',
+    name: '20L Premium Mineral Water Can',
+    price: 90.0,
+    unit: '20L Can',
+    image_url: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'prod-003',
+    name: '1L Packaged Water (Box of 12)',
+    price: 180.0,
+    unit: '12x 1L Pack',
+    image_url: 'https://images.unsplash.com/photo-1564419320461-6870880221ad?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'prod-004',
+    name: '500ml Bottled Water (Box of 24)',
+    price: 240.0,
+    unit: '24x 500ml Pack',
+    image_url: 'https://images.unsplash.com/photo-1523362628745-0c100150b504?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'prod-005',
+    name: 'Manual Water Dispenser Hand Pump',
+    price: 120.0,
+    unit: '1 Piece',
+    image_url: 'https://images.unsplash.com/photo-1589365278144-c9e705f843ba?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'prod-006',
+    name: 'Countertop Water Jar Tap & Stand',
+    price: 280.0,
+    unit: '1 Set',
+    image_url: 'https://images.unsplash.com/photo-1584905066893-7d5c142ba4e1?w=300&auto=format&fit=crop&q=80',
+    in_stock: true,
+    created_at: new Date().toISOString()
+  }
+];
+
+export const initialAddressBook = [
+  {
+    id: 'addr-001',
+    name: 'Vikas Gupta',
+    phone: '9810012345',
+    address: 'Plot 42, Green Avenue, Sector 14',
+    landmark: 'Near Mother Dairy Booth',
+    latitude: 28.6620,
+    longitude: 77.4480,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'addr-002',
+    name: 'Pooja Verma',
+    phone: '9871198765',
+    address: 'Flat 304, Royal Palms Heights, Tower B',
+    landmark: 'Opposite City Mall Gate 2',
+    latitude: 28.6740,
+    longitude: 77.4610,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'addr-003',
+    name: 'Rajesh Sharma',
+    phone: '9818812345',
+    address: 'Shop 12, Main Market, Raj Nagar',
+    landmark: 'Behind SBI Branch',
+    latitude: 28.6810,
+    longitude: 77.4420,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'addr-004',
+    name: 'Anita Devi',
+    phone: '9910045678',
+    address: 'B-15, Kavi Nagar, C-Block',
+    landmark: 'Near Diamond Palace',
+    latitude: 28.6550,
+    longitude: 77.4560,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'addr-005',
+    name: 'Sanjay Malik',
+    phone: '9899123456',
+    address: 'House 88, Shanti Kunj, Vasundhara Sector 3',
+    landmark: 'Near Bal Bharti School',
+    latitude: 28.6680,
+    longitude: 77.3850,
+    created_at: new Date().toISOString()
+  }
+];
+

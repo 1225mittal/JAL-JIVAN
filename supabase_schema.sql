@@ -92,3 +92,59 @@ ALTER TABLE public.driver_locations ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public access to driver_locations" ON public.driver_locations;
 CREATE POLICY "Public access to driver_locations" ON public.driver_locations FOR ALL USING (true) WITH CHECK (true);
 
+-- 7. Add items JSONB column to Orders if not already present
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_name TEXT;
+
+-- 8. Create Address Book Table
+CREATE TABLE IF NOT EXISTS public.address_book (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    name TEXT,
+    phone TEXT,
+    address TEXT NOT NULL,
+    landmark TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION
+);
+
+ALTER TABLE public.address_book ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access to address_book" ON public.address_book;
+CREATE POLICY "Public access to address_book" ON public.address_book FOR ALL USING (true) WITH CHECK (true);
+
+-- 9. Create Products Table
+CREATE TABLE IF NOT EXISTS public.products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    name TEXT NOT NULL,
+    price NUMERIC(10, 2) NOT NULL DEFAULT 0.00,
+    unit TEXT NOT NULL DEFAULT '20L Can',
+    image_url TEXT,
+    in_stock BOOLEAN NOT NULL DEFAULT true
+);
+
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access to products" ON public.products;
+CREATE POLICY "Public access to products" ON public.products FOR ALL USING (true) WITH CHECK (true);
+
+-- 10. Create Storage Bucket for 'product-images'
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Allow public uploads to product-images" ON storage.objects;
+CREATE POLICY "Allow public uploads to product-images" ON storage.objects 
+FOR INSERT WITH CHECK (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Allow public select on product-images" ON storage.objects;
+CREATE POLICY "Allow public select on product-images" ON storage.objects 
+FOR SELECT USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Allow public update on product-images" ON storage.objects;
+CREATE POLICY "Allow public update on product-images" ON storage.objects 
+FOR UPDATE USING (bucket_id = 'product-images');
+
+DROP POLICY IF EXISTS "Allow public delete on product-images" ON storage.objects;
+CREATE POLICY "Allow public delete on product-images" ON storage.objects 
+FOR DELETE USING (bucket_id = 'product-images');
+

@@ -27,7 +27,8 @@ import {
   Building2,
   Radio,
   Crosshair,
-  Navigation
+  Navigation,
+  Package
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -43,21 +44,25 @@ import {
 import { isDriverOnline, formatLastSeen } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 import LiveFleetTracker from './LiveFleetTracker';
+import ProductCatalog from './ProductCatalog';
 
 export function AdminPanel({
   orders = [],
   drivers = [],
+  products = [],
   onOpenAddDriver,
   onOpenCreateTask,
   onUpdateStatus,
   onAssignDriver,
+  onAddProduct,
+  onDeleteProduct,
   onRefresh,
   loading,
   onLogout
 }) {
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'Pending' | 'Out for Delivery' | 'Delivered'
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'addresses' | 'analytics'
+  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'fleet' | 'addresses' | 'products' | 'analytics'
   const [viewProofOrder, setViewProofOrder] = useState(null);
   const [selectedAddressForDetail, setSelectedAddressForDetail] = useState(null);
 
@@ -494,6 +499,19 @@ export function AdminPanel({
           </button>
 
           <button
+            id="admin-products-tab"
+            onClick={() => setActiveTab('products')}
+            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+              activeTab === 'products'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            <span>Products ({products.length})</span>
+          </button>
+
+          <button
             id="admin-analytics-tab"
             onClick={() => setActiveTab('analytics')}
             className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
@@ -642,6 +660,20 @@ export function AdminPanel({
                       {order.customer_phone && (
                         <div className="text-[11px] text-slate-400 pl-5">
                           Customer Phone (Admin): <span className="text-slate-300">{order.customer_phone}</span>
+                        </div>
+                      )}
+
+                      {/* Order Items Badge */}
+                      {Array.isArray(order.items) && order.items.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pl-5 pt-1">
+                          {order.items.map((item, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 rounded-md bg-slate-800/90 border border-slate-700/80 text-[10px] font-semibold text-emerald-300"
+                            >
+                              {item.quantity}x {item.name}
+                            </span>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -873,6 +905,16 @@ export function AdminPanel({
         <AddressBook
           orders={orders}
           onViewProof={(order) => setViewProofOrder(order)}
+        />
+      )}
+
+      {/* TAB 5: PRODUCT CATALOG MANAGEMENT */}
+      {activeTab === 'products' && (
+        <ProductCatalog
+          products={products}
+          onAddProduct={onAddProduct}
+          onDeleteProduct={onDeleteProduct}
+          loading={loading}
         />
       )}
 
