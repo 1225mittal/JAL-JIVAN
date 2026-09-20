@@ -28,6 +28,39 @@ export const initialDrivers = [
 const now = Date.now();
 const minutesAgo = (m) => new Date(now - m * 60000).toISOString();
 
+export const initialStoreSettings = {
+  id: 'main_store',
+  store_name: 'Store Central Hub (Ghaziabad)',
+  latitude: 28.6692,
+  longitude: 77.4538,
+  radius_meters: 150,
+  updated_at: new Date().toISOString()
+};
+
+export const initialDriverLocations = [
+  {
+    driver_id: 'd1a10001-0000-0000-0000-000000000001',
+    driver_name: 'Ramesh Kumar',
+    latitude: 28.6655,
+    longitude: 77.4502,
+    last_seen_at: minutesAgo(0.3)
+  },
+  {
+    driver_id: 'd1a10002-0000-0000-0000-000000000002',
+    driver_name: 'Suresh Sharma',
+    latitude: 28.6681,
+    longitude: 77.4525,
+    last_seen_at: minutesAgo(0.8)
+  },
+  {
+    driver_id: 'd1a10003-0000-0000-0000-000000000003',
+    driver_name: 'Amit Patel',
+    latitude: 28.6720,
+    longitude: 77.4410,
+    last_seen_at: minutesAgo(25)
+  }
+];
+
 export const initialOrders = [
   {
     id: 'ord-0001',

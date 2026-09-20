@@ -59,3 +59,36 @@ FOR INSERT WITH CHECK (bucket_id = 'delivery-proofs');
 DROP POLICY IF EXISTS "Allow public select on delivery-proofs" ON storage.objects;
 CREATE POLICY "Allow public select on delivery-proofs" ON storage.objects 
 FOR SELECT USING (bucket_id = 'delivery-proofs');
+
+-- 5. Create Store Hub Settings Table (Single row for main store geofence)
+CREATE TABLE IF NOT EXISTS public.store_settings (
+    id TEXT PRIMARY KEY DEFAULT 'main_store',
+    store_name TEXT NOT NULL DEFAULT 'Store Central Hub (Ghaziabad)',
+    latitude DOUBLE PRECISION NOT NULL DEFAULT 28.6692,
+    longitude DOUBLE PRECISION NOT NULL DEFAULT 77.4538,
+    radius_meters INTEGER NOT NULL DEFAULT 150,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.store_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access to store_settings" ON public.store_settings;
+CREATE POLICY "Public access to store_settings" ON public.store_settings FOR ALL USING (true) WITH CHECK (true);
+
+INSERT INTO public.store_settings (id, store_name, latitude, longitude, radius_meters)
+VALUES ('main_store', 'Store Central Hub (Ghaziabad)', 28.6692, 77.4538, 150)
+ON CONFLICT (id) DO NOTHING;
+
+-- 6. Create Live Driver Locations Table
+CREATE TABLE IF NOT EXISTS public.driver_locations (
+    driver_id UUID PRIMARY KEY REFERENCES public.drivers(id) ON DELETE CASCADE,
+    driver_name TEXT,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    last_seen_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.driver_locations ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access to driver_locations" ON public.driver_locations;
+CREATE POLICY "Public access to driver_locations" ON public.driver_locations FOR ALL USING (true) WITH CHECK (true);
+

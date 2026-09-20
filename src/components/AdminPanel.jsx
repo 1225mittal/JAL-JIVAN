@@ -24,10 +24,22 @@ import {
   TrendingUp,
   Check,
   BookOpen,
-  Building2
+  Building2,
+  Radio,
+  Crosshair,
+  Navigation
 } from 'lucide-react';
-import { fetchRewardSettings, saveRewardSettings } from '../lib/supabase';
+import {
+  fetchRewardSettings,
+  saveRewardSettings,
+  fetchStoreSettings,
+  saveStoreSettings,
+  fetchDriverLocations,
+  defaultStoreSettings
+} from '../lib/supabase';
+import { isDriverOnline } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
+import LiveFleetTracker from './LiveFleetTracker';
 
 export function AdminPanel({
   orders = [],
@@ -55,15 +67,51 @@ export function AdminPanel({
   const [rewardSaved, setRewardSaved] = useState(false);
   const [savingReward, setSavingReward] = useState(false);
 
+  // Store Hub Settings State
+  const [storeSettings, setStoreSettings] = useState(defaultStoreSettings);
+  const [storeName, setStoreName] = useState('Store Central Hub (Ghaziabad)');
+  const [storeLat, setStoreLat] = useState(28.6692);
+  const [storeLng, setStoreLng] = useState(77.4538);
+  const [storeRadius, setStoreRadius] = useState(150);
+  const [savingStore, setSavingStore] = useState(false);
+  const [storeSaved, setStoreSaved] = useState(false);
+  const [gpsDetecting, setGpsDetecting] = useState(false);
+  const [gpsMessage, setGpsMessage] = useState('');
+
+  // Live Driver Locations
+  const [driverLocations, setDriverLocations] = useState([]);
+
   useEffect(() => {
-    async function loadRewards() {
-      const res = await fetchRewardSettings();
+    async function loadAdminData() {
+      const [res, hub, locs] = await Promise.all([
+        fetchRewardSettings(),
+        fetchStoreSettings(),
+        fetchDriverLocations()
+      ]);
       if (res) {
         setRewardMinDeliv(res.min_deliveries || 5);
         setRewardStars(res.stars_rewarded || 1);
       }
+      if (hub) {
+        setStoreSettings(hub);
+        setStoreName(hub.store_name || 'Store Central Hub (Ghaziabad)');
+        setStoreLat(Number(hub.latitude) || 28.6692);
+        setStoreLng(Number(hub.longitude) || 77.4538);
+        setStoreRadius(Number(hub.radius_meters) || 150);
+      }
+      if (locs) {
+        setDriverLocations(locs);
+      }
     }
-    loadRewards();
+    loadAdminData();
+
+    // 12-second live location refresh interval
+    const interval = setInterval(async () => {
+      const locs = await fetchDriverLocations();
+      if (locs) setDriverLocations(locs);
+    }, 12000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleSaveRewardSettings = async (e) => {
@@ -82,6 +130,63 @@ export function AdminPanel({
       setSavingReward(false);
     }
   };
+
+  // Save Store Location & Geofence
+  const handleSaveStoreLocation = async (e) => {
+    e?.preventDefault();
+    setSavingStore(true);
+    try {
+      const updated = await saveStoreSettings({
+        storeName,
+        latitude: storeLat,
+        longitude: storeLng,
+        radiusMeters: storeRadius
+      });
+      setStoreSettings(updated);
+      setStoreSaved(true);
+      setTimeout(() => setStoreSaved(false), 2500);
+    } catch (err) {
+      console.error('Failed saving store settings', err);
+    } finally {
+      setSavingStore(false);
+    }
+  };
+
+  // Use Current Admin GPS
+  const handleUseAdminGps = () => {
+    if (!navigator.geolocation) {
+      setGpsMessage('Geolocation is not supported by your browser.');
+      return;
+    }
+    setGpsDetecting(true);
+    setGpsMessage('');
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        setStoreLat(lat);
+        setStoreLng(lng);
+        setGpsDetecting(false);
+        setGpsMessage(`📍 Detected Admin GPS: ${lat}, ${lng}`);
+        setTimeout(() => setGpsMessage(''), 4000);
+      },
+      (err) => {
+        setGpsDetecting(false);
+        setGpsMessage('GPS detection failed: ' + (err.message || 'Permission denied'));
+        setTimeout(() => setGpsMessage(''), 4000);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Online drivers count for badge
+  const onlineDriversCount = useMemo(() => {
+    return drivers.filter((d) => {
+      const loc = driverLocations.find((l) => l.driver_id === d.id);
+      return isDriverOnline(loc?.last_seen_at || loc?.updated_at);
+    }).length;
+  }, [drivers, driverLocations]);
 
   // Computed Metrics
   const metrics = useMemo(() => {
@@ -281,6 +386,27 @@ export function AdminPanel({
           </button>
 
           <button
+            id="admin-fleet-tab"
+            onClick={() => setActiveTab('fleet')}
+            className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
+              activeTab === 'fleet'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Radio className="w-4 h-4" />
+            <span>Live Fleet Tracker</span>
+            {onlineDriversCount > 0 ? (
+              <span className="flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {onlineDriversCount}
+              </span>
+            ) : (
+              <span className="text-[10px] text-slate-500 font-normal">({drivers.length})</span>
+            )}
+          </button>
+
+          <button
             id="admin-addresses-tab"
             onClick={() => setActiveTab('addresses')}
             className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all ${
@@ -303,7 +429,7 @@ export function AdminPanel({
             }`}
           >
             <BarChart3 className="w-4 h-4" />
-            <span>Delivery Analytics</span>
+            <span>Settings & Analytics</span>
           </button>
         </div>
 
@@ -587,7 +713,29 @@ export function AdminPanel({
         </div>
       )}
 
-      {/* TAB 3: ADDRESS BOOK DIRECTORY */}
+      {/* TAB 3: LIVE FLEET TRACKER */}
+      {activeTab === 'fleet' && (
+        <LiveFleetTracker
+          drivers={drivers}
+          orders={orders}
+          driverLocations={driverLocations}
+          storeSettings={storeSettings}
+          onRefresh={async () => {
+            const locs = await fetchDriverLocations();
+            if (locs) setDriverLocations(locs);
+          }}
+          loading={loading}
+          onOpenStoreSettings={() => {
+            setActiveTab('analytics');
+            setTimeout(() => {
+              const el = document.getElementById('store-hub-settings-section');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }}
+        />
+      )}
+
+      {/* TAB 4: ADDRESS BOOK DIRECTORY */}
       {activeTab === 'addresses' && (
         <AddressBook
           orders={orders}
@@ -595,10 +743,144 @@ export function AdminPanel({
         />
       )}
 
-      {/* TAB 4: DELIVERY ANALYTICS & VARIANCE */}
+      {/* TAB 5: DELIVERY ANALYTICS & STORE SETTINGS */}
       {activeTab === 'analytics' && (
         <div className="space-y-5 animate-fade-in">
-          {/* 1. Driver Star Reward Rules Configuration */}
+          {/* Section A: Store Hub & Attendance Geofence Settings */}
+          <div id="store-hub-settings-section" className="glass-card p-5 rounded-2xl border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Store Hub Location & Attendance Geofence</h3>
+                  <p className="text-xs text-slate-400">
+                    Configure central store GPS coordinates and punch-in radius threshold (persisted in store_settings).
+                  </p>
+                </div>
+              </div>
+
+              {storeSaved && (
+                <span className="text-xs font-semibold text-emerald-300 bg-emerald-500/20 border border-emerald-500/40 px-3 py-1 rounded-full flex items-center gap-1 animate-fade-in">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Store Location Saved & Active!</span>
+                </span>
+              )}
+            </div>
+
+            {gpsMessage && (
+              <div className="p-2.5 rounded-xl bg-slate-800/80 border border-slate-700 text-xs text-emerald-300 flex items-center gap-2">
+                <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{gpsMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStoreLocation} className="space-y-3 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Store Name */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Store Hub Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={storeName}
+                    onChange={(e) => setStoreName(e.target.value)}
+                    placeholder="e.g. Ghaziabad Central Store"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Latitude */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={storeLat}
+                    onChange={(e) => setStoreLat(parseFloat(e.target.value) || 0)}
+                    placeholder="28.6692"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Longitude */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={storeLng}
+                    onChange={(e) => setStoreLng(parseFloat(e.target.value) || 0)}
+                    placeholder="77.4538"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Radius in Meters */}
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Geofence Radius (Meters)
+                  </label>
+                  <input
+                    type="number"
+                    min="20"
+                    max="10000"
+                    required
+                    value={storeRadius}
+                    onChange={(e) => setStoreRadius(parseInt(e.target.value) || 150)}
+                    placeholder="150"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-amber-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={handleUseAdminGps}
+                  disabled={gpsDetecting}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold rounded-xl transition flex items-center gap-1.5"
+                >
+                  <Crosshair className={`w-3.5 h-3.5 text-emerald-400 ${gpsDetecting ? 'animate-spin' : ''}`} />
+                  <span>{gpsDetecting ? 'Detecting Admin GPS...' : 'Use Current Admin GPS'}</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`https://www.google.com/maps?q=${storeLat},${storeLng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold rounded-xl transition flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>View Hub on Maps</span>
+                  </a>
+
+                  <button
+                    id="admin-save-store-settings-btn"
+                    type="submit"
+                    disabled={savingStore}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-emerald-500/20 active:scale-[0.98] disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{savingStore ? 'Saving...' : 'Save Store Location'}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          {/* Section B: Driver Star Reward Rules Configuration */}
           <div className="glass-card p-5 rounded-2xl border border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">

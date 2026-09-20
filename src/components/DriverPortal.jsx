@@ -29,49 +29,15 @@ import {
   acceptOrderDelivery,
   fetchRewardSettings,
   recordDriverAttendance,
-  checkDriverAttendanceToday
+  checkDriverAttendanceToday,
+  fetchStoreSettings,
+  updateDriverLocation,
+  defaultStoreSettings
 } from '../lib/supabase';
-
-// Store Hub Geofence Location (Ghaziabad Store Central Hub)
-const STORE_HUB = {
-  lat: 28.6692,
-  lng: 77.4538,
-  name: 'Store Central Hub (Ghaziabad)'
-};
-const GEOFENCE_RADIUS_METERS = 150;
-
-// Haversine formula to calculate distance in meters
-function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-  const R = 6371e3; // Earth radius in meters
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
-}
-
-// Calculate road speed ETA for an order: 25 km/h city average speed + 1.3x winding factor + 5 min prep
-function calculateEtaMinutes(destLat, destLng, driverLat = STORE_HUB.lat, driverLng = STORE_HUB.lng) {
-  if (!destLat || !destLng) return 15; // default fallback
-  const R = 6371; // Earth radius in km
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(destLat - driverLat);
-  const dLon = toRad(destLng - driverLng);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(driverLat)) * Math.cos(toRad(destLat)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distKm = R * c;
-
-  const drivingTimeHours = (distKm * 1.3) / 25;
-  return Math.max(5, Math.round(drivingTimeHours * 60) + 5);
-}
+import {
+  calculateDistanceMeters,
+  calculateEtaMinutes
+} from '../lib/geoUtils';
 
 export default function DriverPortal({
   currentDriver,
@@ -98,6 +64,15 @@ export default function DriverPortal({
   const [gpsError, setGpsError] = useState(null);
 
   // Attendance Geofence State
+  const [storeHub, setStoreHub] = useState(() => {
+    try {
+      const saved = localStorage.getItem('jal_jivan_store_settings');
+      return saved ? JSON.parse(saved) : defaultStoreSettings;
+    } catch {
+      return defaultStoreSettings;
+    }
+  });
+
   const [isPunchedIn, setIsPunchedIn] = useState(() => {
     if (!currentDriver) return false;
     try {
@@ -120,13 +95,17 @@ export default function DriverPortal({
   const [hasGps, setHasGps] = useState(true);
   const [guardDismissed, setGuardDismissed] = useState(false);
 
-  // Load Reward Settings
+  // Load Reward Settings & Dynamic Store Hub Geofence
   useEffect(() => {
-    async function loadRewards() {
-      const rules = await fetchRewardSettings();
+    async function loadInitialSettings() {
+      const [rules, hub] = await Promise.all([
+        fetchRewardSettings(),
+        fetchStoreSettings()
+      ]);
       if (rules) setRewardRule(rules);
+      if (hub) setStoreHub(hub);
     }
-    loadRewards();
+    loadInitialSettings();
   }, []);
 
   // Check Attendance on Load
@@ -200,8 +179,8 @@ export default function DriverPortal({
         const dist = calculateDistanceMeters(
           latitude,
           longitude,
-          STORE_HUB.lat,
-          STORE_HUB.lng
+          storeHub.latitude,
+          storeHub.longitude
         );
         setHubDistance(dist);
         setVerifyingLocation(false);
@@ -212,7 +191,7 @@ export default function DriverPortal({
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, []);
+  }, [storeHub.latitude, storeHub.longitude]);
 
   useEffect(() => {
     if (currentDriver && !isPunchedIn) {
@@ -220,17 +199,90 @@ export default function DriverPortal({
     }
   }, [currentDriver, isPunchedIn, verifyHubDistance]);
 
+  // Real-Time Rider Location Tracking (Active on Duty)
+  useEffect(() => {
+    if (!currentDriver || !isPunchedIn) return;
+
+    let watchId = null;
+    let timerId = null;
+
+    const pushLocation = (lat, lng) => {
+      if (lat === null || lat === undefined || lng === null || lng === undefined) return;
+      updateDriverLocation({
+        driverId: currentDriver.id,
+        driverName: currentDriver.name,
+        latitude: lat,
+        longitude: lng
+      }).catch((e) => console.warn('Silent driver location update error', e));
+    };
+
+    // If we already have live coords, push immediately
+    if (driverCoords?.lat && driverCoords?.lng) {
+      pushLocation(driverCoords.lat, driverCoords.lng);
+    }
+
+    if ('geolocation' in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          setDriverCoords({ lat: latitude, lng: longitude });
+          pushLocation(latitude, longitude);
+        },
+        (err) => console.warn('Driver geolocation watch warning:', err),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+    }
+
+    // 15-second recurring interval
+    timerId = setInterval(() => {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            setDriverCoords({ lat: latitude, lng: longitude });
+            pushLocation(latitude, longitude);
+          },
+          () => {
+            if (driverCoords?.lat && driverCoords?.lng) {
+              pushLocation(driverCoords.lat, driverCoords.lng);
+            }
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      } else if (driverCoords?.lat && driverCoords?.lng) {
+        pushLocation(driverCoords.lat, driverCoords.lng);
+      }
+    }, 15000);
+
+    return () => {
+      if (watchId && navigator.geolocation?.clearWatch) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if (timerId) {
+        clearInterval(timerId);
+      }
+    };
+  }, [currentDriver, isPunchedIn, driverCoords?.lat, driverCoords?.lng]);
+
   // Punch In Handler
   const handlePunchIn = async (overrideLat = null, overrideLng = null) => {
     setVerifyingLocation(true);
-    const lat = overrideLat || driverCoords?.lat || STORE_HUB.lat;
-    const lng = overrideLng || driverCoords?.lng || STORE_HUB.lng;
+    const lat = overrideLat !== null ? overrideLat : driverCoords?.lat || storeHub.latitude;
+    const lng = overrideLng !== null ? overrideLng : driverCoords?.lng || storeHub.longitude;
 
     try {
       await recordDriverAttendance({
         driverId: currentDriver.id,
         checkInLat: lat,
         checkInLng: lng
+      });
+
+      // Immediately sync driver location
+      await updateDriverLocation({
+        driverId: currentDriver.id,
+        driverName: currentDriver.name,
+        latitude: lat,
+        longitude: lng
       });
 
       setIsPunchedIn(true);
@@ -243,6 +295,16 @@ export default function DriverPortal({
       setLocationError('Failed to record attendance: ' + err.message);
     } finally {
       setVerifyingLocation(false);
+    }
+  };
+
+  // Punch Out Handler
+  const handlePunchOut = () => {
+    setIsPunchedIn(false);
+    try {
+      localStorage.removeItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
+    } catch (e) {
+      // ignore
     }
   };
 
@@ -478,8 +540,8 @@ export default function DriverPortal({
     );
   }
 
-  // Determine if driver is within geofence radius (<= 150m)
-  const isInsideHubGeofence = hubDistance !== null && hubDistance <= GEOFENCE_RADIUS_METERS;
+  // Determine if driver is within geofence radius (<= storeHub.radius_meters)
+  const isInsideHubGeofence = hubDistance !== null && hubDistance <= (storeHub.radius_meters || 150);
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
@@ -513,7 +575,7 @@ export default function DriverPortal({
             </button>
             <button
               onClick={() => setGuardDismissed(true)}
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition"
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-white rounded-xl text-xs font-semibold transition"
             >
               Bypass for Browser Testing
             </button>
@@ -545,14 +607,27 @@ export default function DriverPortal({
             </div>
           </div>
 
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-400 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/10 border border-slate-700/80 transition-all font-medium"
-            title="Log out from driver portal"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Exit</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {isPunchedIn && (
+              <button
+                onClick={handlePunchOut}
+                className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 py-1.5 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all font-medium"
+                title="Punch out from duty"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Punch Out</span>
+              </button>
+            )}
+
+            <button
+              onClick={onLogout}
+              className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-400 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/10 border border-slate-700/80 transition-all font-medium"
+              title="Log out from driver portal"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Exit</span>
+            </button>
+          </div>
         </div>
 
         {/* Feature 2: Daily Deliveries & Star Rewards Badge */}
@@ -594,7 +669,7 @@ export default function DriverPortal({
           <div>
             <h3 className="text-base font-bold text-white">Daily Attendance Check-In</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-              Drivers must punch in at the store hub ({STORE_HUB.name}) before viewing or accepting delivery orders.
+              Drivers must punch in at the store hub ({storeHub.store_name}) before viewing or accepting delivery orders.
             </p>
           </div>
 
@@ -608,11 +683,10 @@ export default function DriverPortal({
               }`}
             >
               {isInsideHubGeofence ? (
-                <span>📍 Verified at store hub ({hubDistance}m away, within {GEOFENCE_RADIUS_METERS}m).</span>
+                <span>📍 Verified at {storeHub.store_name} ({hubDistance}m away, within {storeHub.radius_meters}m).</span>
               ) : (
                 <span>
-                  ⚠️ You are {hubDistance} meters away. You must be at the store hub to punch in (maximum allowed is{' '}
-                  {GEOFENCE_RADIUS_METERS}m).
+                  ⚠️ You are {hubDistance} meters away from {storeHub.store_name}. Move closer to punch in.
                 </span>
               )}
             </div>
@@ -668,7 +742,7 @@ export default function DriverPortal({
           <div className="pt-2 border-t border-slate-800/80 text-center">
             <button
               type="button"
-              onClick={() => handlePunchIn(STORE_HUB.lat, STORE_HUB.lng)}
+              onClick={() => handlePunchIn(storeHub.latitude, storeHub.longitude)}
               className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1.5 py-1 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all"
             >
               <Sparkles className="w-3.5 h-3.5" />

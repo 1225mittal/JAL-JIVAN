@@ -1,5 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
-import { initialDrivers, initialOrders } from './mockData';
+import {
+  initialDrivers,
+  initialOrders,
+  initialStoreSettings,
+  initialDriverLocations
+} from './mockData';
 
 let rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const rawAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -516,4 +521,160 @@ export async function checkDriverAttendanceToday(driverId) {
     return false;
   }
 }
+
+// ==========================================
+// STORE HUB SETTINGS & GEOFENCE
+// ==========================================
+
+const STORAGE_STORE_SETTINGS = 'jal_jivan_store_settings';
+
+export const defaultStoreSettings = initialStoreSettings;
+
+export async function fetchStoreSettings() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('store_settings')
+        .select('*')
+        .eq('id', 'main_store')
+        .maybeSingle();
+      if (!error && data) {
+        return {
+          id: data.id || 'main_store',
+          store_name: data.store_name || 'Store Central Hub (Ghaziabad)',
+          latitude: Number(data.latitude) || 28.6692,
+          longitude: Number(data.longitude) || 77.4538,
+          radius_meters: Number(data.radius_meters) || 150,
+          updated_at: data.updated_at || new Date().toISOString()
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase fetchStoreSettings failed, using local store:', err.message);
+    }
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(STORAGE_STORE_SETTINGS);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+      localStorage.setItem(STORAGE_STORE_SETTINGS, JSON.stringify(defaultStoreSettings));
+    }
+    return defaultStoreSettings;
+  } catch (e) {
+    return defaultStoreSettings;
+  }
+}
+
+export async function saveStoreSettings({ storeName, latitude, longitude, radiusMeters }) {
+  const settings = {
+    id: 'main_store',
+    store_name: storeName ? storeName.trim() : 'Store Central Hub (Ghaziabad)',
+    latitude: Number(latitude) || 28.6692,
+    longitude: Number(longitude) || 77.4538,
+    radius_meters: Number(radiusMeters) || 150,
+    updated_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('store_settings')
+        .upsert([settings])
+        .select()
+        .single();
+      if (error) throw error;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_STORE_SETTINGS, JSON.stringify(settings));
+      }
+      return data;
+    } catch (err) {
+      console.warn('Supabase saveStoreSettings failed, saving locally:', err.message);
+    }
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_STORE_SETTINGS, JSON.stringify(settings));
+    }
+  } catch (e) {
+    console.error('Failed saving store settings locally', e);
+  }
+  return settings;
+}
+
+// ==========================================
+// LIVE DRIVER LOCATIONS TRACKING
+// ==========================================
+
+const STORAGE_DRIVER_LOCATIONS = 'jal_jivan_driver_locations';
+
+export async function fetchDriverLocations() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_locations')
+        .select('*');
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchDriverLocations failed, checking local store:', err.message);
+    }
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(STORAGE_DRIVER_LOCATIONS);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+      localStorage.setItem(STORAGE_DRIVER_LOCATIONS, JSON.stringify(initialDriverLocations));
+    }
+    return initialDriverLocations;
+  } catch (e) {
+    return initialDriverLocations;
+  }
+}
+
+export async function updateDriverLocation({ driverId, driverName, latitude, longitude }) {
+  if (!driverId || latitude === null || latitude === undefined || longitude === null || longitude === undefined) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const locationRecord = {
+    driver_id: driverId,
+    driver_name: driverName || '',
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    last_seen_at: now,
+    updated_at: now
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('driver_locations')
+        .upsert([locationRecord]);
+    } catch (err) {
+      console.warn('Supabase updateDriverLocation failed, updating local store:', err.message);
+    }
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const existing = JSON.parse(localStorage.getItem(STORAGE_DRIVER_LOCATIONS) || '[]');
+      const filtered = existing.filter((item) => item.driver_id !== driverId);
+      const updated = [locationRecord, ...filtered];
+      localStorage.setItem(STORAGE_DRIVER_LOCATIONS, JSON.stringify(updated));
+    }
+  } catch (e) {
+    console.error('Failed updating driver location locally', e);
+  }
+
+  return locationRecord;
+}
+
 
