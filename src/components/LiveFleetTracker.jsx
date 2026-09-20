@@ -54,9 +54,20 @@ export default function LiveFleetTracker({
     return () => clearInterval(interval);
   }, [onRefresh]);
 
+  // Filter out any dummy names defensively so only live database delivery_boys are shown
+  const liveDrivers = useMemo(() => {
+    return (drivers || []).filter(
+      (r) =>
+        r &&
+        r.name !== 'Ramesh Kumar' &&
+        r.name !== 'Suresh Sharma' &&
+        r.name !== 'Amit Patel'
+    );
+  }, [drivers]);
+
   // Build enriched rider data
   const riderCards = useMemo(() => {
-    return drivers.map((driver) => {
+    return liveDrivers.map((driver) => {
       // Find latest location record
       const loc = driverLocations.find(
         (l) => l.driver_id === driver.id || l.driver_name === driver.name
@@ -158,7 +169,7 @@ export default function LiveFleetTracker({
         hasCustomerCoords
       };
     });
-  }, [drivers, driverLocations, orders, storeLat, storeLng]);
+  }, [liveDrivers, driverLocations, orders, storeLat, storeLng]);
 
   // Filter riders based on search and status
   const filteredRiders = useMemo(() => {
@@ -336,12 +347,22 @@ export default function LiveFleetTracker({
       </div>
 
       {/* Rider Cards Grid */}
-      {filteredRiders.length === 0 ? (
+      {loading && liveDrivers.length === 0 ? (
+        <div className="glass-card p-12 text-center rounded-2xl border border-slate-800">
+          <RefreshCw className="w-8 h-8 text-emerald-400 mx-auto mb-3 animate-spin" />
+          <p className="text-slate-200 font-bold text-sm">Connecting to live fleet radar...</p>
+          <p className="text-slate-500 text-xs mt-1">Retrieving delivery team records from database.</p>
+        </div>
+      ) : filteredRiders.length === 0 ? (
         <div className="glass-card p-10 text-center rounded-2xl border border-slate-800">
           <Radio className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-          <p className="text-slate-300 font-semibold text-sm">No riders match the current filter</p>
+          <p className="text-slate-300 font-semibold text-sm">
+            {liveDrivers.length === 0 ? 'No delivery boys registered in database' : 'No riders match the current filter'}
+          </p>
           <p className="text-slate-500 text-xs mt-1">
-            Try switching the filter to "All" or clearing the search query.
+            {liveDrivers.length === 0
+              ? 'Add a delivery boy in the Delivery Boys tab or wait for rider login.'
+              : 'Try switching the filter to "All" or clearing the search query.'}
           </p>
         </div>
       ) : (

@@ -81,48 +81,69 @@ export function AdminPanel({
   const [gpsDetecting, setGpsDetecting] = useState(false);
   const [gpsMessage, setGpsMessage] = useState('');
 
-  // Live Driver Locations & Delivery Boys List
-  const [driverLocations, setDriverLocations] = useState([]);
-  const [deliveryBoys, setDeliveryBoys] = useState(drivers);
+  // Helper to strictly filter out any legacy dummy riders
+  const filterRealRiders = useCallback((list) => {
+    return Array.isArray(list)
+      ? list.filter(
+          (r) =>
+            r &&
+            r.name !== 'Ramesh Kumar' &&
+            r.name !== 'Suresh Sharma' &&
+            r.name !== 'Amit Patel'
+        )
+      : [];
+  }, []);
 
-  // Sync if parent drivers prop updates
+  // Live Driver Locations & Delivery Boys List (only real delivery team, defaults to empty array)
+  const [driverLocations, setDriverLocations] = useState([]);
+  const [deliveryBoys, setDeliveryBoys] = useState([]);
+  const [deliveryBoysLoading, setDeliveryBoysLoading] = useState(true);
+
+  // Sync if parent drivers prop updates with real drivers
   useEffect(() => {
     if (drivers && drivers.length > 0) {
-      setDeliveryBoys((prev) => {
-        if (!prev || prev.length === 0) return drivers;
-        const prevMap = new Map(prev.map((d) => [d.id, d]));
-        return drivers.map((d) => {
-          const live = prevMap.get(d.id);
-          return live ? { ...d, ...live } : d;
+      const real = filterRealRiders(drivers);
+      if (real.length > 0) {
+        setDeliveryBoys((prev) => {
+          const map = new Map(prev.map((d) => [d.id, d]));
+          real.forEach((d) => {
+            const live = map.get(d.id);
+            map.set(d.id, live ? { ...d, ...live } : d);
+          });
+          return Array.from(map.values());
         });
-      });
+      }
     }
-  }, [drivers]);
+  }, [drivers, filterRealRiders]);
 
   useEffect(() => {
     async function loadAdminData() {
-      const [res, hub, locs, dBoys] = await Promise.all([
-        fetchRewardSettings(),
-        fetchStoreSettings(),
-        fetchDriverLocations(),
-        fetchDeliveryBoys()
-      ]);
-      if (res) {
-        setRewardMinDeliv(res.min_deliveries || 5);
-        setRewardStars(res.stars_rewarded || 1);
-      }
-      if (hub) {
-        setStoreSettings(hub);
-        setStoreName(hub.store_name || 'Store Central Hub (Ghaziabad)');
-        setStoreLat(Number(hub.latitude) || 28.6692);
-        setStoreLng(Number(hub.longitude) || 77.4538);
-        setStoreRadius(Number(hub.radius_meters) || 150);
-      }
-      if (locs) {
-        setDriverLocations(locs);
-      }
-      if (dBoys && dBoys.length > 0) {
-        setDeliveryBoys(dBoys);
+      try {
+        const [res, hub, locs, dBoys] = await Promise.all([
+          fetchRewardSettings(),
+          fetchStoreSettings(),
+          fetchDriverLocations(),
+          fetchDeliveryBoys()
+        ]);
+        if (res) {
+          setRewardMinDeliv(res.min_deliveries || 5);
+          setRewardStars(res.stars_rewarded || 1);
+        }
+        if (hub) {
+          setStoreSettings(hub);
+          setStoreName(hub.store_name || 'Store Central Hub (Ghaziabad)');
+          setStoreLat(Number(hub.latitude) || 28.6692);
+          setStoreLng(Number(hub.longitude) || 77.4538);
+          setStoreRadius(Number(hub.radius_meters) || 150);
+        }
+        if (locs) {
+          setDriverLocations(locs);
+        }
+        if (Array.isArray(dBoys)) {
+          setDeliveryBoys(filterRealRiders(dBoys));
+        }
+      } finally {
+        setDeliveryBoysLoading(false);
       }
     }
     loadAdminData();
@@ -134,7 +155,7 @@ export function AdminPanel({
         fetchDeliveryBoys()
       ]);
       if (locs) setDriverLocations(locs);
-      if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
+      if (Array.isArray(dBoys)) setDeliveryBoys(filterRealRiders(dBoys));
     }, 10000);
 
     // Supabase Realtime subscription on delivery_boys
@@ -148,7 +169,7 @@ export function AdminPanel({
             { event: '*', schema: 'public', table: 'delivery_boys' },
             async () => {
               const dBoys = await fetchDeliveryBoys();
-              if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
+              if (Array.isArray(dBoys)) setDeliveryBoys(filterRealRiders(dBoys));
             }
           )
           .subscribe();
@@ -163,7 +184,7 @@ export function AdminPanel({
         supabase.removeChannel(channel);
       }
     };
-  }, []);
+  }, [filterRealRiders]);
 
   const handleSaveRewardSettings = async (e) => {
     e?.preventDefault();
@@ -834,9 +855,9 @@ export function AdminPanel({
               fetchDeliveryBoys()
             ]);
             if (locs) setDriverLocations(locs);
-            if (dBoys && dBoys.length > 0) setDeliveryBoys(dBoys);
+            if (Array.isArray(dBoys)) setDeliveryBoys(filterRealRiders(dBoys));
           }}
-          loading={loading}
+          loading={loading || deliveryBoysLoading}
           onOpenStoreSettings={() => {
             setActiveTab('analytics');
             setTimeout(() => {

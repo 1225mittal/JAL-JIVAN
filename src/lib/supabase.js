@@ -37,12 +37,24 @@ const getLocalDrivers = () => {
   try {
     const saved = localStorage.getItem(STORAGE_DRIVERS);
     if (!saved) {
-      localStorage.setItem(STORAGE_DRIVERS, JSON.stringify(initialDrivers));
-      return initialDrivers;
+      return [];
     }
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    const cleaned = Array.isArray(parsed)
+      ? parsed.filter(
+          (d) =>
+            d &&
+            d.name !== 'Ramesh Kumar' &&
+            d.name !== 'Suresh Sharma' &&
+            d.name !== 'Amit Patel'
+        )
+      : [];
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_DRIVERS, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (e) {
-    return initialDrivers;
+    return [];
   }
 };
 
@@ -86,7 +98,7 @@ export async function fetchDeliveryBoys() {
         .from('delivery_boys')
         .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
         .order('name', { ascending: true });
-      if (!error && data && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         return data;
       }
     } catch (err) {
@@ -98,12 +110,13 @@ export async function fetchDeliveryBoys() {
         .from('drivers')
         .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
         .order('name', { ascending: true });
-      if (!dError && dData && dData.length > 0) {
+      if (!dError && Array.isArray(dData)) {
         return dData;
       }
     } catch (err) {
       // ignore
     }
+    return [];
   }
   return getLocalDrivers();
 }
@@ -115,7 +128,7 @@ export async function fetchDrivers() {
         .from('delivery_boys')
         .select('*')
         .order('name', { ascending: true });
-      if (!error && data && data.length > 0) {
+      if (!error && Array.isArray(data)) {
         return data;
       }
     } catch (err) {
@@ -127,11 +140,13 @@ export async function fetchDrivers() {
         .from('drivers')
         .select('*')
         .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
     } catch (err) {
-      console.warn('Supabase fetchDrivers failed, falling back to local store:', err.message);
+      console.warn('Supabase fetchDrivers failed:', err.message);
     }
+    return [];
   }
   return getLocalDrivers();
 }
@@ -731,13 +746,22 @@ export async function fetchDriverLocations() {
     if (typeof localStorage !== 'undefined') {
       const saved = localStorage.getItem(STORAGE_DRIVER_LOCATIONS);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const cleaned = Array.isArray(parsed)
+          ? parsed.filter(
+              (l) =>
+                l &&
+                l.driver_name !== 'Ramesh Kumar' &&
+                l.driver_name !== 'Suresh Sharma' &&
+                l.driver_name !== 'Amit Patel'
+            )
+          : [];
+        return cleaned;
       }
-      localStorage.setItem(STORAGE_DRIVER_LOCATIONS, JSON.stringify(initialDriverLocations));
     }
-    return initialDriverLocations;
+    return [];
   } catch (e) {
-    return initialDriverLocations;
+    return [];
   }
 }
 

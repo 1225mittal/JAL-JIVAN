@@ -1,47 +1,7 @@
 const now = Date.now();
 const minutesAgo = (m) => new Date(now - m * 60000).toISOString();
 
-export const initialDrivers = [
-  {
-    id: 'd1a10001-0000-0000-0000-000000000001',
-    name: 'Ramesh Kumar',
-    phone: '9876543210',
-    pin: '1234',
-    status: 'active',
-    is_online: true,
-    current_lat: 28.6655,
-    current_lng: 77.4502,
-    last_seen_at: minutesAgo(0.3),
-    updated_at: minutesAgo(0.3),
-    created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-  {
-    id: 'd1a10002-0000-0000-0000-000000000002',
-    name: 'Suresh Sharma',
-    phone: '9811223344',
-    pin: '5678',
-    status: 'active',
-    is_online: true,
-    current_lat: 28.6681,
-    current_lng: 77.4525,
-    last_seen_at: minutesAgo(0.8),
-    updated_at: minutesAgo(0.8),
-    created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-  },
-  {
-    id: 'd1a10003-0000-0000-0000-000000000003',
-    name: 'Amit Patel',
-    phone: '9899001122',
-    pin: '9999',
-    status: 'active',
-    is_online: false,
-    current_lat: 28.6720,
-    current_lng: 77.4410,
-    last_seen_at: minutesAgo(25),
-    updated_at: minutesAgo(25),
-    created_at: new Date(Date.now() - 86400000 * 4).toISOString(),
-  },
-];
+export const initialDrivers = [];
 
 export const initialStoreSettings = {
   id: 'main_store',
@@ -52,32 +12,7 @@ export const initialStoreSettings = {
   updated_at: new Date().toISOString()
 };
 
-export const initialDriverLocations = [
-  {
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
-    latitude: 28.6655,
-    longitude: 77.4502,
-    last_seen_at: minutesAgo(0.3),
-    updated_at: minutesAgo(0.3)
-  },
-  {
-    driver_id: 'd1a10002-0000-0000-0000-000000000002',
-    driver_name: 'Suresh Sharma',
-    latitude: 28.6681,
-    longitude: 77.4525,
-    last_seen_at: minutesAgo(0.8),
-    updated_at: minutesAgo(0.8)
-  },
-  {
-    driver_id: 'd1a10003-0000-0000-0000-000000000003',
-    driver_name: 'Amit Patel',
-    latitude: 28.6720,
-    longitude: 77.4410,
-    last_seen_at: minutesAgo(25),
-    updated_at: minutesAgo(25)
-  }
-];
+export const initialDriverLocations = [];
 
 export const initialOrders = [
   {
@@ -88,10 +23,10 @@ export const initialOrders = [
     landmark: 'Near Mother Dairy Booth',
     customer_phone: '9810012345',
     customer_name: 'Vikas Gupta',
-    assigned_driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
-    status: 'Out for Delivery',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
+    status: 'Pending',
     latitude: 28.6620,
     longitude: 77.4480,
     accepted_at: minutesAgo(20),
@@ -180,9 +115,9 @@ export const initialOrders = [
     landmark: 'Near Water Tank',
     customer_phone: '9811122233',
     customer_name: 'Rajesh Tyagi',
-    assigned_driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
     status: 'Delivered',
     latitude: 28.6650,
     longitude: 77.4520,
@@ -203,9 +138,9 @@ export const initialOrders = [
     landmark: 'Sector 62 Cross Road',
     customer_phone: '9822233344',
     customer_name: 'Sunita Rao',
-    assigned_driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
     status: 'Delivered',
     latitude: 28.6680,
     longitude: 77.4580,
@@ -226,9 +161,9 @@ export const initialOrders = [
     landmark: 'Opposite State Bank ATM',
     customer_phone: '9833344455',
     customer_name: 'Kavita Joshi',
-    assigned_driver_id: 'd1a10002-0000-0000-0000-000000000002',
-    driver_id: 'd1a10002-0000-0000-0000-000000000002',
-    driver_name: 'Suresh Sharma',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
     status: 'Delivered',
     latitude: 28.6710,
     longitude: 77.4490,
@@ -249,9 +184,9 @@ export const initialOrders = [
     landmark: 'Near DAV Public School',
     customer_phone: '9844455566',
     customer_name: 'Manish Pandey',
-    assigned_driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
     status: 'Delivered',
     latitude: 28.6640,
     longitude: 77.4510,
@@ -295,9 +230,9 @@ export const initialOrders = [
     landmark: 'Near Mother Dairy Booth',
     customer_phone: '9810012345',
     customer_name: 'Vikas Gupta',
-    assigned_driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_id: 'd1a10001-0000-0000-0000-000000000001',
-    driver_name: 'Ramesh Kumar',
+    assigned_driver_id: null,
+    driver_id: null,
+    driver_name: 'Unassigned',
     status: 'Delivered',
     latitude: 28.6620,
     longitude: 77.4480,
