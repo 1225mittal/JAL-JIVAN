@@ -26,8 +26,10 @@ export function fileToGenerativePart(file) {
   });
 }
 
+console.log("Gemini Key Exists:", !!import.meta.env.VITE_GEMINI_API_KEY);
+
 /**
- * Analyzes a handwritten paper order slip or note using Gemini 2.5 Flash
+ * Analyzes a handwritten paper order slip or note using Gemini 2.0 Flash
  * and returns structured order details.
  * 
  * @param {File} file - Image file of the paper slip
@@ -42,6 +44,8 @@ export function fileToGenerativePart(file) {
  * }>}
  */
 export async function extractOrderFromSlip(file) {
+  console.log("Gemini Key Exists:", !!import.meta.env.VITE_GEMINI_API_KEY);
+
   if (!file) {
     throw new Error('No slip image provided for OCR extraction');
   }
@@ -83,24 +87,28 @@ Guidelines:
 4. If a field cannot be deciphered or is absent, leave it as an empty string ("") or 0.
 5. Return ONLY the JSON object. Do not include markdown code block backticks.`;
 
+  const requestPayload = {
+    contents: [
+      {
+        inlineData: {
+          data: base64Data,
+          mimeType
+        }
+      },
+      prompt
+    ],
+    config: {
+      responseMimeType: 'application/json'
+    }
+  };
+
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType
-          }
-        },
-        prompt
-      ],
-      config: {
-        responseMimeType: 'application/json'
-      }
+      model: 'gemini-2.0-flash',
+      ...requestPayload
     });
 
-    const responseText = response.text || '';
+    const responseText = response?.text || '';
     let parsedData = {};
 
     try {
@@ -123,10 +131,10 @@ Guidelines:
       landmark: (parsedData.landmark || '').trim(),
       items: Array.isArray(parsedData.items)
         ? parsedData.items.map((item) => ({
-            item_name: (item.item_name || 'Item').trim(),
-            quantity: Math.max(1, Number(item.quantity) || 1),
-            price: Math.max(0, Number(item.price) || 0)
-          }))
+          item_name: (item.item_name || 'Item').trim(),
+          quantity: Math.max(1, Number(item.quantity) || 1),
+          price: Math.max(0, Number(item.price) || 0)
+        }))
         : [],
       total_amount: Math.max(0, Number(parsedData.total_amount) || 0),
       notes: (parsedData.notes || '').trim()
