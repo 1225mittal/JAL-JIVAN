@@ -148,3 +148,27 @@ DROP POLICY IF EXISTS "Allow public delete on product-images" ON storage.objects
 CREATE POLICY "Allow public delete on product-images" ON storage.objects 
 FOR DELETE USING (bucket_id = 'product-images');
 
+-- 11. Add slip_image_url column to Orders
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS slip_image_url TEXT;
+
+-- 12. Create Storage Bucket for 'order-slips' (Handwritten paper notes & invoices)
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('order-slips', 'order-slips', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Allow public uploads to order-slips" ON storage.objects;
+CREATE POLICY "Allow public uploads to order-slips" ON storage.objects 
+FOR INSERT WITH CHECK (bucket_id = 'order-slips');
+
+DROP POLICY IF EXISTS "Allow public select on order-slips" ON storage.objects;
+CREATE POLICY "Allow public select on order-slips" ON storage.objects 
+FOR SELECT USING (bucket_id = 'order-slips');
+
+DROP POLICY IF EXISTS "Allow public update on order-slips" ON storage.objects;
+CREATE POLICY "Allow public update on order-slips" ON storage.objects 
+FOR UPDATE USING (bucket_id = 'order-slips');
+
+DROP POLICY IF EXISTS "Allow public delete on order-slips" ON storage.objects;
+CREATE POLICY "Allow public delete on order-slips" ON storage.objects 
+FOR DELETE USING (bucket_id = 'order-slips');
+

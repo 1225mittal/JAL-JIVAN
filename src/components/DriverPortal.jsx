@@ -22,9 +22,12 @@ import {
   WifiOff,
   RefreshCw,
   Sparkles,
-  Check
+  Check,
+  Eye,
+  FileText
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
+import SlipViewerModal from './SlipViewerModal';
 import {
   supabase,
   acceptOrderDelivery,
@@ -61,6 +64,7 @@ export default function DriverPortal({
   // Portal Tab State: 'pool' | 'active' | 'history'
   const [activeTab, setActiveTab] = useState('pool');
   const [selectedOrderForPod, setSelectedOrderForPod] = useState(null);
+  const [selectedSlipOrder, setSelectedSlipOrder] = useState(null);
   const [pinningOrderId, setPinningOrderId] = useState(null);
   const [gpsError, setGpsError] = useState(null);
 
@@ -879,13 +883,23 @@ export default function DriverPortal({
                     >
                       {/* Top Bar: Order Number, ETA badge, Amount */}
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-black text-white tracking-wide">
                             #{order.order_number}
                           </span>
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                             ~{eta} mins ETA
                           </span>
+                          {order.slip_image_url && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSlipOrder(order)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-[11px] font-semibold transition-all shadow-sm"
+                            >
+                              <Eye className="w-3 h-3 text-amber-400" />
+                              <span>View Slip</span>
+                            </button>
+                          )}
                         </div>
 
                         <div className="text-emerald-400 font-black text-base">
@@ -974,7 +988,7 @@ export default function DriverPortal({
                     >
                       {/* Top: Order #, Amount, Status */}
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-extrabold text-white tracking-wide">
                             #{order.order_number}
                           </span>
@@ -985,6 +999,16 @@ export default function DriverPortal({
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
                               ~{order.estimated_minutes}m ETA
                             </span>
+                          )}
+                          {order.slip_image_url && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSlipOrder(order)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-[11px] font-semibold transition-all shadow-sm"
+                            >
+                              <Eye className="w-3 h-3 text-amber-400" />
+                              <span>View Slip</span>
+                            </button>
                           )}
                         </div>
 
@@ -1105,11 +1129,21 @@ export default function DriverPortal({
                     className="glass-card p-4 rounded-2xl border border-slate-800 space-y-3 text-xs"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-white text-sm">#{order.order_number}</span>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                           Delivered
                         </span>
+                        {order.slip_image_url && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSlipOrder(order)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-[11px] font-semibold transition-all shadow-sm"
+                          >
+                            <Eye className="w-3 h-3 text-amber-400" />
+                            <span>View Slip</span>
+                          </button>
+                        )}
                       </div>
                       <span className="font-bold text-emerald-400 text-sm">₹{order.amount}</span>
                     </div>
@@ -1160,6 +1194,14 @@ export default function DriverPortal({
           onCompleteDelivery={onCompleteDelivery}
         />
       )}
+
+      {/* Handwritten Slip Viewer Modal */}
+      <SlipViewerModal
+        isOpen={Boolean(selectedSlipOrder)}
+        onClose={() => setSelectedSlipOrder(null)}
+        imageUrl={selectedSlipOrder?.slip_image_url}
+        orderNumber={selectedSlipOrder?.order_number}
+      />
     </div>
   );
 }

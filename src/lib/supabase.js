@@ -427,8 +427,11 @@ export async function createOrder({
   driverName,
   latitude,
   longitude,
-  items = []
+  items = [],
+  slipImageUrl,
+  slip_image_url
 }) {
+  const finalSlipUrl = slipImageUrl || slip_image_url || null;
   const newOrder = {
     id: 'ord-' + Date.now(),
     order_number: orderNumber || `JJ-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -443,6 +446,7 @@ export async function createOrder({
     latitude: latitude || null,
     longitude: longitude || null,
     items: Array.isArray(items) ? items : [],
+    slip_image_url: finalSlipUrl,
     payment_method: null,
     payment_proof_url: null,
     delivery_proof_url: null,
@@ -465,7 +469,8 @@ export async function createOrder({
         status: newOrder.status,
         latitude: newOrder.latitude,
         longitude: newOrder.longitude,
-        items: newOrder.items
+        items: newOrder.items,
+        slip_image_url: newOrder.slip_image_url
       };
 
       let { data, error } = await supabase
@@ -474,10 +479,11 @@ export async function createOrder({
         .select()
         .single();
 
-      // Graceful retry without items/customer_name if columns are not yet in remote schema
-      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.code === 'PGRST204')) {
+      // Graceful retry without items/customer_name/slip_image_url if columns are not yet in remote schema
+      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.message?.includes('slip_image_url') || error.code === 'PGRST204')) {
         delete insertPayload.items;
         delete insertPayload.customer_name;
+        delete insertPayload.slip_image_url;
         const res = await supabase.from('orders').insert([insertPayload]).select().single();
         data = res.data;
         error = res.error;
@@ -578,6 +584,8 @@ export async function updateOrder(orderId, updates = {}) {
   if (updates.latitude !== undefined) payload.latitude = updates.latitude !== null && updates.latitude !== undefined && updates.latitude !== '' ? Number(updates.latitude) : null;
   if (updates.longitude !== undefined) payload.longitude = updates.longitude !== null && updates.longitude !== undefined && updates.longitude !== '' ? Number(updates.longitude) : null;
   if (updates.items !== undefined) payload.items = Array.isArray(updates.items) ? updates.items : [];
+  if (updates.slip_image_url !== undefined) payload.slip_image_url = updates.slip_image_url || null;
+  if (updates.slipImageUrl !== undefined) payload.slip_image_url = updates.slipImageUrl || null;
 
   if (isSupabaseConfigured) {
     try {
@@ -688,6 +696,47 @@ export async function uploadDeliveryFile(file, folder = 'proofs') {
   }
 
   // Fallback to Data URL for instant previews and local demo persistence
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+// STORAGE UPLOAD FOR ORDER SLIPS (Supabase 'order-slips' bucket)
+export async function uploadOrderSlip(file) {
+  if (!file) return null;
+
+  if (isSupabaseConfigured) {
+    try {
+      const sanitizedName = file.name ? file.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'slip.jpg';
+      const filePath = `slips/${Date.now()}_${sanitizedName}`;
+
+      const { data, error } = await supabase.storage
+        .from('order-slips')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (!error && data) {
+        const { data: publicUrlData } = supabase.storage
+          .from('order-slips')
+          .getPublicUrl(filePath);
+
+        if (publicUrlData?.publicUrl) {
+          return publicUrlData.publicUrl;
+        }
+      } else if (error) {
+        console.warn('Supabase storage upload to order-slips failed:', error.message);
+      }
+    } catch (err) {
+      console.warn('uploadOrderSlip error, falling back to data URL:', err.message);
+    }
+  }
+
+  // Fallback to Data URL for instant local demo persistence
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result);

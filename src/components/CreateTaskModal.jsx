@@ -17,9 +17,12 @@ import {
   Package,
   BookOpen,
   CheckCircle2,
-  Navigation
+  Navigation,
+  FileText,
+  Camera,
+  Upload
 } from 'lucide-react';
-import { fetchSavedAddresses, supabase, isSupabaseConfigured } from '../lib/supabase';
+import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
 
 export default function CreateTaskModal({
   isOpen,
@@ -49,8 +52,33 @@ export default function CreateTaskModal({
   // Product Selection State: { [productId]: quantity }
   const [selectedQuantities, setSelectedQuantities] = useState({});
 
+  // Handwritten Paper Slip Photo State
+  const [slipFile, setSlipFile] = useState(null);
+  const [slipPreview, setSlipPreview] = useState('');
+  const slipInputRef = useRef(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const handleSlipChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSlipFile(file);
+      const url = URL.createObjectURL(file);
+      setSlipPreview(url);
+    }
+  };
+
+  const handleRemoveSlip = () => {
+    setSlipFile(null);
+    if (slipPreview) {
+      URL.revokeObjectURL(slipPreview);
+      setSlipPreview('');
+    }
+    if (slipInputRef.current) {
+      slipInputRef.current.value = '';
+    }
+  };
 
   // 1. Fetch real saved addresses on modal open
   useEffect(() => {
@@ -286,8 +314,9 @@ export default function CreateTaskModal({
       setError('Order number is required');
       return;
     }
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Please enter a valid amount or select products');
+    const numAmount = parseFloat(amount) || 0;
+    if (numAmount <= 0 && !slipFile && calculatedItems.length === 0) {
+      setError('Please enter a valid amount, select products, or attach a handwritten slip');
       return;
     }
     if (!address.trim()) {
@@ -299,9 +328,31 @@ export default function CreateTaskModal({
 
     try {
       setLoading(true);
+
+      // Upload handwritten slip if selected
+      let uploadedSlipUrl = null;
+      if (slipFile) {
+        uploadedSlipUrl = await uploadOrderSlip(slipFile);
+      }
+
+      // If user only provides an image and leaves the items field blank, default the item name to "Handwritten Paper Order"
+      let finalItems = calculatedItems;
+      if (finalItems.length === 0 && (slipFile || uploadedSlipUrl)) {
+        finalItems = [
+          {
+            id: 'slip-order-' + Date.now(),
+            name: 'Handwritten Paper Order',
+            unit: 'Paper Slip',
+            price: numAmount,
+            quantity: 1,
+            total: numAmount
+          }
+        ];
+      }
+
       await onCreateTask({
         orderNumber: orderNumber.trim(),
-        amount: parseFloat(amount),
+        amount: numAmount,
         address: address.trim(),
         landmark: landmark.trim(),
         customerPhone: customerPhone.trim(),
@@ -310,7 +361,9 @@ export default function CreateTaskModal({
         driverName: assignedDriver ? assignedDriver.name : null,
         latitude: pinnedLat,
         longitude: pinnedLng,
-        items: calculatedItems
+        items: finalItems,
+        slipImageUrl: uploadedSlipUrl,
+        slip_image_url: uploadedSlipUrl
       });
 
       // Reset
@@ -325,6 +378,7 @@ export default function CreateTaskModal({
       setPinnedLng(null);
       setSelectedQuantities({});
       setIsAmountManuallyEdited(false);
+      handleRemoveSlip();
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to create task');
@@ -478,6 +532,72 @@ export default function CreateTaskModal({
                     {item.quantity}x {item.name} (₹{item.total.toFixed(0)})
                   </span>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* OPTIONAL: HANDWRITTEN PAPER SLIP / NOTE PHOTO */}
+          <div className="space-y-2 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>Handwritten Paper Slip / Note Photo</span>
+              </label>
+              {slipFile && (
+                <span className="text-[10px] text-amber-400 font-semibold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                  Slip Attached
+                </span>
+              )}
+            </div>
+
+            <input
+              ref={slipInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleSlipChange}
+              className="hidden"
+              id="slip-image-upload"
+            />
+
+            {!slipPreview ? (
+              <label
+                htmlFor="slip-image-upload"
+                className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-slate-700/80 hover:border-amber-400/60 rounded-xl cursor-pointer bg-slate-900/40 hover:bg-slate-900/80 transition-all group"
+              >
+                <div className="flex items-center gap-2 text-slate-400 group-hover:text-amber-300 transition-colors">
+                  <Camera className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-medium">Take Photo / Upload Slip or Invoice</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1 text-center">
+                  Direct camera capture on mobile. Saves drivers time reading handwritten orders.
+                </p>
+              </label>
+            ) : (
+              <div className="flex items-center gap-3 p-2 bg-slate-900 rounded-xl border border-slate-800">
+                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-700 shrink-0 relative bg-black/40">
+                  <img
+                    src={slipPreview}
+                    alt="Slip Preview"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-white truncate">
+                    {slipFile?.name || 'Handwritten Slip'}
+                  </p>
+                  <p className="text-[11px] text-emerald-400">
+                    {slipFile ? `${(slipFile.size / 1024).toFixed(0)} KB • Ready to upload` : 'Attached'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveSlip}
+                  className="px-2.5 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1 font-medium"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Remove</span>
+                </button>
               </div>
             )}
           </div>

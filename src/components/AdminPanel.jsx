@@ -33,7 +33,8 @@ import {
   Trash2,
   Loader2,
   AlertCircle,
-  X
+  X,
+  FileText
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -57,6 +58,7 @@ import { isDriverOnline, formatLastSeen } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 import LiveFleetTracker from './LiveFleetTracker';
 import ProductCatalog from './ProductCatalog';
+import SlipViewerModal from './SlipViewerModal';
 
 export function AdminPanel({
   orders = [],
@@ -137,6 +139,9 @@ export function AdminPanel({
   const [isDetectingOrderGps, setIsDetectingOrderGps] = useState(false);
   const [deleteConfirmOrder, setDeleteConfirmOrder] = useState(null);
   const [isOrderDeleting, setIsOrderDeleting] = useState(false);
+
+  // Handwritten Slip Viewer State
+  const [selectedSlipOrder, setSelectedSlipOrder] = useState(null);
 
   // Driver edit handlers
   const handleOpenEditDriver = (rider) => {
@@ -865,11 +870,22 @@ export function AdminPanel({
                   {/* Card Header */}
                   <div>
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-black text-white tracking-wide">
                           #{order.order_number}
                         </span>
                         {getStatusBadge(order.status)}
+                        {order.slip_image_url && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSlipOrder(order)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-[11px] font-semibold transition-all shadow-sm group"
+                            title="View handwritten slip photo"
+                          >
+                            <Eye className="w-3 h-3 text-amber-400 group-hover:scale-110 transition-transform" />
+                            <span>View Slip</span>
+                          </button>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-base font-black text-emerald-400">
@@ -1797,6 +1813,24 @@ export function AdminPanel({
                 </div>
               </div>
 
+              {/* Attached Slip Preview Link if order has slip */}
+              {editingOrder?.slip_image_url && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs text-amber-300 font-medium">Handwritten slip attached</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlipOrder(editingOrder)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>View Slip</span>
+                  </button>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex items-center gap-3 pt-2">
                 <button
@@ -2121,6 +2155,14 @@ export function AdminPanel({
           </div>
         </div>
       )}
+
+      {/* Handwritten Slip Viewer Modal */}
+      <SlipViewerModal
+        isOpen={!!selectedSlipOrder}
+        onClose={() => setSelectedSlipOrder(null)}
+        imageUrl={selectedSlipOrder?.slip_image_url}
+        orderNumber={selectedSlipOrder?.order_number}
+      />
     </div>
   );
 }
