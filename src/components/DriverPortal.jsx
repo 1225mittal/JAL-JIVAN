@@ -7,7 +7,6 @@ import {
   Navigation,
   CheckCircle2,
   Clock,
-  LogOut,
   Camera,
   AlertCircle,
   Loader2,
@@ -659,8 +658,8 @@ export default function DriverPortal({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {isPunchedIn && (
+          {isPunchedIn && (
+            <div className="flex items-center gap-2">
               <button
                 onClick={handlePunchOut}
                 className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 py-1.5 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all font-medium"
@@ -669,17 +668,8 @@ export default function DriverPortal({
                 <Clock className="w-3.5 h-3.5" />
                 <span>Punch Out</span>
               </button>
-            )}
-
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-rose-400 py-1.5 px-2.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/10 border border-slate-700/80 transition-all font-medium"
-              title="Log out from driver portal"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Exit</span>
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Feature 2: Daily Deliveries & Star Rewards Badge */}

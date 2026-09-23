@@ -17,7 +17,6 @@ import {
   RefreshCw,
   Phone,
   KeyRound,
-  LogOut,
   BarChart3,
   Award,
   Star,
@@ -635,18 +634,6 @@ export function AdminPanel({
             <PackagePlus className="w-4 h-4" />
             <span>Create Task</span>
           </button>
-
-          {onLogout && (
-            <button
-              id="admin-panel-logout-btn"
-              onClick={onLogout}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-200 text-xs sm:text-sm font-semibold transition-all shadow-sm"
-              title="Sign Out Admin"
-            >
-              <LogOut className="w-4 h-4 text-rose-400" />
-              <span className="hidden sm:inline">Logout</span>
-            </button>
-          )}
         </div>
       </div>
 

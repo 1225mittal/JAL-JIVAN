@@ -87,10 +87,11 @@ export default function Navbar({
               <button
                 id="driver-navbar-logout-btn"
                 onClick={onDriverLogout}
-                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-200 text-xs font-semibold transition-all shadow-sm"
                 title="Log Out Driver"
               >
                 <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Logout</span>
               </button>
             </div>
           )}
