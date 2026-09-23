@@ -52,11 +52,36 @@ export default async function handler(req, res) {
       }
     };
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    let response;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        break;
+      }
+
+      // If Google returns 503 (High Demand) or 429 (Rate limited), retry after delay
+      if (response.status === 503 || response.status === 429) {
+        if (attempts < maxAttempts) {
+          console.warn(`Gemini returned ${response.status}. Retrying attempt ${attempts + 1}...`);
+          await wait(attempts * 1500); // 1.5s then 3.0s
+          continue;
+        }
+      }
+
+      // If it's a 4xx client error, don't retry
+      break;
+    }
 
     if (!response.ok) {
       const errText = await response.text();
