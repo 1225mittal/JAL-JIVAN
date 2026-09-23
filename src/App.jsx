@@ -11,7 +11,7 @@ import {
   fetchDrivers,
   addDriver,
   driverLogin,
-  fetchOrders,
+  fetchOrders as fetchOrdersFromApi,
   createOrder,
   updateOrderStatus,
   updateOrderLocation,
@@ -129,13 +129,26 @@ export default function App() {
     }, 4000);
   }, []);
 
+  // Fetch orders and update state
+  const fetchOrders = useCallback(async () => {
+    try {
+      const data = await fetchOrdersFromApi();
+      if (Array.isArray(data)) {
+        setOrders(data);
+      }
+      return data;
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+    }
+  }, []);
+
   // Load Data
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
       const [driversData, ordersData, productsData] = await Promise.all([
         fetchDrivers(),
-        fetchOrders(),
+        fetchOrdersFromApi(),
         fetchProducts()
       ]);
       setDrivers(driversData || []);
@@ -153,94 +166,23 @@ export default function App() {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Real-time synchronization for orders across all devices via Supabase Realtime
   useEffect(() => {
-    let channel = null;
+    fetchOrders(); // Initial load
 
-    if (isSupabaseConfigured) {
-      try {
-        channel = supabase
-          .channel('public:orders_realtime')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'orders' },
-            async (payload) => {
-              // 1. Immediate optimistic UI sync based on event type
-              if (payload.eventType === 'INSERT' && payload.new) {
-                setOrders((prev) => {
-                  if (prev.some((o) => o.id === payload.new.id)) return prev;
-                  return [payload.new, ...prev];
-                });
-              } else if (payload.eventType === 'UPDATE' && payload.new) {
-                setOrders((prev) =>
-                  prev.map((o) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
-                );
-              } else if (payload.eventType === 'DELETE' && payload.old) {
-                setOrders((prev) => prev.filter((o) => o.id !== payload.old.id));
-              }
-
-              // 2. Fetch fresh order list to ensure correct ordering and full relational data
-              try {
-                const freshOrders = await fetchOrders();
-                if (Array.isArray(freshOrders)) {
-                  setOrders(freshOrders);
-                }
-              } catch (err) {
-                console.warn('Realtime fetchOrders refresh error:', err);
-              }
-            }
-          )
-          .subscribe((status) => {
-            if (status === 'SUBSCRIBED') {
-              console.log('⚡ Connected to Supabase Realtime channel for orders');
-            }
-          });
-      } catch (e) {
-        console.warn('Realtime subscription on orders failed:', e);
-      }
-    }
-
-    // Secondary fallback: periodic poll every 15s to guarantee multi-device sync
-    const pollInterval = setInterval(async () => {
-      try {
-        const freshOrders = await fetchOrders();
-        if (Array.isArray(freshOrders)) {
-          setOrders(freshOrders);
+    const channel = supabase
+      .channel('orders-realtime-channel')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('Realtime change detected:', payload);
+          fetchOrders(); // Refresh the list automatically on any insert/update/delete
         }
-      } catch (err) {
-        // silent fail for background poll
-      }
-    }, 15000);
-
-    // Auto-refresh when user switches back to browser/PWA tab
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchOrders()
-          .then((fresh) => {
-            if (Array.isArray(fresh)) setOrders(fresh);
-          })
-          .catch(() => {});
-      }
-    };
-    window.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Sync across tabs in demo/offline mode
-    const handleStorageChange = (e) => {
-      if (e.key === 'jal_jivan_orders') {
-        Promise.resolve(fetchOrders()).then((data) => {
-          if (Array.isArray(data)) setOrders(data);
-        }).catch(() => {});
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
+      )
+      .subscribe();
 
     return () => {
-      clearInterval(pollInterval);
-      window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('storage', handleStorageChange);
-      if (channel) {
-        supabase.removeChannel(channel);
-      }
+      supabase.removeChannel(channel);
     };
   }, []);
 
