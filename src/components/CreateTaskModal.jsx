@@ -287,7 +287,7 @@ export default function CreateTaskModal({
           return;
         }
 
-        await processAudioWithGemini(audioBlob, mimeType);
+        await processAudioWithGroq(audioBlob, mimeType);
       };
 
       recorder.start();
@@ -305,7 +305,7 @@ export default function CreateTaskModal({
     }
   };
 
-  const processAudioWithGemini = async (audioBlob, mimeType) => {
+  const processAudioWithGroq = async (audioBlob, mimeType) => {
     setIsProcessingVoice(true);
     setVoiceError('');
     try {
@@ -321,7 +321,7 @@ export default function CreateTaskModal({
         : audioBase64.trim();
       const cleanMime = (mimeType || 'audio/webm').split(';')[0].trim();
 
-      const res = await fetch('/api/gemini-voice', {
+      const res = await fetch('/api/groq-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioBase64: cleanBase64, mimeType: cleanMime })
@@ -397,10 +397,10 @@ export default function CreateTaskModal({
         }
       }
 
-      setVoiceSuccessMessage('Voice order parsed successfully with Gemini 3.8 Flash!');
+      setVoiceSuccessMessage('Voice order parsed successfully with Groq Whisper & AI!');
     } catch (err) {
-      console.error('Gemini Voice order error:', err);
-      setVoiceError(err.message || 'Failed to parse voice order with Gemini 3.8.');
+      console.error('Groq Voice order error:', err);
+      setVoiceError(err.message || 'Failed to parse voice order with Groq Whisper.');
     } finally {
       setIsProcessingVoice(false);
     }
@@ -948,7 +948,7 @@ export default function CreateTaskModal({
                 </div>
               )}
 
-              {/* Standalone Voice-to-Order Button (Gemini 3.8 Flash) */}
+              {/* Standalone Voice-to-Order Button (Groq Whisper AI) */}
               <button
                 type="button"
                 id="voice-order-btn"
@@ -966,10 +966,10 @@ export default function CreateTaskModal({
                   <>
                     <div className="flex items-center gap-2 text-purple-300 font-semibold text-xs">
                       <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
-                      <span>Gemini 3.8 parsing order...</span>
+                      <span>Groq Whisper & AI parsing...</span>
                     </div>
                     <p className="text-[10px] text-purple-300/80 mt-1">
-                      Extracting address & matching items...
+                      Transcribing speech & matching items...
                     </p>
                   </>
                 ) : isRecordingVoice ? (
@@ -992,7 +992,7 @@ export default function CreateTaskModal({
                       <span className="text-xs font-medium">Record Voice Order</span>
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      Voice Order (Gemini 3.8 Flash)
+                      Voice Order (Groq Whisper AI)
                     </p>
                   </>
                 )}
