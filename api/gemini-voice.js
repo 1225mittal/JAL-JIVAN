@@ -72,59 +72,55 @@ export default async function handler(req, res) {
 
     if (!transcribedText) {
       return res.status(200).json({
-        customerName: '',
-        customerPhone: '',
         deliveryAddress: '',
-        landmark: '',
-        items: [],
         totalAmount: 0,
+        itemsSummary: '',
+        customerPhone: '',
+        customerName: '',
         notes: '',
-        customer_name: '',
-        customer_phone: '',
         delivery_address: '',
         total_amount: 0,
+        items_summary: '',
+        customer_phone: '',
+        customer_name: '',
         _transcription: ''
       });
     }
 
-    // Step 2: Pass transcribed text to Groq chat completions using the verified working model
+    // Step 2: Simplified extraction with Groq chat completions using the verified working model
     const systemPrompt = `You are an expert Indian quick-commerce delivery dispatcher assistant.
 Extract order details strictly from this spoken delivery note (transcribed from Hindi, Hinglish, or English).
 
-Rules:
-1. DELIVERY ADDRESS & FLAT NUMBERS:
-   - Phrases like "Ruby 1-505", "Tower B 402", "G-12", "Flat 304", or society/colony names are ALWAYS the "deliveryAddress", NEVER a customer name or phone number.
-   - Set "deliveryAddress" to whatever tower/flat/house/society is mentioned. If not mentioned, set to "".
-2. CUSTOMER PHONE:
-   - MUST be a valid 10-digit Indian mobile number (e.g., starts with 6, 7, 8, or 9).
-   - NEVER put flat numbers, hyphenated numbers like "1-505", or item counts into "customerPhone". If no 10-digit number exists, leave it as "".
-3. CUSTOMER NAME:
-   - Person's name if explicitly spoken, otherwise "".
-4. LANDMARK:
-   - Nearby landmark if explicitly spoken, otherwise "".
-5. ITEMS & QUANTITIES:
-   - Extract item name and quantity into "items" array: [{ "name": "Bisleri", "quantity": 1 }].
-   - If no quantity is specified, default quantity to 1.
-   - If no items are mentioned, set "items" to [].
-6. TOTAL AMOUNT:
-   - Total price or amount if explicitly spoken, otherwise 0.
-7. NOTES:
-   - Any special delivery instructions (e.g. "bell mat bajana", "call before delivery", "leave at door"), otherwise "".
-8. CRITICAL RULE:
-   - Do NOT invent, assume, or extrapolate facts or details not spoken by the user. Only extract what is explicitly stated in the spoken text.
-
 Return strictly valid JSON matching this schema:
 {
-  "customerName": "",
-  "customerPhone": "",
   "deliveryAddress": "",
-  "landmark": "",
-  "items": [
-    { "name": "", "quantity": 1 }
-  ],
   "totalAmount": 0,
+  "itemsSummary": "",
+  "customerPhone": "",
+  "customerName": "",
   "notes": ""
-}`;
+}
+
+Formatting and extraction rules:
+1. deliveryAddress:
+   - Phrases like "Ruby 1-505", "Tower B 402", "G-12", "Flat 304", or society/colony names are ALWAYS the "deliveryAddress", NEVER a customer name or phone number.
+   - Set "deliveryAddress" to whatever flat/tower/society/colony/house is mentioned. If not mentioned, set to "".
+2. totalAmount:
+   - Total price or amount in rupees (e.g. 150, 200, 70). Return as a number. If not spoken, set to 0.
+3. itemsSummary (Plain text representation of all ordered goods):
+   - Water items: list the cans/bottles clearly (e.g., "1x 20L Bisleri", "3x 20L Bisleri", "2x Water Jar").
+   - Grocery items / generic packets: represent as packets or bags of goods (e.g., "2 packets of goods", "1 grocery bag").
+   - Combinations: combine them into a single clear readable line (e.g., "2 packets of goods + 3x 20L Bisleri").
+   - If no items mentioned, set to "".
+4. customerPhone:
+   - MUST be a valid 10-digit Indian mobile number (e.g., starts with 6, 7, 8, or 9).
+   - If not spoken, leave as "".
+5. customerName:
+   - Person's name if explicitly spoken, otherwise "".
+6. notes:
+   - Any special delivery instructions (e.g. "bell mat bajana", "call before delivery", "leave at door"). If not spoken, leave as "".
+7. STRICT ACCURACY:
+   - Do NOT invent, assume, or extrapolate facts or items not spoken by the user. Only extract what was spoken.`;
 
     const chatRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -172,37 +168,26 @@ Return strictly valid JSON matching this schema:
       });
     }
 
-    const customerName = String(parsedJson.customerName || parsedJson.customer_name || '').trim();
-    const customerPhone = String(parsedJson.customerPhone || parsedJson.customer_phone || '').trim();
     const deliveryAddress = String(parsedJson.deliveryAddress || parsedJson.delivery_address || '').trim();
-    const landmark = String(parsedJson.landmark || '').trim();
     const totalAmount = Number(parsedJson.totalAmount || parsedJson.total_amount) || 0;
+    const itemsSummary = String(parsedJson.itemsSummary || parsedJson.items_summary || '').trim();
+    const customerPhone = String(parsedJson.customerPhone || parsedJson.customer_phone || '').trim();
+    const customerName = String(parsedJson.customerName || parsedJson.customer_name || '').trim();
     const notes = String(parsedJson.notes || '').trim();
 
-    const rawItems = Array.isArray(parsedJson.items) ? parsedJson.items : [];
-    const normalizedItems = rawItems.map((item) => {
-      const name = String(item?.name || item?.item_name || '').trim();
-      const quantity = Math.max(1, Number(item?.quantity) || 1);
-      return {
-        name,
-        item_name: name,
-        quantity
-      };
-    }).filter(item => item.name.length > 0);
-
     return res.status(200).json({
-      customerName,
-      customerPhone,
       deliveryAddress,
-      landmark,
-      items: normalizedItems,
       totalAmount,
+      itemsSummary,
+      customerPhone,
+      customerName,
       notes,
-      // Backward compatibility aliases
-      customer_name: customerName,
-      customer_phone: customerPhone,
+      // Compatibility aliases
       delivery_address: deliveryAddress,
       total_amount: totalAmount,
+      items_summary: itemsSummary,
+      customer_phone: customerPhone,
+      customer_name: customerName,
       _transcription: transcribedText
     });
   } catch (error) {

@@ -334,11 +334,33 @@ export default function CreateTaskModal({
 
       const parsed = await res.json();
 
-      // Auto-populate form fields
+      // 1. Put deliveryAddress into Delivery Address input
       const deliveryAddress = parsed.deliveryAddress || parsed.delivery_address;
       if (deliveryAddress) {
         setAddress(deliveryAddress);
       }
+
+      // 2. Put totalAmount into Total Amount (₹) input
+      const rawTotal = parsed.totalAmount !== undefined && parsed.totalAmount !== null
+        ? parsed.totalAmount
+        : parsed.total_amount;
+      if (rawTotal !== undefined && rawTotal !== null && Number(rawTotal) > 0) {
+        setAmount(String(rawTotal));
+        setIsAmountManuallyEdited(true);
+      }
+
+      // 3. Put itemsSummary into Order Notes / Items Description field
+      const summaryText = parsed.itemsSummary || parsed.items_summary || '';
+      const notesText = parsed.notes || '';
+      let combinedNotes = summaryText;
+      if (notesText) {
+        combinedNotes = combinedNotes ? `${combinedNotes} • ${notesText}` : notesText;
+      }
+      if (combinedNotes) {
+        setAiExtractedNotes(combinedNotes);
+      }
+
+      // 4. Populate customerPhone and customerName if spoken
       const customerPhone = parsed.customerPhone || parsed.customer_phone;
       if (customerPhone) {
         const cleanPhone = String(customerPhone).replace(/\D/g, '');
@@ -346,68 +368,21 @@ export default function CreateTaskModal({
           setCustomerPhone(cleanPhone.slice(-10));
         }
       }
+
       const customerName = parsed.customerName || parsed.customer_name;
       if (customerName) {
         setCustomerName(customerName);
       }
+
       if (parsed.landmark) {
         setLandmark(parsed.landmark);
       }
-      if (parsed.notes) {
-        setAiExtractedNotes(parsed.notes);
-      }
 
-      // Match items against loaded products catalog
-      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-        const updatedQuantities = { ...selectedQuantities };
-        const newCustomList = [...customItems];
-
-        parsed.items.forEach((item) => {
-          const qty = Math.max(1, Number(item.quantity) || 1);
-          const itemName = item.name || item.item_name || 'Spoken Item';
-          const matchedProduct = findMatchingProduct(itemName, products);
-
-          if (matchedProduct) {
-            updatedQuantities[matchedProduct.id] =
-              (updatedQuantities[matchedProduct.id] || 0) + qty;
-          } else {
-            newCustomList.push({
-              id: 'voice-item-' + Math.random().toString(36).substring(2, 9),
-              name: itemName,
-              unit: 'Voice Item',
-              quantity: qty,
-              price: 0,
-              total: 0
-            });
-          }
-        });
-
-        setSelectedQuantities(updatedQuantities);
-        if (newCustomList.length > 0) {
-          setCustomItems(newCustomList);
-        }
-
-        // Calculate total amount automatically
-        const catalogTotal = products.reduce((acc, p) => {
-          const q = updatedQuantities[p.id] || 0;
-          return acc + (Number(p.price) || 0) * q;
-        }, 0);
-        const customTotal = newCustomList.reduce((acc, ci) => acc + (ci.total || 0), 0);
-        const autoComputedTotal = catalogTotal + customTotal;
-
-        if (autoComputedTotal > 0) {
-          setAmount(autoComputedTotal.toFixed(2));
-          setIsAmountManuallyEdited(false);
-        } else if ((parsed.totalAmount || parsed.total_amount) && Number(parsed.totalAmount || parsed.total_amount) > 0) {
-          setAmount(String(parsed.totalAmount || parsed.total_amount));
-          setIsAmountManuallyEdited(true);
-        }
-      } else if ((parsed.totalAmount || parsed.total_amount) && Number(parsed.totalAmount || parsed.total_amount) > 0) {
-        setAmount(String(parsed.totalAmount || parsed.total_amount));
-        setIsAmountManuallyEdited(true);
-      }
-
-      setVoiceSuccessMessage('Voice order parsed successfully with Groq Whisper & AI!');
+      setVoiceSuccessMessage(
+        summaryText
+          ? `Voice order extracted: ${summaryText}`
+          : 'Voice order details extracted successfully!'
+      );
     } catch (err) {
       console.error('Groq Voice order error:', err);
       setVoiceError(err.message || 'Failed to parse voice order with Groq Whisper.');
@@ -686,7 +661,7 @@ export default function CreateTaskModal({
         uploadedSlipUrl = await uploadOrderSlip(slipFile);
       }
 
-      // If user only provides an image and leaves the items field blank, default the item name to "Handwritten Paper Order"
+      // If user only provides an image or voice notes and leaves the items field blank, default the item name
       let finalItems = calculatedItems;
       if (finalItems.length === 0 && (slipFile || uploadedSlipUrl)) {
         finalItems = [
@@ -694,6 +669,17 @@ export default function CreateTaskModal({
             id: 'slip-order-' + Date.now(),
             name: 'Handwritten Paper Order',
             unit: 'Paper Slip',
+            price: numAmount,
+            quantity: 1,
+            total: numAmount
+          }
+        ];
+      } else if (finalItems.length === 0 && aiExtractedNotes) {
+        finalItems = [
+          {
+            id: 'voice-order-' + Date.now(),
+            name: aiExtractedNotes,
+            unit: 'Voice Order',
             price: numAmount,
             quantity: 1,
             total: numAmount
@@ -1332,6 +1318,28 @@ export default function CreateTaskModal({
                   ))}
                 </select>
               </div>
+            </div>
+          </div>
+
+          {/* SECTION 6: ORDER NOTES / ITEMS DESCRIPTION */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Order Notes / Items Description</span>
+              </span>
+              {aiExtractedNotes && (
+                <span className="text-[10px] text-amber-400 font-medium">Extracted from Voice/Slip</span>
+              )}
+            </label>
+            <div className="relative">
+              <textarea
+                rows={2}
+                value={aiExtractedNotes}
+                onChange={(e) => setAiExtractedNotes(e.target.value)}
+                placeholder="e.g. 2 packets of goods + 3x 20L Bisleri, or special delivery instructions..."
+                className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all resize-none"
+              />
             </div>
           </div>
 
