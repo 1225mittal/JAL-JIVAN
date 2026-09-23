@@ -20,7 +20,9 @@ import {
   Navigation,
   FileText,
   Camera,
-  Upload
+  Upload,
+  Mic,
+  MicOff
 } from 'lucide-react';
 import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
 import { extractOrderFromSlip } from '../lib/geminiOcr';
@@ -128,6 +130,14 @@ export default function CreateTaskModal({
   const [aiExtractedNotes, setAiExtractedNotes] = useState('');
   const [customItems, setCustomItems] = useState([]);
 
+  // Standalone Voice-to-Order State (Gemini 3.8 Flash)
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
+  const [voiceSuccessMessage, setVoiceSuccessMessage] = useState('');
+  const [voiceError, setVoiceError] = useState('');
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -233,6 +243,177 @@ export default function CreateTaskModal({
     setIsAnalyzingSlip(false);
     setAiExtractedNotes('');
   };
+
+  // Standalone Voice-to-Order Handlers (Gemini 3.8 Flash)
+  const startVoiceRecording = async () => {
+    setVoiceError('');
+    setVoiceSuccessMessage('');
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Microphone recording is not supported in this browser.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+          mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          mimeType = 'audio/webm';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4';
+        } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+          mimeType = 'audio/ogg';
+        }
+      }
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        // Release mic stream
+        stream.getTracks().forEach((track) => track.stop());
+
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (audioBlob.size === 0) {
+          setVoiceError('No speech detected. Please tap Record and try speaking again.');
+          return;
+        }
+
+        await processAudioWithGemini(audioBlob, mimeType);
+      };
+
+      recorder.start();
+      setIsRecordingVoice(true);
+    } catch (err) {
+      console.error('Error starting voice recording:', err);
+      setVoiceError(err.message || 'Microphone access denied or unavailable.');
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setIsRecordingVoice(false);
+    }
+  };
+
+  const processAudioWithGemini = async (audioBlob, mimeType) => {
+    setIsProcessingVoice(true);
+    setVoiceError('');
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(audioBlob);
+      const audioBase64 = await base64Promise;
+
+      const res = await fetch('/api/gemini-voice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64, mimeType })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Voice order request failed (${res.status})`);
+      }
+
+      const parsed = await res.json();
+
+      // Auto-populate form fields
+      if (parsed.delivery_address) {
+        setAddress(parsed.delivery_address);
+      }
+      if (parsed.customer_phone) {
+        const cleanPhone = String(parsed.customer_phone).replace(/\D/g, '');
+        if (cleanPhone.length >= 10) {
+          setCustomerPhone(cleanPhone.slice(-10));
+        }
+      }
+      if (parsed.customer_name) {
+        setCustomerName(parsed.customer_name);
+      }
+      if (parsed.landmark) {
+        setLandmark(parsed.landmark);
+      }
+      if (parsed.notes) {
+        setAiExtractedNotes(parsed.notes);
+      }
+
+      // Match items against loaded products catalog
+      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+        const updatedQuantities = { ...selectedQuantities };
+        const newCustomList = [...customItems];
+
+        parsed.items.forEach((item) => {
+          const qty = Math.max(1, Number(item.quantity) || 1);
+          const matchedProduct = findMatchingProduct(item.item_name, products);
+
+          if (matchedProduct) {
+            updatedQuantities[matchedProduct.id] =
+              (updatedQuantities[matchedProduct.id] || 0) + qty;
+          } else {
+            newCustomList.push({
+              id: 'voice-item-' + Math.random().toString(36).substring(2, 9),
+              name: item.item_name || 'Spoken Item',
+              unit: 'Voice Item',
+              quantity: qty,
+              price: 0,
+              total: 0
+            });
+          }
+        });
+
+        setSelectedQuantities(updatedQuantities);
+        if (newCustomList.length > 0) {
+          setCustomItems(newCustomList);
+        }
+
+        // Calculate total amount automatically
+        const catalogTotal = products.reduce((acc, p) => {
+          const q = updatedQuantities[p.id] || 0;
+          return acc + (Number(p.price) || 0) * q;
+        }, 0);
+        const customTotal = newCustomList.reduce((acc, ci) => acc + (ci.total || 0), 0);
+        const autoComputedTotal = catalogTotal + customTotal;
+
+        if (autoComputedTotal > 0) {
+          setAmount(autoComputedTotal.toFixed(2));
+          setIsAmountManuallyEdited(false);
+        }
+      }
+
+      setVoiceSuccessMessage('Voice order parsed successfully with Gemini 3.8 Flash!');
+    } catch (err) {
+      console.error('Gemini Voice order error:', err);
+      setVoiceError(err.message || 'Failed to parse voice order with Gemini 3.8.');
+    } finally {
+      setIsProcessingVoice(false);
+    }
+  };
+
+  // Cleanup audio tracks on modal close / unmount
+  useEffect(() => {
+    if (!isOpen) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecordingVoice(false);
+      setIsProcessingVoice(false);
+      setVoiceError('');
+      setVoiceSuccessMessage('');
+    }
+  }, [isOpen]);
 
   // 1. Fetch real saved addresses on modal open
   useEffect(() => {
@@ -695,12 +876,12 @@ export default function CreateTaskModal({
             )}
           </div>
 
-          {/* OPTIONAL: HANDWRITTEN PAPER SLIP / NOTE PHOTO */}
-          <div className="space-y-2 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
+          {/* QUICK INPUT: GROK SLIP PHOTO OCR & GEMINI 3.8 VOICE-TO-ORDER */}
+          <div className="space-y-2.5 p-3 rounded-2xl bg-slate-950/60 border border-slate-800">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-amber-400" />
-                <span>Handwritten Paper Slip / Note Photo</span>
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Quick Input: Slip Photo OCR or Voice-to-Order</span>
               </label>
               {slipFile && (
                 <span className="text-[10px] text-amber-400 font-semibold bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
@@ -719,43 +900,128 @@ export default function CreateTaskModal({
               id="slip-image-upload"
             />
 
-            {!slipPreview ? (
-              <label
-                htmlFor="slip-image-upload"
-                className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-slate-700/80 hover:border-amber-400/60 rounded-xl cursor-pointer bg-slate-900/40 hover:bg-slate-900/80 transition-all group"
+            {/* Grid: Slip Photo Upload and Gemini Voice Order side-by-side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Slip Photo OCR Button / Preview */}
+              {!slipPreview ? (
+                <label
+                  htmlFor="slip-image-upload"
+                  className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-slate-700/80 hover:border-amber-400/60 rounded-xl cursor-pointer bg-slate-900/40 hover:bg-slate-900/80 transition-all group text-center"
+                >
+                  <div className="flex items-center gap-2 text-slate-400 group-hover:text-amber-300 transition-colors">
+                    <Camera className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-medium">Slip Photo / Invoice</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Scan handwritten notes with Groq
+                  </p>
+                </label>
+              ) : (
+                <div className="flex items-center gap-3 p-2 bg-slate-900 rounded-xl border border-slate-800">
+                  <div className="w-14 h-14 rounded-lg overflow-hidden border border-slate-700 shrink-0 relative bg-black/40">
+                    <img
+                      src={slipPreview}
+                      alt="Slip Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-white truncate">
+                      {slipFile?.name || 'Handwritten Slip'}
+                    </p>
+                    <p className="text-[10px] text-emerald-400">
+                      {slipFile ? `${(slipFile.size / 1024).toFixed(0)} KB • Ready` : 'Attached'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveSlip}
+                    className="px-2 py-1 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1 font-medium"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Remove</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Standalone Voice-to-Order Button (Gemini 3.8 Flash) */}
+              <button
+                type="button"
+                id="voice-order-btn"
+                onClick={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
+                disabled={isProcessingVoice}
+                className={`flex flex-col items-center justify-center p-3.5 border-2 rounded-xl transition-all text-center cursor-pointer ${
+                  isRecordingVoice
+                    ? 'border-rose-500/60 bg-rose-500/15 text-rose-200 animate-pulse ring-2 ring-rose-500/40'
+                    : isProcessingVoice
+                    ? 'border-purple-500/50 bg-purple-500/15 text-purple-200'
+                    : 'border-dashed border-slate-700/80 hover:border-sky-400/60 bg-slate-900/40 hover:bg-slate-900/80 text-slate-300'
+                }`}
               >
-                <div className="flex items-center gap-2 text-slate-400 group-hover:text-amber-300 transition-colors">
-                  <Camera className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs font-medium">Take Photo / Upload Slip or Invoice</span>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1 text-center">
-                  Direct camera capture on mobile. Saves drivers time reading handwritten orders.
-                </p>
-              </label>
-            ) : (
-              <div className="flex items-center gap-3 p-2 bg-slate-900 rounded-xl border border-slate-800">
-                <div className="w-16 h-16 rounded-lg overflow-hidden border border-slate-700 shrink-0 relative bg-black/40">
-                  <img
-                    src={slipPreview}
-                    alt="Slip Preview"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-white truncate">
-                    {slipFile?.name || 'Handwritten Slip'}
-                  </p>
-                  <p className="text-[11px] text-emerald-400">
-                    {slipFile ? `${(slipFile.size / 1024).toFixed(0)} KB • Ready to upload` : 'Attached'}
-                  </p>
+                {isProcessingVoice ? (
+                  <>
+                    <div className="flex items-center gap-2 text-purple-300 font-semibold text-xs">
+                      <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+                      <span>Gemini 3.8 parsing order...</span>
+                    </div>
+                    <p className="text-[10px] text-purple-300/80 mt-1">
+                      Extracting address & matching items...
+                    </p>
+                  </>
+                ) : isRecordingVoice ? (
+                  <>
+                    <div className="flex items-center gap-2 text-rose-300 font-bold text-xs">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                      </span>
+                      <span>Listening... (Tap to Stop)</span>
+                    </div>
+                    <p className="text-[10px] text-rose-300/80 mt-1">
+                      Speak order details in Hindi or English
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 text-slate-300 hover:text-sky-300 transition-colors">
+                      <Mic className="w-4 h-4 text-sky-400" />
+                      <span className="text-xs font-medium">Record Voice Order</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Voice Order (Gemini 3.8 Flash)
+                    </p>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Voice Success Alert */}
+            {voiceSuccessMessage && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300 text-xs font-semibold animate-fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />
+                  <span>{voiceSuccessMessage}</span>
                 </div>
                 <button
                   type="button"
-                  onClick={handleRemoveSlip}
-                  className="px-2.5 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors flex items-center gap-1 font-medium"
+                  onClick={() => setVoiceSuccessMessage('')}
+                  className="text-sky-400 hover:text-white text-[11px] underline ml-2 shrink-0"
                 >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Remove</span>
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Voice Error Alert */}
+            {voiceError && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs animate-fade-in">
+                <span>{voiceError}</span>
+                <button
+                  type="button"
+                  onClick={() => setVoiceError('')}
+                  className="text-rose-400 hover:text-white text-[11px] underline ml-2 shrink-0"
+                >
+                  Dismiss
                 </button>
               </div>
             )}
