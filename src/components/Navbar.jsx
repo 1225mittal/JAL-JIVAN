@@ -44,7 +44,7 @@ export default function Navbar({
 
         {/* Right Section: Database Info & Role Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Database indicator (Mobile & Desktop) */}
+          {/* Operational Status indicator (Mobile & Desktop) */}
           <button
             onClick={onOpenDbInfo}
             className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium transition-all ${
@@ -52,14 +52,25 @@ export default function Navbar({
                 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20'
                 : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
             }`}
-            title="Click for Supabase database setup status"
+            title="System Status: Operational"
           >
-            <Database className="w-3.5 h-3.5" />
+            <span className="relative flex h-2 w-2">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isSupabaseConfigured ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+              <span
+                className={`relative inline-flex rounded-full h-2 w-2 ${
+                  isSupabaseConfigured ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
+            </span>
             <span className="hidden sm:inline">
-              {isSupabaseConfigured ? 'Supabase Live' : 'Demo Local Mode'}
+              {isSupabaseConfigured ? 'System Online' : 'Demo Local Mode'}
             </span>
             <span className="sm:hidden">
-              {isSupabaseConfigured ? 'Supabase' : 'Demo'}
+              {isSupabaseConfigured ? 'System Online' : 'Demo'}
             </span>
           </button>
 
