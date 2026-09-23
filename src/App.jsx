@@ -188,15 +188,15 @@ export default function App() {
     }
   };
 
-  // Create Delivery Task (Admin)
+  // Create Delivery (Admin)
   const handleCreateTask = async (taskData) => {
     try {
       const created = await createOrder(taskData);
       setOrders((prev) => [created, ...prev]);
-      showToast(`Task #${created.order_number} dispatched successfully!`, 'success');
+      showToast(`Delivery #${created.order_number} dispatched successfully!`, 'success');
       return created;
     } catch (err) {
-      showToast(err.message || 'Error creating task', 'error');
+      showToast(err.message || 'Error creating delivery', 'error');
       throw err;
     }
   };

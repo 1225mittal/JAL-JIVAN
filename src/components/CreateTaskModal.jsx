@@ -540,7 +540,7 @@ export default function CreateTaskModal({
       handleRemoveSlip();
       onClose();
     } catch (err) {
-      setError(err.message || 'Failed to create task');
+      setError(err.message || 'Failed to create delivery');
     } finally {
       setLoading(false);
     }
@@ -556,7 +556,7 @@ export default function CreateTaskModal({
               <PackagePlus className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-semibold text-white text-base">Create Delivery Task</h3>
+              <h3 className="font-semibold text-white text-base">Create Delivery</h3>
               <p className="text-[11px] text-slate-400">Dispatch water jars or select catalog items</p>
             </div>
           </div>

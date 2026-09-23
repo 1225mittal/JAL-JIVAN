@@ -615,7 +615,7 @@ export function AdminPanel({
             className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-emerald-600/25"
           >
             <PackagePlus className="w-4 h-4" />
-            <span>Create Task</span>
+            <span>Create Delivery</span>
           </button>
         </div>
       </div>
@@ -625,7 +625,7 @@ export function AdminPanel({
         {/* Total Orders */}
         <div className="glass-card p-3.5 rounded-2xl border border-slate-800">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Tasks</span>
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Deliveries</span>
             <div className="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
               <Filter className="w-3.5 h-3.5" />
             </div>
@@ -823,11 +823,11 @@ export function AdminPanel({
           {filteredOrders.length === 0 ? (
             <div className="glass-card p-12 text-center rounded-2xl border border-slate-800">
               <Truck className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-              <p className="text-slate-300 font-semibold text-sm">No delivery tasks found</p>
+              <p className="text-slate-300 font-semibold text-sm">No deliveries found</p>
               <p className="text-slate-500 text-xs mt-1">
                 {searchQuery
                   ? 'Try clearing the search query or changing filters'
-                  : 'Click "Create Task" above to dispatch your first order'}
+                  : 'Click "Create Delivery" above to dispatch your first order'}
               </p>
             </div>
           ) : (
@@ -865,7 +865,7 @@ export function AdminPanel({
                           type="button"
                           onClick={() => handleOpenEditOrder(order)}
                           className="p-1 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                          title="Edit Task / Order"
+                          title="Edit Delivery / Order"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
@@ -873,7 +873,7 @@ export function AdminPanel({
                           type="button"
                           onClick={() => setDeleteConfirmOrder(order)}
                           className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                          title="Cancel / Delete Task"
+                          title="Cancel / Delete Delivery"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1611,7 +1611,7 @@ export function AdminPanel({
                 </div>
                 <div>
                   <h3 className="font-semibold text-white text-base">
-                    Edit Task #{editingOrder.order_number}
+                    Edit Delivery #{editingOrder.order_number}
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     Update delivery details, amount, address, and assigned driver
@@ -1840,7 +1840,7 @@ export function AdminPanel({
                 <Trash2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-white text-base">Cancel & Delete Task?</h3>
+                <h3 className="font-bold text-white text-base">Cancel & Delete Delivery?</h3>
                 <p className="text-xs text-slate-400">Order #{deleteConfirmOrder.order_number}</p>
               </div>
             </div>
@@ -1870,7 +1870,7 @@ export function AdminPanel({
                     <span>Deleting...</span>
                   </>
                 ) : (
-                  <span>Delete Task</span>
+                  <span>Delete Delivery</span>
                 )}
               </button>
             </div>
