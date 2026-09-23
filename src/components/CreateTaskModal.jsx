@@ -25,6 +25,72 @@ import {
 import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
 import { extractOrderFromSlip } from '../lib/geminiOcr';
 
+// Helper to find matching product in catalog based on case-insensitive substring and synonym matching
+const findMatchingProduct = (itemName, catalogProducts = []) => {
+  if (!itemName || !catalogProducts || catalogProducts.length === 0) return null;
+
+  const raw = String(itemName).toLowerCase().trim();
+  if (!raw) return null;
+
+  // Clean common noise prefixes like "1.", "1x", "qty: 2"
+  const cleaned = raw.replace(/^(\d+[\s\.\-xX]*|[^\w\s]+)/, '').replace(/[^\w\s]/g, ' ').trim();
+  const searchTerms = [cleaned, raw].filter(Boolean);
+
+  // 1. Direct case-insensitive substring match on product name or unit
+  for (const term of searchTerms) {
+    if (term.length < 2) continue;
+    const match = catalogProducts.find((p) => {
+      const pName = (p.name || '').toLowerCase();
+      const pUnit = (p.unit || '').toLowerCase();
+      return pName.includes(term) || term.includes(pName) || pUnit.includes(term);
+    });
+    if (match) return match;
+  }
+
+  // 2. Word-level token match (e.g. matching 'bisleri' token in multi-word product names)
+  const tokens = cleaned.split(/\s+/).filter((t) => t.length >= 3);
+  for (const token of tokens) {
+    const match = catalogProducts.find((p) => {
+      const pName = (p.name || '').toLowerCase();
+      const pUnit = (p.unit || '').toLowerCase();
+      return pName.includes(token) || pUnit.includes(token);
+    });
+    if (match) return match;
+  }
+
+  // 3. Smart fallbacks for common drinking water delivery terms (e.g. 'Bisleri', 'mineral', 'water')
+  const isBisleriOrWater = cleaned.includes('bisleri') || cleaned.includes('mineral') || cleaned.includes('water');
+  if (isBisleriOrWater) {
+    // Prefer product with "bisleri", then "mineral", then "20l", then general "water"
+    const bisleriMatch = catalogProducts.find((p) => (p.name || '').toLowerCase().includes('bisleri'));
+    if (bisleriMatch) return bisleriMatch;
+
+    const mineralMatch = catalogProducts.find((p) => (p.name || '').toLowerCase().includes('mineral'));
+    if (mineralMatch) return mineralMatch;
+
+    const twentyLitreMatch = catalogProducts.find((p) => {
+      const pName = (p.name || '').toLowerCase();
+      const pUnit = (p.unit || '').toLowerCase();
+      return pName.includes('20l') || pName.includes('20 l') || pUnit.includes('20l');
+    });
+    if (twentyLitreMatch) return twentyLitreMatch;
+
+    const generalWater = catalogProducts.find((p) => (p.name || '').toLowerCase().includes('water'));
+    if (generalWater) return generalWater;
+  }
+
+  // 4. Can / Jar alias match
+  if (cleaned.includes('jar') || cleaned.includes('can')) {
+    const jarMatch = catalogProducts.find((p) => {
+      const pName = (p.name || '').toLowerCase();
+      return pName.includes('jar') || pName.includes('can') || pName.includes('20');
+    });
+    if (jarMatch) return jarMatch;
+  }
+
+  return null;
+};
+
 export default function CreateTaskModal({
   isOpen,
   onClose,
@@ -95,29 +161,19 @@ export default function CreateTaskModal({
           setAiExtractedNotes(parsed.notes);
         }
 
-        // Map parsed items into order items
+        // Map parsed items into catalog products and calculate total amount automatically
         if (Array.isArray(parsed.items) && parsed.items.length > 0) {
           const updatedQuantities = { ...selectedQuantities };
           const newCustomList = [];
 
           parsed.items.forEach((item) => {
-            const rawName = (item.item_name || '').toLowerCase();
-            const matchedProduct = products.find((p) => {
-              const pName = (p.name || '').toLowerCase();
-              return (
-                pName.includes(rawName) ||
-                rawName.includes(pName) ||
-                (rawName.includes('20') && pName.includes('20')) ||
-                (rawName.includes('jar') && pName.includes('can')) ||
-                (rawName.includes('can') && pName.includes('can'))
-              );
-            });
+            const qty = Math.max(1, Number(item.quantity) || 1);
+            const matchedProduct = findMatchingProduct(item.item_name, products);
 
             if (matchedProduct) {
               updatedQuantities[matchedProduct.id] =
-                (updatedQuantities[matchedProduct.id] || 0) + (Number(item.quantity) || 1);
+                (updatedQuantities[matchedProduct.id] || 0) + qty;
             } else {
-              const qty = Number(item.quantity) || 1;
               const unitPrice = Number(item.price) || 0;
               newCustomList.push({
                 id: 'ai-item-' + Math.random().toString(36).substring(2, 9),
@@ -134,10 +190,23 @@ export default function CreateTaskModal({
           if (newCustomList.length > 0) {
             setCustomItems(newCustomList);
           }
-        }
 
-        // Set total amount
-        if (parsed.total_amount && Number(parsed.total_amount) > 0) {
+          // Automatically calculate total amount from matched catalog items & custom items
+          const catalogTotal = products.reduce((acc, p) => {
+            const q = updatedQuantities[p.id] || 0;
+            return acc + (Number(p.price) || 0) * q;
+          }, 0);
+          const customTotal = newCustomList.reduce((acc, ci) => acc + (ci.total || 0), 0);
+          const autoComputedTotal = catalogTotal + customTotal;
+
+          if (autoComputedTotal > 0) {
+            setAmount(autoComputedTotal.toFixed(2));
+            setIsAmountManuallyEdited(false);
+          } else if (parsed.total_amount && Number(parsed.total_amount) > 0) {
+            setAmount(String(parsed.total_amount));
+            setIsAmountManuallyEdited(true);
+          }
+        } else if (parsed.total_amount && Number(parsed.total_amount) > 0) {
           setAmount(String(parsed.total_amount));
           setIsAmountManuallyEdited(true);
         }

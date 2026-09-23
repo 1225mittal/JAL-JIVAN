@@ -18,17 +18,33 @@ export default async function handler(req, res) {
       ? imageBase64
       : `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
-    const prompt = `Analyze this handwritten order slip or invoice photo carefully. Extract the order details into this EXACT raw JSON structure (no markdown formatting, no backticks, just raw valid json):
+    const prompt = `You are an expert Indian quick-commerce OCR parser for delivery notes and slips.
+Analyze this handwritten note carefully.
+
+Rules for field parsing:
+1. DELIVERY ADDRESS & FLAT NUMBERS:
+   - Phrases like "Ruby 1-505", "Tower B 402", "G-12", "Flat 304", or society names are ALWAYS the "delivery_address", NEVER a customer name or phone number.
+   - Set "delivery_address" to whatever tower/flat/house/society is written (e.g. "Ruby 1-505").
+2. CUSTOMER PHONE:
+   - MUST be a valid 10-digit Indian mobile number (e.g., starts with 6, 7, 8, or 9).
+   - NEVER put flat numbers, hyphenated numbers like "1-505", or item counts into "customer_phone". If no 10-digit number exists, leave it as "".
+3. CUSTOMER NAME:
+   - Only set if an actual person's name is explicitly written. If only an apartment or flat is written, leave "customer_name" as "".
+4. ITEMS & PRODUCTS:
+   - Extract item names and quantities. For example: "1 Bisleri", "2 20L", "Bisleri 20L" -> item_name: "Bisleri", quantity: 1.
+   - If a standard 20L Bisleri can or jar is implied without price, default price to 0 or leave for catalog lookup.
+
+Return EXACT raw JSON matching this schema:
 {
-  "customer_name": "string or empty",
-  "customer_phone": "string or empty",
-  "delivery_address": "string or empty",
-  "landmark": "string or empty",
+  "customer_name": "",
+  "customer_phone": "",
+  "delivery_address": "Ruby 1-505",
+  "landmark": "",
   "items": [
-    { "item_name": "string", "quantity": 1, "price": 0 }
+    { "item_name": "Bisleri", "quantity": 1, "price": 0 }
   ],
   "total_amount": 0,
-  "notes": "string or empty"
+  "notes": ""
 }`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
