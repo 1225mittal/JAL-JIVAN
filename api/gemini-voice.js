@@ -72,42 +72,57 @@ export default async function handler(req, res) {
 
     if (!transcribedText) {
       return res.status(200).json({
-        delivery_address: '',
-        customer_phone: '',
-        customer_name: '',
+        customerName: '',
+        customerPhone: '',
+        deliveryAddress: '',
         landmark: '',
         items: [],
-        notes: ''
+        totalAmount: 0,
+        notes: '',
+        customer_name: '',
+        customer_phone: '',
+        delivery_address: '',
+        total_amount: 0,
+        _transcription: ''
       });
     }
 
-    // Step 2: Pass the transcribed text to Groq chat completions
+    // Step 2: Pass transcribed text to Groq chat completions using the verified working model
     const systemPrompt = `You are an expert Indian quick-commerce delivery dispatcher assistant.
 Extract order details strictly from this spoken delivery note (transcribed from Hindi, Hinglish, or English).
 
-Rules for field parsing:
+Rules:
 1. DELIVERY ADDRESS & FLAT NUMBERS:
-   - Phrases like "Ruby 1-505", "Tower B 402", "G-12", "Flat 304", or society/colony names are ALWAYS the "delivery_address", NEVER a customer name or phone number.
-   - Set "delivery_address" to whatever tower/flat/house/society is mentioned.
+   - Phrases like "Ruby 1-505", "Tower B 402", "G-12", "Flat 304", or society/colony names are ALWAYS the "deliveryAddress", NEVER a customer name or phone number.
+   - Set "deliveryAddress" to whatever tower/flat/house/society is mentioned. If not mentioned, set to "".
 2. CUSTOMER PHONE:
    - MUST be a valid 10-digit Indian mobile number (e.g., starts with 6, 7, 8, or 9).
-   - NEVER put flat numbers, hyphenated numbers like "1-505", or item counts into "customer_phone". If no 10-digit number exists, leave it as "".
+   - NEVER put flat numbers, hyphenated numbers like "1-505", or item counts into "customerPhone". If no 10-digit number exists, leave it as "".
 3. CUSTOMER NAME:
-   - Person's name if explicitly mentioned, otherwise "".
+   - Person's name if explicitly spoken, otherwise "".
 4. LANDMARK:
-   - Nearby landmark if mentioned, otherwise "".
+   - Nearby landmark if explicitly spoken, otherwise "".
 5. ITEMS & QUANTITIES:
-   - Extract item names and quantities (e.g., "do Bisleri can", "2 water bottles", "1 carton" -> item_name: "Bisleri", quantity: 2).
-6. NOTES:
-   - Any special delivery instructions (e.g., "bell mat bajana", "call before delivery").
+   - Extract item name and quantity into "items" array: [{ "name": "Bisleri", "quantity": 1 }].
+   - If no quantity is specified, default quantity to 1.
+   - If no items are mentioned, set "items" to [].
+6. TOTAL AMOUNT:
+   - Total price or amount if explicitly spoken, otherwise 0.
+7. NOTES:
+   - Any special delivery instructions (e.g. "bell mat bajana", "call before delivery", "leave at door"), otherwise "".
+8. CRITICAL RULE:
+   - Do NOT invent, assume, or extrapolate facts or details not spoken by the user. Only extract what is explicitly stated in the spoken text.
 
-Return EXACT raw JSON matching this schema:
+Return strictly valid JSON matching this schema:
 {
-  "delivery_address": "",
-  "customer_phone": "",
-  "customer_name": "",
+  "customerName": "",
+  "customerPhone": "",
+  "deliveryAddress": "",
   "landmark": "",
-  "items": [{ "item_name": "", "quantity": 1 }],
+  "items": [
+    { "name": "", "quantity": 1 }
+  ],
+  "totalAmount": 0,
   "notes": ""
 }`;
 
@@ -118,7 +133,7 @@ Return EXACT raw JSON matching this schema:
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
+        model: 'qwen/qwen3.8-27b',
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: systemPrompt },
@@ -139,7 +154,7 @@ Return EXACT raw JSON matching this schema:
     const chatData = await chatRes.json();
     const rawContent = chatData.choices?.[0]?.message?.content;
     if (!rawContent) {
-      return res.status(500).json({ error: 'No content returned from Groq model' });
+      return res.status(502).json({ error: 'No content returned from Groq model' });
     }
 
     const cleaned = rawContent
@@ -147,15 +162,47 @@ Return EXACT raw JSON matching this schema:
       .replace(/```/g, '')
       .trim();
 
-    const parsedJson = JSON.parse(cleaned);
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(cleaned);
+    } catch (parseErr) {
+      console.error('Failed to parse Groq response JSON:', cleaned, parseErr);
+      return res.status(502).json({
+        error: `Failed to parse structured order from Groq response: ${parseErr.message}`
+      });
+    }
+
+    const customerName = String(parsedJson.customerName || parsedJson.customer_name || '').trim();
+    const customerPhone = String(parsedJson.customerPhone || parsedJson.customer_phone || '').trim();
+    const deliveryAddress = String(parsedJson.deliveryAddress || parsedJson.delivery_address || '').trim();
+    const landmark = String(parsedJson.landmark || '').trim();
+    const totalAmount = Number(parsedJson.totalAmount || parsedJson.total_amount) || 0;
+    const notes = String(parsedJson.notes || '').trim();
+
+    const rawItems = Array.isArray(parsedJson.items) ? parsedJson.items : [];
+    const normalizedItems = rawItems.map((item) => {
+      const name = String(item?.name || item?.item_name || '').trim();
+      const quantity = Math.max(1, Number(item?.quantity) || 1);
+      return {
+        name,
+        item_name: name,
+        quantity
+      };
+    }).filter(item => item.name.length > 0);
 
     return res.status(200).json({
-      delivery_address: parsedJson.delivery_address || '',
-      customer_phone: parsedJson.customer_phone || '',
-      customer_name: parsedJson.customer_name || '',
-      landmark: parsedJson.landmark || '',
-      items: Array.isArray(parsedJson.items) ? parsedJson.items : [],
-      notes: parsedJson.notes || '',
+      customerName,
+      customerPhone,
+      deliveryAddress,
+      landmark,
+      items: normalizedItems,
+      totalAmount,
+      notes,
+      // Backward compatibility aliases
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      delivery_address: deliveryAddress,
+      total_amount: totalAmount,
       _transcription: transcribedText
     });
   } catch (error) {

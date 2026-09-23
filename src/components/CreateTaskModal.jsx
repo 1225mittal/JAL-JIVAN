@@ -335,17 +335,20 @@ export default function CreateTaskModal({
       const parsed = await res.json();
 
       // Auto-populate form fields
-      if (parsed.delivery_address) {
-        setAddress(parsed.delivery_address);
+      const deliveryAddress = parsed.deliveryAddress || parsed.delivery_address;
+      if (deliveryAddress) {
+        setAddress(deliveryAddress);
       }
-      if (parsed.customer_phone) {
-        const cleanPhone = String(parsed.customer_phone).replace(/\D/g, '');
+      const customerPhone = parsed.customerPhone || parsed.customer_phone;
+      if (customerPhone) {
+        const cleanPhone = String(customerPhone).replace(/\D/g, '');
         if (cleanPhone.length >= 10) {
           setCustomerPhone(cleanPhone.slice(-10));
         }
       }
-      if (parsed.customer_name) {
-        setCustomerName(parsed.customer_name);
+      const customerName = parsed.customerName || parsed.customer_name;
+      if (customerName) {
+        setCustomerName(customerName);
       }
       if (parsed.landmark) {
         setLandmark(parsed.landmark);
@@ -361,7 +364,8 @@ export default function CreateTaskModal({
 
         parsed.items.forEach((item) => {
           const qty = Math.max(1, Number(item.quantity) || 1);
-          const matchedProduct = findMatchingProduct(item.item_name, products);
+          const itemName = item.name || item.item_name || 'Spoken Item';
+          const matchedProduct = findMatchingProduct(itemName, products);
 
           if (matchedProduct) {
             updatedQuantities[matchedProduct.id] =
@@ -369,7 +373,7 @@ export default function CreateTaskModal({
           } else {
             newCustomList.push({
               id: 'voice-item-' + Math.random().toString(36).substring(2, 9),
-              name: item.item_name || 'Spoken Item',
+              name: itemName,
               unit: 'Voice Item',
               quantity: qty,
               price: 0,
@@ -394,7 +398,13 @@ export default function CreateTaskModal({
         if (autoComputedTotal > 0) {
           setAmount(autoComputedTotal.toFixed(2));
           setIsAmountManuallyEdited(false);
+        } else if ((parsed.totalAmount || parsed.total_amount) && Number(parsed.totalAmount || parsed.total_amount) > 0) {
+          setAmount(String(parsed.totalAmount || parsed.total_amount));
+          setIsAmountManuallyEdited(true);
         }
+      } else if ((parsed.totalAmount || parsed.total_amount) && Number(parsed.totalAmount || parsed.total_amount) > 0) {
+        setAmount(String(parsed.totalAmount || parsed.total_amount));
+        setIsAmountManuallyEdited(true);
       }
 
       setVoiceSuccessMessage('Voice order parsed successfully with Groq Whisper & AI!');
