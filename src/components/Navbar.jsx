@@ -1,10 +1,13 @@
 import React from 'react';
-import { ShieldCheck, Droplets, Database, LogOut, UserCheck } from 'lucide-react';
+import { ShieldCheck, Droplets, Database, LogOut, UserCheck, Truck, LayoutGrid } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
   isAdminRoute = false,
   isAdminView = false,
+  adminSubView = 'hub',
+  onSelectAdminSubView,
+  onToggleAdminView,
   currentDriver = null,
   onDriverLogout,
   onOpenDbInfo,
@@ -31,7 +34,13 @@ export default function Navbar({
                     : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                 }`}
               >
-                {isViewAdmin ? 'Admin Command' : 'Driver Dispatch'}
+                {isViewAdmin
+                  ? adminSubView === 'damage'
+                    ? 'Damage & Returns'
+                    : adminSubView === 'delivery'
+                    ? 'Dispatch Console'
+                    : 'Admin Command Hub'
+                  : 'Driver Dispatch'}
               </span>
             </div>
             <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
@@ -44,6 +53,39 @@ export default function Navbar({
 
         {/* Right Section: Database Info & Role Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Quick Hub button if inside Admin sub-module */}
+          {isViewAdmin && isAdminLoggedIn && adminSubView !== 'hub' && onSelectAdminSubView && (
+            <button
+              onClick={() => onSelectAdminSubView('hub')}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-semibold transition-all shadow-sm"
+              title="Return to Admin Hub Home"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Main Hub</span>
+            </button>
+          )}
+
+          {/* Toggle Driver / Admin View */}
+          {onToggleAdminView && (
+            <button
+              onClick={onToggleAdminView}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-medium transition-all shadow-sm"
+              title={isViewAdmin ? 'Switch to Driver View' : 'Switch to Admin Hub'}
+            >
+              {isViewAdmin ? (
+                <>
+                  <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="hidden md:inline">Driver Portal</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="hidden md:inline">Admin Hub</span>
+                </>
+              )}
+            </button>
+          )}
+
           {/* Operational Status indicator (Mobile & Desktop) */}
           <button
             onClick={onOpenDbInfo}
@@ -70,7 +112,7 @@ export default function Navbar({
               {isSupabaseConfigured ? 'System Online' : 'Demo Local Mode'}
             </span>
             <span className="sm:hidden">
-              {isSupabaseConfigured ? 'System Online' : 'Demo'}
+              {isSupabaseConfigured ? 'Online' : 'Demo'}
             </span>
           </button>
 

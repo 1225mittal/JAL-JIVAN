@@ -75,3 +75,45 @@ export const initialProducts = [
 
 export const initialAddressBook = [];
 
+export const initialDamages = [
+  {
+    id: 'dmg-101',
+    item_name: '20L RO Purified Water Jar',
+    quantity: 2,
+    damage_category: 'Cracked Body',
+    driver_name: 'Rahul Sharma',
+    driver_id: 'drv-01',
+    reason: 'Fell from delivery bike rear rack during transit over speed bump',
+    estimated_value: 300,
+    photo_url: 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?w=500&auto=format&fit=crop&q=80',
+    status: 'Pending',
+    created_at: new Date(Date.now() - 3600000 * 2).toISOString()
+  },
+  {
+    id: 'dmg-102',
+    item_name: 'Countertop Water Jar Tap & Stand',
+    quantity: 1,
+    damage_category: 'Tap Leakage',
+    driver_name: 'Amit Kumar',
+    driver_id: 'drv-02',
+    reason: 'Valve thread stripped upon customer unboxing, continuous drip',
+    estimated_value: 280,
+    photo_url: 'https://images.unsplash.com/photo-1584905066893-7d5c142ba4e1?w=500&auto=format&fit=crop&q=80',
+    status: 'Replaced',
+    created_at: new Date(Date.now() - 3600000 * 18).toISOString()
+  },
+  {
+    id: 'dmg-103',
+    item_name: '20L Premium Mineral Water Can',
+    quantity: 3,
+    damage_category: 'Broken Neck',
+    driver_name: 'Sunil Yadav',
+    driver_id: 'drv-03',
+    reason: 'Crushed under heavy crate stacking in warehouse unloading',
+    estimated_value: 450,
+    photo_url: '',
+    status: 'Written Off',
+    created_at: new Date(Date.now() - 3600000 * 36).toISOString()
+  }
+];
+

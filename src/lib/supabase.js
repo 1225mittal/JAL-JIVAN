@@ -5,7 +5,8 @@ import {
   initialStoreSettings,
   initialDriverLocations,
   initialProducts,
-  initialAddressBook
+  initialAddressBook,
+  initialDamages
 } from './mockData';
 
 let rawUrl = import.meta.env.VITE_SUPABASE_URL || '';
@@ -36,6 +37,28 @@ const STORAGE_DRIVERS = 'jal_jivan_drivers';
 const STORAGE_ORDERS = 'jal_jivan_orders';
 const STORAGE_PRODUCTS = 'jal_jivan_products';
 const STORAGE_ADDRESS_BOOK = 'jal_jivan_address_book';
+const STORAGE_DAMAGES = 'jal_jivan_damages';
+
+const getLocalDamages = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_DAMAGES);
+    if (!saved) {
+      localStorage.setItem(STORAGE_DAMAGES, JSON.stringify(initialDamages));
+      return initialDamages;
+    }
+    return JSON.parse(saved);
+  } catch (e) {
+    return initialDamages;
+  }
+};
+
+const saveLocalDamages = (damages) => {
+  try {
+    localStorage.setItem(STORAGE_DAMAGES, JSON.stringify(damages));
+  } catch (e) {
+    console.error('Failed saving damages locally', e);
+  }
+};
 
 const getLocalProducts = () => {
   try {
@@ -1662,6 +1685,148 @@ export async function deleteSavedAddress(addressStr, { alsoRemoveFromOrders = fa
 
   return true;
 }
+
+// ==========================================
+// DAMAGE & RETURNS OPERATIONS
+// ==========================================
+
+export async function uploadDamagePhoto(file) {
+  if (!file) return null;
+  if (isSupabaseConfigured) {
+    try {
+      const sanitizedName = file.name ? file.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'damage.jpg';
+      const filePath = `damages/${Date.now()}_${sanitizedName}`;
+
+      const { data, error } = await supabase.storage
+        .from('delivery-proofs')
+        .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+      if (!error && data) {
+        const { data: publicUrlData } = supabase.storage
+          .from('delivery-proofs')
+          .getPublicUrl(filePath);
+        if (publicUrlData?.publicUrl) return publicUrlData.publicUrl;
+      }
+    } catch (err) {
+      console.warn('Storage upload error, falling back to base64 data url:', err.message);
+    }
+  }
+
+  // Fallback to Data URL for instant rendering and persistence
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function fetchProductDamages() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('product_damages')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalDamages(data);
+        return data;
+      }
+      if (error) {
+        console.warn('Supabase fetchProductDamages query notice:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase fetchProductDamages exception:', err.message);
+    }
+  }
+  return getLocalDamages();
+}
+
+export async function createProductDamage(damagePayload) {
+  const newDamage = {
+    id: 'dmg-' + Date.now(),
+    item_name: damagePayload.item_name || damagePayload.itemName || '20L RO Purified Water Jar',
+    quantity: Number(damagePayload.quantity) || 1,
+    damage_category: damagePayload.damage_category || damagePayload.damageCategory || 'Cracked Body',
+    driver_name: damagePayload.driver_name || damagePayload.driverName || 'Unassigned / Warehouse',
+    driver_id: damagePayload.driver_id || damagePayload.driverId || null,
+    reason: damagePayload.reason || damagePayload.notes || '',
+    notes: damagePayload.notes || damagePayload.reason || '',
+    estimated_value: Number(damagePayload.estimated_value || damagePayload.estimatedValue) || 0,
+    photo_url: damagePayload.photo_url || damagePayload.photoUrl || null,
+    status: damagePayload.status || 'Pending',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('product_damages')
+        .insert([newDamage])
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDamages();
+        saveLocalDamages([data, ...local.filter((d) => d.id !== data.id)]);
+        return data;
+      }
+      if (error) {
+        console.warn('Supabase createProductDamage error, persisting locally:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase createProductDamage exception:', err.message);
+    }
+  }
+
+  // Local persistence fallback
+  const current = getLocalDamages();
+  const updated = [newDamage, ...current];
+  saveLocalDamages(updated);
+  return newDamage;
+}
+
+export async function updateProductDamageStatus(id, newStatus) {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('product_damages')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDamages();
+        saveLocalDamages(local.map((d) => (d.id === id ? { ...d, ...data } : d)));
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase updateProductDamageStatus error:', err.message);
+    }
+  }
+
+  const local = getLocalDamages();
+  const updated = local.map((d) => (d.id === id ? { ...d, status: newStatus, updated_at: new Date().toISOString() } : d));
+  saveLocalDamages(updated);
+  return updated.find((d) => d.id === id) || { id, status: newStatus };
+}
+
+export async function deleteProductDamage(id) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('product_damages').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteProductDamage error:', err.message);
+    }
+  }
+  const local = getLocalDamages();
+  saveLocalDamages(local.filter((d) => d.id !== id));
+  return true;
+}
+
 
 
 

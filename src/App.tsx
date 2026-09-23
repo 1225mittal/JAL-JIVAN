@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
+import AdminHub from './components/AdminHub';
+import DamageManagement from './components/DamageManagement';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import DriverPortal from './components/DriverPortal';
@@ -27,6 +29,7 @@ import {
   deleteDeliveryBoy,
   updateSavedAddress,
   deleteSavedAddress,
+  fetchProductDamages,
   supabase,
   isSupabaseConfigured
 } from './lib/supabase';
@@ -99,10 +102,14 @@ export default function App() {
   });
 
   // Data State
-  const [drivers, setDrivers] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [damages, setDamages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
+  const [adminSubView, setAdminSubView] = useState<'hub' | 'delivery' | 'damage'>('hub');
 
   // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {
@@ -146,14 +153,16 @@ export default function App() {
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
-      const [driversData, ordersData, productsData] = await Promise.all([
+      const [driversData, ordersData, productsData, damagesData] = await Promise.all([
         fetchDrivers(),
         fetchOrdersFromApi(),
-        fetchProducts()
+        fetchProducts(),
+        fetchProductDamages()
       ]);
       setDrivers(driversData || []);
       setOrders(ordersData || []);
       setProducts(productsData || []);
+      setDamages(damagesData || []);
     } catch (err) {
       console.error('Error loading data:', err);
       showToast('Failed to load live data', 'error');
@@ -502,12 +511,29 @@ export default function App() {
     }
   };
 
+  const handleToggleAdminView = () => {
+    setIsAdminView((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          window.history.pushState({}, '', '/admin');
+        } else {
+          window.history.pushState({}, '', '/');
+        }
+      } catch (e) {}
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-full flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
         isAdminView={isAdminView}
         isAdminRoute={isAdminView}
+        adminSubView={adminSubView}
+        onSelectAdminSubView={(view: any) => setAdminSubView(view)}
+        onToggleAdminView={handleToggleAdminView}
         currentDriver={currentDriver}
         onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
@@ -518,29 +544,89 @@ export default function App() {
       {/* Main Container: Distinct Routes */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:py-6">
         {isAdminView ? (
-          /* ROUTE /admin OR ENDING IN "admin": ADMIN PANEL VIEW */
+          /* ROUTE /admin OR ENDING IN "admin": ADMIN HUB & SUB-MODULES */
           isAdminLoggedIn ? (
-            <AdminDashboard
-              orders={orders}
-              drivers={drivers}
-              products={products}
-              loading={loading}
-              onOpenAddDriver={() => setIsAddDriverOpen(true)}
-              onOpenCreateTask={() => setIsCreateTaskOpen(true)}
-              onUpdateStatus={handleUpdateStatus}
-              onAssignDriver={handleAssignDriver}
-              onAddProduct={handleAddProduct}
-              onUpdateProduct={handleUpdateProduct}
-              onDeleteProduct={handleDeleteProduct}
-              onUpdateOrder={handleUpdateOrder}
-              onDeleteOrder={handleDeleteOrder}
-              onUpdateDriver={handleUpdateDriver}
-              onDeleteDriver={handleDeleteDriver}
-              onUpdateAddress={handleUpdateAddress}
-              onDeleteAddress={handleDeleteAddress}
-              onRefresh={loadInitialData}
-              onLogout={handleAdminLogout}
-            />
+            <div>
+              {/* Persistent Breadcrumb Navigation Bar when inside sub-modules */}
+              {adminSubView !== 'hub' && (
+                <div className="flex items-center justify-between mb-4 px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-md">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setAdminSubView('hub')}
+                      className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      ← Back to Admin Hub
+                    </button>
+                    <span className="text-slate-600 font-bold">/</span>
+                    <span className="text-white font-semibold">
+                      {adminSubView === 'delivery'
+                        ? 'Delivery & Dispatch System'
+                        : 'Damage & Returns Management'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {adminSubView === 'delivery' ? (
+                      <button
+                        onClick={() => setAdminSubView('damage')}
+                        className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
+                      >
+                        Switch to Damage Portal →
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setAdminSubView('delivery')}
+                        className="text-xs text-emerald-300 hover:text-white px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all font-medium"
+                      >
+                        Switch to Dispatch Console →
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Render Selected Admin Sub-Module */}
+              {adminSubView === 'hub' ? (
+                <AdminHub
+                  onSelectModule={(mod: any) => setAdminSubView(mod)}
+                  orders={orders}
+                  drivers={drivers}
+                  damages={damages}
+                  onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+                  onOpenAddDriver={() => setIsAddDriverOpen(true)}
+                  onRefreshAll={loadInitialData}
+                />
+              ) : adminSubView === 'damage' ? (
+                <DamageManagement
+                  onBackToHub={() => setAdminSubView('hub')}
+                  drivers={drivers}
+                  damages={damages}
+                  onDamagesChange={setDamages}
+                />
+              ) : (
+                <AdminDashboard
+                  orders={orders}
+                  drivers={drivers}
+                  products={products}
+                  loading={loading}
+                  onOpenAddDriver={() => setIsAddDriverOpen(true)}
+                  onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+                  onUpdateStatus={handleUpdateStatus}
+                  onAssignDriver={handleAssignDriver}
+                  onAddProduct={handleAddProduct}
+                  onUpdateProduct={handleUpdateProduct}
+                  onDeleteProduct={handleDeleteProduct}
+                  onUpdateOrder={handleUpdateOrder}
+                  onDeleteOrder={handleDeleteOrder}
+                  onUpdateDriver={handleUpdateDriver}
+                  onDeleteDriver={handleDeleteDriver}
+                  onUpdateAddress={handleUpdateAddress}
+                  onDeleteAddress={handleDeleteAddress}
+                  onRefresh={loadInitialData}
+                  onLogout={handleAdminLogout}
+                />
+              )}
+            </div>
           ) : (
             <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           )
