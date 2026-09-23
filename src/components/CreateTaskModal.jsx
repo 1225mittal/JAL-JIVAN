@@ -244,6 +244,64 @@ export default function CreateTaskModal({
     setAiExtractedNotes('');
   };
 
+  // Clean reset function to prevent modal state persistence on cancel or close
+  const resetForm = () => {
+    // 1. Reset core order fields
+    setOrderNumber(`JJ-${Math.floor(1000 + Math.random() * 9000)}`);
+    setAmount('');
+    setIsAmountManuallyEdited(false);
+    setAddress('');
+    setLandmark('');
+    setCustomerPhone('');
+    setCustomerName('');
+    setSelectedDriverId('');
+    setPinnedLat(null);
+    setPinnedLng(null);
+    setIsAddressDropdownOpen(false);
+
+    // 2. Reset products and custom items
+    setSelectedQuantities({});
+    setCustomItems([]);
+
+    // 3. Reset slip photo & OCR state
+    setSlipFile(null);
+    if (slipPreview) {
+      URL.revokeObjectURL(slipPreview);
+      setSlipPreview('');
+    }
+    if (slipInputRef.current) {
+      slipInputRef.current.value = '';
+    }
+    setIsAnalyzingSlip(false);
+    setAiParseSuccess(false);
+
+    // 4. Reset notes & summary
+    setAiExtractedNotes('');
+
+    // 5. Reset voice recording, audio chunks, and processing banners
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (err) {
+        // ignore
+      }
+    }
+    audioChunksRef.current = [];
+    setIsRecordingVoice(false);
+    setIsProcessingVoice(false);
+    setVoiceSuccessMessage('');
+    setVoiceError('');
+
+    // 6. Reset error & loading
+    setError('');
+    setLoading(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
+
   // Standalone Voice-to-Order Handlers (Gemini 3.8 Flash)
   const startVoiceRecording = async () => {
     setVoiceError('');
@@ -391,17 +449,23 @@ export default function CreateTaskModal({
     }
   };
 
-  // Cleanup audio tracks on modal close / unmount
+  // Cleanup audio tracks and reset all form state on modal close / unmount
   useEffect(() => {
     if (!isOpen) {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.stop();
-      }
-      setIsRecordingVoice(false);
-      setIsProcessingVoice(false);
-      setVoiceError('');
-      setVoiceSuccessMessage('');
+      resetForm();
     }
+  }, [isOpen]);
+
+  // ESC key to cancel & clean up
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        handleClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
   // 1. Fetch real saved addresses on modal open
@@ -704,21 +768,8 @@ export default function CreateTaskModal({
         slip_image_url: uploadedSlipUrl
       });
 
-      // Reset
-      generateNewOrderNo();
-      setAmount('');
-      setAddress('');
-      setLandmark('');
-      setCustomerPhone('');
-      setCustomerName('');
-      setSelectedDriverId('');
-      setPinnedLat(null);
-      setPinnedLng(null);
-      setSelectedQuantities({});
-      setCustomItems([]);
-      setAiExtractedNotes('');
-      setIsAmountManuallyEdited(false);
-      handleRemoveSlip();
+      // Reset & close
+      resetForm();
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to create delivery');
@@ -728,7 +779,14 @@ export default function CreateTaskModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          handleClose();
+        }
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto"
+    >
       <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-6 animate-scale-up">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/60">
@@ -742,7 +800,7 @@ export default function CreateTaskModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
@@ -1354,7 +1412,7 @@ export default function CreateTaskModal({
           <div className="flex items-center gap-3 pt-3 border-t border-slate-800">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="flex-1 py-2.5 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-all"
             >
               Cancel
