@@ -379,10 +379,22 @@ export default function CreateTaskModal({
         : audioBase64.trim();
       const cleanMime = (mimeType || 'audio/webm').split(';')[0].trim();
 
+      // Prepare lightweight list of unique addresses & customer details from loaded savedAddresses
+      const knownAddresses = savedAddresses.slice(0, 50).map((a) => ({
+        address: a.address,
+        name: a.name || '',
+        phone: a.phone || '',
+        landmark: a.landmark || ''
+      }));
+
       const res = await fetch('/api/groq-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64: cleanBase64, mimeType: cleanMime })
+        body: JSON.stringify({
+          audioBase64: cleanBase64,
+          mimeType: cleanMime,
+          knownAddresses
+        })
       });
 
       if (!res.ok) {
@@ -396,6 +408,29 @@ export default function CreateTaskModal({
       const deliveryAddress = parsed.deliveryAddress || parsed.delivery_address;
       if (deliveryAddress) {
         setAddress(deliveryAddress);
+
+        // Auto-match against saved addresses directory for GPS coordinates and landmarks
+        const matchedAddr = savedAddresses.find((sa) =>
+          sa.address && sa.address.toLowerCase().trim() === deliveryAddress.toLowerCase().trim()
+        );
+        if (matchedAddr) {
+          if (matchedAddr.latitude !== null && matchedAddr.latitude !== undefined && matchedAddr.longitude !== null && matchedAddr.longitude !== undefined) {
+            setPinnedLat(matchedAddr.latitude);
+            setPinnedLng(matchedAddr.longitude);
+          }
+          if (matchedAddr.landmark && !parsed.landmark) {
+            setLandmark(matchedAddr.landmark);
+          }
+          if (matchedAddr.phone && !parsed.customerPhone && !parsed.customer_phone) {
+            const cleanPhone = String(matchedAddr.phone).replace(/\D/g, '');
+            if (cleanPhone.length >= 10) {
+              setCustomerPhone(cleanPhone.slice(-10));
+            }
+          }
+          if (matchedAddr.name && !parsed.customerName && !parsed.customer_name) {
+            setCustomerName(matchedAddr.name);
+          }
+        }
       }
 
       // 2. Put totalAmount into Total Amount (₹) input
@@ -418,7 +453,7 @@ export default function CreateTaskModal({
         setAiExtractedNotes(combinedNotes);
       }
 
-      // 4. Populate customerPhone and customerName if spoken
+      // 4. Populate customerPhone and customerName if spoken or matched from database
       const customerPhone = parsed.customerPhone || parsed.customer_phone;
       if (customerPhone) {
         const cleanPhone = String(customerPhone).replace(/\D/g, '');
@@ -436,8 +471,11 @@ export default function CreateTaskModal({
         setLandmark(parsed.landmark);
       }
 
+      const isMatched = Boolean(parsed.matchedExisting || parsed.matched_existing);
       setVoiceSuccessMessage(
-        summaryText
+        isMatched
+          ? `Matched customer address: "${deliveryAddress}"! ${summaryText ? `(${summaryText})` : ''}`
+          : summaryText
           ? `Voice order extracted: ${summaryText}`
           : 'Voice order details extracted successfully!'
       );
