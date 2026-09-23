@@ -610,18 +610,9 @@ export function AdminPanel({
 
         <div className="flex items-center gap-2">
           <button
-            id="admin-add-driver-btn"
-            onClick={onOpenAddDriver}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-200 hover:text-white text-xs sm:text-sm font-semibold transition-all shadow-sm"
-          >
-            <UserPlus className="w-4 h-4 text-emerald-400" />
-            <span>Add Delivery Boy</span>
-          </button>
-
-          <button
             id="admin-create-task-btn"
             onClick={onOpenCreateTask}
-            className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-emerald-600/25"
+            className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition-all shadow-lg shadow-emerald-600/25"
           >
             <PackagePlus className="w-4 h-4" />
             <span>Create Task</span>
