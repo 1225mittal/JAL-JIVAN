@@ -469,10 +469,14 @@ export async function createOrder({
   latitude,
   longitude,
   items = [],
+  notes = '',
+  audioUrl,
+  audio_url,
   slipImageUrl,
   slip_image_url
 }) {
   const finalSlipUrl = slipImageUrl || slip_image_url || null;
+  const finalAudioUrl = audio_url || audioUrl || null;
   const newOrder = {
     id: 'ord-' + Date.now(),
     order_number: orderNumber || `JJ-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -488,11 +492,12 @@ export async function createOrder({
     longitude: longitude || null,
     items: Array.isArray(items) ? items : [],
     slip_image_url: finalSlipUrl,
+    audio_url: finalAudioUrl,
     payment_method: null,
     payment_proof_url: null,
     delivery_proof_url: null,
     delivered_at: null,
-    notes: '',
+    notes: notes || '',
     created_at: new Date().toISOString()
   };
 
@@ -511,6 +516,8 @@ export async function createOrder({
         latitude: newOrder.latitude,
         longitude: newOrder.longitude,
         items: newOrder.items,
+        notes: newOrder.notes,
+        audio_url: newOrder.audio_url,
         slip_image_url: newOrder.slip_image_url
       };
 
@@ -520,11 +527,12 @@ export async function createOrder({
         .select()
         .single();
 
-      // Graceful retry without items/customer_name/slip_image_url if columns are not yet in remote schema
-      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.message?.includes('slip_image_url') || error.code === 'PGRST204')) {
+      // Graceful retry without items/customer_name/slip_image_url/audio_url if columns are not yet in remote schema
+      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.message?.includes('slip_image_url') || error.message?.includes('audio_url') || error.code === 'PGRST204')) {
         delete insertPayload.items;
         delete insertPayload.customer_name;
         delete insertPayload.slip_image_url;
+        delete insertPayload.audio_url;
         const res = await supabase.from('orders').insert([insertPayload]).select().single();
         data = res.data;
         error = res.error;

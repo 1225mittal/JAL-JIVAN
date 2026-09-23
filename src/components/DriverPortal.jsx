@@ -912,6 +912,16 @@ export default function DriverPortal({
                             <span>Landmark: {order.landmark}</span>
                           </div>
                         )}
+
+                        {/* Voice Note Audio Player */}
+                        {(order.audio_url || order.audioUrl) && (
+                          <div className="mt-2.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center gap-2 overflow-hidden">
+                            <span className="text-[11px] text-emerald-400 font-medium whitespace-nowrap shrink-0">🎙️ Voice Note:</span>
+                            <audio controls className="w-full h-7 rounded outline-none min-w-0" src={order.audio_url || order.audioUrl}>
+                              Your browser does not support audio playback.
+                            </audio>
+                          </div>
+                        )}
                         {Array.isArray(order.items) && order.items.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1.5 pt-1 pl-5">
                             {order.items.map((item, idx) => (
@@ -1021,6 +1031,16 @@ export default function DriverPortal({
                             )}
                           </div>
                         </div>
+
+                        {/* Voice Note Audio Player */}
+                        {(order.audio_url || order.audioUrl) && (
+                          <div className="mt-2.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center gap-2 overflow-hidden">
+                            <span className="text-[11px] text-emerald-400 font-medium whitespace-nowrap shrink-0">🎙️ Voice Note:</span>
+                            <audio controls className="w-full h-7 rounded outline-none min-w-0" src={order.audio_url || order.audioUrl}>
+                              Your browser does not support audio playback.
+                            </audio>
+                          </div>
+                        )}
 
                         {/* Privacy Note Badge */}
                         <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
@@ -1142,6 +1162,16 @@ export default function DriverPortal({
                       <p className="line-clamp-1">{order.address}</p>
                       {order.landmark && <p className="text-slate-400 italic">Landmark: {order.landmark}</p>}
                     </div>
+
+                    {/* Voice Note Audio Player */}
+                    {(order.audio_url || order.audioUrl) && (
+                      <div className="mt-2.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center gap-2 overflow-hidden">
+                        <span className="text-[11px] text-emerald-400 font-medium whitespace-nowrap shrink-0">🎙️ Voice Note:</span>
+                        <audio controls className="w-full h-7 rounded outline-none min-w-0" src={order.audio_url || order.audioUrl}>
+                          Your browser does not support audio playback.
+                        </audio>
+                      </div>
+                    )}
 
                     <div className="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-[11px]">
                       <span className="text-slate-400">

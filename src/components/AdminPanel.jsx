@@ -938,6 +938,16 @@ export function AdminPanel({
                         </div>
                       )}
 
+                      {/* Voice Note Audio Player */}
+                      {(order.audio_url || order.audioUrl) && (
+                        <div className="mt-2.5 p-2 rounded-lg bg-slate-800/60 border border-slate-700/50 flex items-center gap-2 overflow-hidden">
+                          <span className="text-[11px] text-emerald-400 font-medium whitespace-nowrap shrink-0">🎙️ Voice Note:</span>
+                          <audio controls className="w-full h-7 rounded outline-none min-w-0" src={order.audio_url || order.audioUrl}>
+                            Your browser does not support audio playback.
+                          </audio>
+                        </div>
+                      )}
+
                       {/* Order Items Badge */}
                       {Array.isArray(order.items) && order.items.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5 pl-5 pt-1">

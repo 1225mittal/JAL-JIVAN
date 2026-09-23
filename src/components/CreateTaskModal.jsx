@@ -135,6 +135,7 @@ export default function CreateTaskModal({
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [voiceSuccessMessage, setVoiceSuccessMessage] = useState('');
   const [voiceError, setVoiceError] = useState('');
+  const [voiceAudioUrl, setVoiceAudioUrl] = useState('');
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -291,6 +292,7 @@ export default function CreateTaskModal({
     setIsProcessingVoice(false);
     setVoiceSuccessMessage('');
     setVoiceError('');
+    setVoiceAudioUrl('');
 
     // 6. Reset error & loading
     setError('');
@@ -378,6 +380,7 @@ export default function CreateTaskModal({
         ? audioBase64.split(',')[1].trim()
         : audioBase64.trim();
       const cleanMime = (mimeType || 'audio/webm').split(';')[0].trim();
+      setVoiceAudioUrl(`data:${cleanMime};base64,${cleanBase64}`);
 
       // Prepare lightweight list of unique addresses & customer details from loaded savedAddresses
       const knownAddresses = savedAddresses.slice(0, 50).map((a) => ({
@@ -802,6 +805,8 @@ export default function CreateTaskModal({
         longitude: pinnedLng,
         items: finalItems,
         notes: aiExtractedNotes || '',
+        audio_url: voiceAudioUrl || null,
+        audioUrl: voiceAudioUrl || null,
         slipImageUrl: uploadedSlipUrl,
         slip_image_url: uploadedSlipUrl
       });
