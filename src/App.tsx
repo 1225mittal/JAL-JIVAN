@@ -169,10 +169,17 @@ export default function App() {
   };
 
   // Add Delivery Boy (Admin)
-  const handleAddDriver = async ({ name, phone, pin }) => {
+  const handleAddDriver = async (driverInput) => {
     try {
-      const created = await addDriver({ name, phone, pin });
-      setDrivers((prev) => [created, ...prev]);
+      let created = driverInput;
+      if (!driverInput || !driverInput.id) {
+        created = await addDriver(driverInput);
+      }
+      if (!created) return;
+      // Optimistically append new delivery boy to admin drivers state
+      setDrivers((prev) => [created, ...prev.filter((d) => d.id !== created.id)]);
+      // Re-fetch to ensure fresh database synchronization across all dropdowns
+      loadInitialData();
       showToast(`Driver ${created.name} registered successfully!`, 'success');
       return created;
     } catch (err) {

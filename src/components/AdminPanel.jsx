@@ -361,17 +361,9 @@ export function AdminPanel({
     if (onRefresh) onRefresh();
   };
 
-  // Helper to strictly filter out any legacy dummy riders
+  // Helper to ensure valid rider objects are included
   const filterRealRiders = useCallback((list) => {
-    return Array.isArray(list)
-      ? list.filter(
-          (r) =>
-            r &&
-            r.name !== 'Ramesh Kumar' &&
-            r.name !== 'Suresh Sharma' &&
-            r.name !== 'Amit Patel'
-        )
-      : [];
+    return Array.isArray(list) ? list.filter((r) => r && r.id && r.name) : [];
   }, []);
 
   // Live Driver Locations & Delivery Boys List (only real delivery team, defaults to empty array)

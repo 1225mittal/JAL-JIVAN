@@ -241,32 +241,73 @@ export async function fetchDrivers() {
   return getLocalDrivers();
 }
 
-export async function addDriver({ name, phone, pin }) {
+export async function addDriver({ name, phone, pin, vehicle_number, status = 'active' }) {
   const newDriver = {
     id: 'drv-' + Date.now(),
     name: name.trim(),
     phone: phone.trim(),
-    pin: pin.trim(),
+    pin: pin ? pin.trim() : '1234',
+    vehicle_number: vehicle_number ? vehicle_number.trim() : null,
     status: 'active',
+    active: true,
     created_at: new Date().toISOString()
   };
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
-        .from('drivers')
-        .insert([{
+      const insertPayload = {
+        name: newDriver.name,
+        phone: newDriver.phone,
+        vehicle_number: newDriver.vehicle_number,
+        status: 'active'
+      };
+
+      let { data, error } = await supabase
+        .from('delivery_boys')
+        .insert([insertPayload])
+        .select();
+
+      if (error && error.code === 'PGRST204') {
+        const adapted = {
           name: newDriver.name,
           phone: newDriver.phone,
           pin: newDriver.pin,
-          status: 'active'
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+          active: true
+        };
+        const retry = await supabase.from('delivery_boys').insert([adapted]).select();
+        if (!retry.error) {
+          data = retry.data;
+          error = null;
+        } else {
+          error = retry.error;
+        }
+      }
+
+      if (error) {
+        console.error('Supabase Add Delivery Boy Error:', error);
+        alert(`Failed to add delivery boy: ${error.message}`);
+        return null;
+      }
+
+      if (data && data[0]) {
+        const created = data[0];
+        try {
+          await supabase.from('drivers').insert([{
+            id: created.id,
+            name: created.name,
+            phone: created.phone,
+            pin: newDriver.pin,
+            status: 'active'
+          }]);
+        } catch (e) {
+          // ignore if already present
+        }
+        return created;
+      }
     } catch (err) {
-      console.warn('Supabase addDriver failed, saving to local store:', err.message);
+      console.error('Supabase Add Delivery Boy Error:', err);
+      alert(`Failed to add delivery boy: ${err.message}`);
+      return null;
     }
   }
 
