@@ -14,9 +14,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Missing audioBase64 in request body' });
     }
 
-    const cleanData = audioBase64
-      .replace(/^data:audio\/\w+;base64,/, '')
-      .replace(/^data:[^;]+;base64,/, '');
+    const cleanBase64 = audioBase64.includes(',') ? audioBase64.split(',')[1].trim() : audioBase64.trim();
+
+    let cleanMimeType = (mimeType || 'audio/webm').split(';')[0].trim();
+    if (!cleanMimeType.startsWith('audio/')) {
+      cleanMimeType = 'audio/webm';
+    }
 
     const promptText = `You are an Indian delivery dispatcher assistant. Listen carefully to this spoken delivery note (in Hindi, Hinglish, or English).
 Extract order details strictly following these rules:
@@ -46,8 +49,8 @@ Return clean JSON matching:
           },
           {
             inlineData: {
-              mimeType: mimeType || "audio/webm",
-              data: cleanData
+              mimeType: cleanMimeType,
+              data: cleanBase64
             }
           }
         ]

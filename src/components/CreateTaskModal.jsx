@@ -316,11 +316,15 @@ export default function CreateTaskModal({
       });
       reader.readAsDataURL(audioBlob);
       const audioBase64 = await base64Promise;
+      const cleanBase64 = audioBase64.includes(',')
+        ? audioBase64.split(',')[1].trim()
+        : audioBase64.trim();
+      const cleanMime = (mimeType || 'audio/webm').split(';')[0].trim();
 
       const res = await fetch('/api/gemini-voice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64, mimeType })
+        body: JSON.stringify({ audioBase64: cleanBase64, mimeType: cleanMime })
       });
 
       if (!res.ok) {
