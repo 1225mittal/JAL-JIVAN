@@ -26,7 +26,9 @@ import {
   updateDeliveryBoy,
   deleteDeliveryBoy,
   updateSavedAddress,
-  deleteSavedAddress
+  deleteSavedAddress,
+  supabase,
+  isSupabaseConfigured
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
@@ -150,6 +152,97 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Real-time synchronization for orders across all devices via Supabase Realtime
+  useEffect(() => {
+    let channel: any = null;
+
+    if (isSupabaseConfigured) {
+      try {
+        channel = supabase
+          .channel('public:orders_realtime')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'orders' },
+            async (payload: any) => {
+              // 1. Immediate optimistic UI sync based on event type
+              if (payload.eventType === 'INSERT' && payload.new) {
+                setOrders((prev: any[]) => {
+                  if (prev.some((o: any) => o.id === payload.new.id)) return prev;
+                  return [payload.new, ...prev];
+                });
+              } else if (payload.eventType === 'UPDATE' && payload.new) {
+                setOrders((prev: any[]) =>
+                  prev.map((o: any) => (o.id === payload.new.id ? { ...o, ...payload.new } : o))
+                );
+              } else if (payload.eventType === 'DELETE' && payload.old) {
+                setOrders((prev: any[]) => prev.filter((o: any) => o.id !== payload.old.id));
+              }
+
+              // 2. Fetch fresh order list to ensure correct ordering and full relational data
+              try {
+                const freshOrders = await fetchOrders();
+                if (Array.isArray(freshOrders)) {
+                  setOrders(freshOrders);
+                }
+              } catch (err) {
+                console.warn('Realtime fetchOrders refresh error:', err);
+              }
+            }
+          )
+          .subscribe((status: string) => {
+            if (status === 'SUBSCRIBED') {
+              console.log('⚡ Connected to Supabase Realtime channel for orders');
+            }
+          });
+      } catch (e) {
+        console.warn('Realtime subscription on orders failed:', e);
+      }
+    }
+
+    // Secondary fallback: periodic poll every 15s to guarantee multi-device sync
+    const pollInterval = setInterval(async () => {
+      try {
+        const freshOrders = await fetchOrders();
+        if (Array.isArray(freshOrders)) {
+          setOrders(freshOrders);
+        }
+      } catch (err) {
+        // silent fail for background poll
+      }
+    }, 15000);
+
+    // Auto-refresh when user switches back to browser/PWA tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchOrders()
+          .then((fresh) => {
+            if (Array.isArray(fresh)) setOrders(fresh);
+          })
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Sync across tabs in demo/offline mode
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'jal_jivan_orders') {
+        Promise.resolve(fetchOrders()).then((data) => {
+          if (Array.isArray(data)) setOrders(data);
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('storage', handleStorageChange);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, []);
 
   // Admin Login & Logout handlers
   const handleAdminLoginSuccess = () => {
