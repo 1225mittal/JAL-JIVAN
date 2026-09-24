@@ -23,7 +23,11 @@ import {
   Sparkles,
   Check,
   Eye,
-  FileText
+  FileText,
+  Bell,
+  Volume2,
+  Smartphone,
+  Download
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
@@ -35,7 +39,8 @@ import {
   checkDriverAttendanceToday,
   fetchStoreSettings,
   updateDriverLocation,
-  defaultStoreSettings
+  defaultStoreSettings,
+  updateDriverHeartbeat
 } from '../lib/supabase';
 import {
   calculateDistanceMeters,
@@ -93,6 +98,222 @@ export default function DriverPortal({
 
   // Reward Rule State
   const [rewardRule, setRewardRule] = useState({ min_deliveries: 5, stars_rewarded: 1 });
+
+  // Notification & Sound Alert State
+  const [notifPermission, setNotifPermission] = useState(() =>
+    typeof window !== 'undefined' && 'Notification' in window
+      ? Notification.permission
+      : 'default'
+  );
+
+  // PWA Install Prompt State for Android Chrome
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [canInstall, setCanInstall] = useState(false);
+
+  // Synthesize loud crisp alert chime using Web Audio API
+  const playOrderAlertChime = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Tone 1: High crisp bell ping (587Hz -> 880Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(587.33, now);
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.15);
+      gain1.gain.setValueAtTime(0.85, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.4);
+
+      // Tone 2: Harmonious high ping (880Hz -> 1174Hz)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(880, now + 0.15);
+      osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.3);
+      gain2.gain.setValueAtTime(0.9, now + 0.15);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.15);
+      osc2.stop(now + 0.7);
+
+      // Tone 3: Urgent alert chirp (1046Hz -> 1318Hz)
+      const osc3 = ctx.createOscillator();
+      const gain3 = ctx.createGain();
+      osc3.type = 'square';
+      osc3.frequency.setValueAtTime(1046.5, now + 0.35);
+      osc3.frequency.exponentialRampToValueAtTime(1318.51, now + 0.5);
+      gain3.gain.setValueAtTime(0.45, now + 0.35);
+      gain3.gain.exponentialRampToValueAtTime(0.01, now + 0.85);
+      osc3.connect(gain3);
+      gain3.connect(ctx.destination);
+      osc3.start(now + 0.35);
+      osc3.stop(now + 0.85);
+    } catch (err) {
+      console.warn('Web Audio chime playback failed:', err);
+    }
+  }, []);
+
+  // Trigger Order Alert (Loud Chime + Phone Vibration + Native Notification)
+  const triggerOrderAlert = useCallback(
+    (orderData) => {
+      // 1. Play loud chime
+      playOrderAlertChime();
+
+      // 2. Trigger device vibration
+      if ('vibrate' in navigator) {
+        try {
+          navigator.vibrate([200, 100, 200]);
+        } catch (e) {}
+      }
+
+      // 3. Trigger native notification
+      if (
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        try {
+          const orderNum = orderData?.order_number || '';
+          const address = orderData?.address || 'New delivery';
+          new Notification('🚨 New Water Delivery Assigned!', {
+            body: orderNum
+              ? `Order #${orderNum}: ${address}`
+              : 'New order received. Tap to view details.',
+            icon: '/pwa-192x192.png',
+            badge: '/pwa-192x192.png',
+            tag: 'order-alert-' + (orderData?.id || Date.now())
+          });
+        } catch (err) {
+          console.warn('Native notification trigger failed:', err);
+        }
+      }
+    },
+    [playOrderAlertChime]
+  );
+
+  // Notification Permission Request Handler
+  const handleRequestNotificationPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        setNotifPermission(permission);
+        if (permission === 'granted') {
+          playOrderAlertChime();
+          if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+          new Notification('🚨 Jal-Jivan Order Alerts Enabled!', {
+            body: 'You will now hear a loud alert chime & receive notifications when orders arrive.',
+            icon: '/pwa-192x192.png'
+          });
+        }
+      } catch (err) {
+        console.warn('Notification permission error:', err);
+      }
+    }
+  };
+
+  // PWA beforeinstallprompt capture for Android Chrome
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      setCanInstall(true);
+    };
+
+    const handleAppInstalled = () => {
+      setCanInstall(false);
+      setInstallPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setCanInstall(false);
+        setInstallPrompt(null);
+      }
+    } else {
+      alert(
+        'To install Jal-Jivan on Android: Tap the 3 dots (⋮) in Chrome and select "Install app" or "Add to Home screen".'
+      );
+    }
+  };
+
+  // Supabase Realtime Listener for New Orders (Chime + Notification + Vibration)
+  useEffect(() => {
+    if (!currentDriver || !supabase) return;
+
+    let channel = null;
+    try {
+      channel = supabase
+        .channel(`driver-order-alerts-${currentDriver.id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders' },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              console.log('🚨 Realtime new order detected:', payload.new);
+              triggerOrderAlert(payload.new);
+            } else if (payload.eventType === 'UPDATE') {
+              if (
+                payload.new?.assigned_driver_id === currentDriver.id &&
+                payload.old?.assigned_driver_id !== currentDriver.id
+              ) {
+                console.log('🚨 Order assigned to current driver:', payload.new);
+                triggerOrderAlert(payload.new);
+              }
+            }
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Driver Realtime alerts subscription failed:', e);
+    }
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [currentDriver, triggerOrderAlert]);
+
+  // Driver Live Online Heartbeat (every 30 seconds & offline on unload)
+  useEffect(() => {
+    if (!currentDriver) return;
+
+    // Send immediate heartbeat on mount / login
+    updateDriverHeartbeat(currentDriver.id, true);
+
+    const interval = setInterval(() => {
+      updateDriverHeartbeat(currentDriver.id, true);
+    }, 30000);
+
+    const handleBeforeUnload = () => {
+      updateDriverHeartbeat(currentDriver.id, false);
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      updateDriverHeartbeat(currentDriver.id, false);
+    };
+  }, [currentDriver]);
 
   // Geoguard State (GPS & Network Monitoring)
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -347,15 +568,9 @@ export default function DriverPortal({
       // ignore
     }
     try {
-      await supabase
-        .from('delivery_boys')
-        .update({
-          is_online: false,
-          last_seen_at: new Date().toISOString()
-        })
-        .eq('id', currentDriver.id);
+      await updateDriverHeartbeat(currentDriver.id, false);
     } catch (err) {
-      console.warn('Punch out delivery_boys update error:', err);
+      console.warn('Punch out heartbeat update error:', err);
     }
   };
 
@@ -633,6 +848,58 @@ export default function DriverPortal({
           </div>
         </div>
       )}
+
+      {/* Quick Action Alerts & PWA Install Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+          </span>
+          <span className="text-xs font-bold text-emerald-400">
+            🟢 Online / On Road (Heartbeat Active)
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Notification Alert Permission Button */}
+          {notifPermission !== 'granted' && (
+            <button
+              onClick={handleRequestNotificationPermission}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shadow animate-pulse"
+              title="Click to enable sound alerts and push notifications on new orders"
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Enable Order Alerts 🔔</span>
+            </button>
+          )}
+
+          {/* Test Chime Button */}
+          {notifPermission === 'granted' && (
+            <button
+              onClick={() => {
+                playOrderAlertChime();
+                if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all"
+              title="Test loud chime sound"
+            >
+              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Test Alert</span>
+            </button>
+          )}
+
+          {/* Fallback Install App Button */}
+          <button
+            onClick={handleInstallApp}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all shadow active:scale-95"
+            title="Install Jal-Jivan App on Android Chrome"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>📲 Install App</span>
+          </button>
+        </div>
+      </div>
 
       {/* Driver Header Card */}
       <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-3">

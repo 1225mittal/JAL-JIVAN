@@ -1058,10 +1058,11 @@ export function AdminPanel({
                   (o) => o.assigned_driver_id === rider.id && o.status === 'Delivered'
                 ).length;
 
-                const diffMinutes = rider.last_seen_at 
-                  ? (Date.now() - new Date(rider.last_seen_at).getTime()) / (1000 * 60) 
+                const activeTime = rider.last_active_at || rider.last_seen_at;
+                const diffMinutes = activeTime 
+                  ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60) 
                   : 999;
-                const isOnline = Boolean(rider.is_online) && diffMinutes < 5;
+                const isOnline = Boolean(rider.is_online) && diffMinutes <= 2;
 
                 const lat = rider.current_lat !== undefined && rider.current_lat !== null
                   ? Number(rider.current_lat)
@@ -1076,31 +1077,39 @@ export function AdminPanel({
                   <div
                     key={rider.id}
                     className={`glass-card p-4 rounded-2xl border space-y-3 transition-all ${
-                      isOnline ? 'border-emerald-500/30 bg-slate-900/90' : 'border-slate-800 bg-slate-950/60'
+                      isOnline ? 'border-emerald-500/40 bg-slate-900/90 shadow-lg shadow-emerald-500/5' : 'border-slate-800 bg-slate-950/60'
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <h4 className="text-sm font-bold text-white">{rider.name}</h4>
-                        <div className="flex items-center gap-1 text-xs text-slate-400 mt-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{isOnline ? '🟢' : '⚪'}</span>
+                          <h4 className="text-sm font-bold text-white">
+                            {rider.name} {isOnline && <span className="text-emerald-400 text-xs font-semibold">- Online / On Road</span>}
+                          </h4>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-slate-400 mt-1 ml-6">
                           <Phone className="w-3 h-3 text-slate-500" />
                           <span>{rider.phone}</span>
                         </div>
                       </div>
                       <div className="text-right">
                         {isOnline ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            <span>Online (Active)</span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/20">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            </span>
+                            <span>🟢 Online / On Road</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 uppercase">
-                            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                            <span>Offline</span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                            <span className="inline-flex rounded-full h-2 w-2 bg-slate-500" />
+                            <span>⚪ Offline</span>
                           </span>
                         )}
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          {rider.last_seen_at ? lastSeenText : 'No GPS recorded'}
+                          {activeTime ? lastSeenText : 'No heartbeat recorded'}
                         </p>
                       </div>
                     </div>

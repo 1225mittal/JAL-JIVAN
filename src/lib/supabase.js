@@ -1827,6 +1827,54 @@ export async function deleteProductDamage(id) {
   return true;
 }
 
+export async function updateDriverHeartbeat(driverId, isOnline = true) {
+  if (!driverId) return;
+  const nowIso = new Date().toISOString();
 
+  if (isSupabaseConfigured) {
+    try {
+      await Promise.allSettled([
+        supabase
+          .from('drivers')
+          .update({
+            is_online: isOnline,
+            last_active_at: nowIso,
+            last_seen_at: nowIso
+          })
+          .eq('id', driverId),
+        supabase
+          .from('delivery_boys')
+          .update({
+            is_online: isOnline,
+            last_active_at: nowIso,
+            last_seen_at: nowIso
+          })
+          .eq('id', driverId)
+      ]);
+    } catch (err) {
+      console.warn('Driver heartbeat remote update notice:', err.message);
+    }
+  }
 
+  // Update local storage for demo/offline resilience
+  try {
+    const drivers = getLocalDrivers();
+    const updated = drivers.map((d) =>
+      d.id === driverId
+        ? { ...d, is_online: isOnline, last_active_at: nowIso, last_seen_at: nowIso }
+        : d
+    );
+    saveLocalDrivers(updated);
 
+    const savedCurrent = localStorage.getItem('jal_jivan_current_driver');
+    if (savedCurrent) {
+      const parsed = JSON.parse(savedCurrent);
+      if (parsed.id === driverId) {
+        parsed.is_online = isOnline;
+        parsed.last_active_at = nowIso;
+        parsed.last_seen_at = nowIso;
+        localStorage.setItem('jal_jivan_current_driver', JSON.stringify(parsed));
+      }
+    }
+  } catch (e) {}
+}

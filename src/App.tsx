@@ -109,7 +109,33 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
-  const [adminSubView, setAdminSubView] = useState<'hub' | 'delivery' | 'damage'>('hub');
+  const [currentModule, setCurrentModule] = useState<'hub' | 'delivery' | 'damage'>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParam = new URLSearchParams(window.location.search).get('module') as 'hub' | 'delivery' | 'damage';
+      if (urlParam) return urlParam;
+      const saved = localStorage.getItem('active_module') as 'hub' | 'delivery' | 'damage';
+      if (saved) return saved;
+    }
+    return 'hub';
+  });
+
+  // Sync currentModule with localStorage and URL query string to preserve screen on page refresh
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('active_module', currentModule);
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('module') !== currentModule) {
+          url.searchParams.set('module', currentModule);
+          window.history.replaceState(null, '', url.toString());
+        }
+      } catch (e) {}
+    }
+  }, [currentModule]);
+
+  // Alias for backward compatibility across modules
+  const adminSubView = currentModule;
+  const setAdminSubView = setCurrentModule;
 
   // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {

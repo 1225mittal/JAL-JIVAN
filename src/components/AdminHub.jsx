@@ -64,7 +64,15 @@ export default function AdminHub({
     .filter((o) => o.status === 'Delivered')
     .reduce((sum, o) => sum + (parseFloat(o.amount) || 0), 0);
 
-  const onlineDrivers = drivers.filter((d) => d.is_online).length;
+  // Online drivers (considered ONLINE if is_online === true and active within last 2 minutes)
+  const onlineDriversList = drivers.filter((d) => {
+    const activeTime = d.last_active_at || d.last_seen_at;
+    const diffMinutes = activeTime
+      ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60)
+      : 999;
+    return Boolean(d.is_online) && diffMinutes <= 2;
+  });
+  const onlineDrivers = onlineDriversList.length;
 
   const totalDamagedUnits = damages.reduce((sum, d) => sum + (Number(d.quantity) || 1), 0);
   const pendingDamageReplacements = damages.filter((d) => d.status === 'Pending').length;
@@ -181,6 +189,53 @@ export default function AdminHub({
               {totalDamagedUnits}
               <span className="text-xs font-normal text-slate-400 ml-1.5">units</span>
             </div>
+          </div>
+        </div>
+
+        {/* Live Driver Fleet Roster with Glowing Green Dot */}
+        <div className="mt-4 p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between flex-wrap gap-2 text-xs">
+          <div className="flex items-center gap-1.5 font-semibold text-slate-300">
+            <Users className="w-4 h-4 text-emerald-400" />
+            <span>Driver Fleet Status ({drivers.length} registered):</span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {drivers.map((d) => {
+              const activeTime = d.last_active_at || d.last_seen_at;
+              const diffMinutes = activeTime
+                ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60)
+                : 999;
+              const isOnline = Boolean(d.is_online) && diffMinutes <= 2;
+              return (
+                <span
+                  key={d.id}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
+                    isOnline
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20'
+                      : 'bg-slate-900/90 text-slate-400 border-slate-800'
+                  }`}
+                >
+                  {isOnline ? (
+                    <>
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                      </span>
+                      <span className="font-bold text-white">{d.name}</span>
+                      <span className="text-[11px] text-emerald-400">- Online / On Road</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="inline-flex rounded-full h-2 w-2 bg-slate-500" />
+                      <span>{d.name}</span>
+                      <span className="text-[10px] text-slate-500">- Offline</span>
+                    </>
+                  )}
+                </span>
+              );
+            })}
+            {drivers.length === 0 && (
+              <span className="text-xs text-slate-500">No delivery drivers registered yet.</span>
+            )}
           </div>
         </div>
       </div>
