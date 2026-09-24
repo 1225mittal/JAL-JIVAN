@@ -553,7 +553,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-full flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
         isAdminView={isAdminView}
@@ -569,43 +569,43 @@ export default function App() {
       />
 
       {/* Main Container: Distinct Routes */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:py-6">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
         {isAdminView ? (
           /* ROUTE /admin OR ENDING IN "admin": ADMIN HUB & SUB-MODULES */
           isAdminLoggedIn ? (
             <div>
               {/* Persistent Breadcrumb Navigation Bar when inside sub-modules */}
               {adminSubView !== 'hub' && (
-                <div className="flex items-center justify-between mb-4 px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-md">
-                  <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
                     <button
                       onClick={() => setAdminSubView('hub')}
-                      className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition-colors"
+                      className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition-colors shrink-0"
                     >
-                      ← Back to Admin Hub
+                      ← <span className="hidden xs:inline">Back to</span> Hub
                     </button>
                     <span className="text-slate-600 font-bold">/</span>
-                    <span className="text-white font-semibold">
+                    <span className="text-white font-semibold truncate max-w-[170px] sm:max-w-none">
                       {adminSubView === 'delivery'
                         ? 'Delivery & Dispatch System'
                         : 'Damage & Returns Management'}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     {adminSubView === 'delivery' ? (
                       <button
                         onClick={() => setAdminSubView('damage')}
                         className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
                       >
-                        Switch to Damage Portal →
+                        <span className="hidden sm:inline">Switch to </span>Damage Portal →
                       </button>
                     ) : (
                       <button
                         onClick={() => setAdminSubView('delivery')}
                         className="text-xs text-emerald-300 hover:text-white px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all font-medium"
                       >
-                        Switch to Dispatch Console →
+                        <span className="hidden sm:inline">Switch to </span>Dispatch Console →
                       </button>
                     )}
                   </div>

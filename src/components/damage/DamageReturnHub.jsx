@@ -219,90 +219,91 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
   }, [items, slipModalDistributor]);
 
   return (
-    <div className="space-y-6 animate-fade-in pb-12">
+    <div className="space-y-6 animate-fade-in pb-12 w-full max-w-full overflow-x-hidden">
       {/* TOP HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 w-full max-w-full">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           {onBackToHub && (
             <button
               onClick={onBackToHub}
-              className="p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              className="p-2 sm:p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0"
               title="Return to Admin Hub"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
 
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              <h1 className="text-lg sm:text-2xl font-black text-white tracking-tight">
                 Damage & Expiry Return Hub
               </h1>
-              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              <span className="text-[10px] sm:text-[11px] font-bold px-2 sm:px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
                 गोदाम डैमेज और एक्सपायरी वापसी हब
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 sm:mt-1 truncate">
               Dual-Photo Groq Vision OCR • Godown Racks • FMCG Return Slips • Distributor Credits
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
           <button
             onClick={() => setIsLogModalOpen(true)}
-            className="flex-1 sm:flex-none py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-black shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition active:scale-95"
+            className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-black shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition active:scale-95"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>+ Log Damaged Item</span>
           </button>
 
           <button
             onClick={loadData}
             title="Refresh inventory"
-            className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            className="w-full sm:w-auto py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition flex items-center justify-center gap-1.5 text-xs font-semibold"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
+            <RefreshCw className={`w-4 h-4 shrink-0 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
+            <span className="sm:hidden">Refresh List</span>
           </button>
         </div>
       </div>
 
       {/* MODULE NAVIGATION TABS */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 overflow-x-auto">
+      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 overflow-x-auto no-scrollbar w-full max-w-full flex-nowrap">
         <button
           onClick={() => setActiveView('inventory')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
+          className={`py-2 px-3 sm:px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition whitespace-nowrap shrink-0 ${
             activeView === 'inventory'
               ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Package className="w-4 h-4" />
+          <Package className="w-4 h-4 shrink-0" />
           <span>Damage & Expiry Inventory ({items.length})</span>
         </button>
 
         <button
           onClick={() => setActiveView('distributors')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
+          className={`py-2 px-3 sm:px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition whitespace-nowrap shrink-0 ${
             activeView === 'distributors'
               ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Building2 className="w-4 h-4" />
+          <Building2 className="w-4 h-4 shrink-0" />
           <span>Distributors Directory ({distributors.length})</span>
         </button>
 
         <button
           onClick={() => setActiveView('legacy_jars')}
-          className={`py-2 px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
+          className={`py-2 px-3 sm:px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition whitespace-nowrap shrink-0 ${
             activeView === 'legacy_jars'
               ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
               : 'text-slate-400 hover:text-white'
           }`}
         >
-          <Layers className="w-4 h-4" />
+          <Layers className="w-4 h-4 shrink-0" />
           <span>Water Jar Transit Damages</span>
         </button>
       </div>
@@ -374,26 +375,26 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
           </div>
 
           {/* SEARCH & FILTERS BAR */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 p-3 rounded-2xl bg-slate-900 border border-slate-800">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5 p-3 rounded-2xl bg-slate-900 border border-slate-800 w-full max-w-full">
             {/* Search Input */}
-            <div className="relative flex-1">
+            <div className="relative w-full lg:flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search product, brand, distributor, batch no, rack..."
+                placeholder="Search product, brand, distributor, batch, rack..."
                 className="w-full pl-9 pr-4 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
               />
             </div>
 
             {/* Filter Pills */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
               {/* Status Filter */}
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 truncate"
               >
                 <option value="All">All Statuses / सभी स्थिति</option>
                 <option value="in_godown">In Godown (गोदाम में)</option>
@@ -406,7 +407,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 truncate"
               >
                 <option value="All">All Types / सभी नुक़सान</option>
                 <option value="Damage">Physical Damage</option>
@@ -420,9 +421,9 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                 <select
                   value={distributorFilter}
                   onChange={(e) => setDistributorFilter(e.target.value)}
-                  className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 truncate"
                 >
-                  <option value="All">All Distributors / सभी डिस्ट्रीब्यूटर</option>
+                  <option value="All">All Distributors / सभी</option>
                   {distributors.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.distributor_name}

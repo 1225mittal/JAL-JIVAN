@@ -366,28 +366,28 @@ export default function DistributorMaster({
   });
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in w-full max-w-full overflow-x-hidden">
       {/* Top Header / Action Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-black text-white tracking-tight">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 w-full max-w-full">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
               Distributors & Companies Directory
             </h2>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0">
               {distributors.length} Registered
             </span>
           </div>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1 truncate">
             डिस्ट्रीब्यूटर और कंपनी मास्टर सूची - सेल्समैन फ़ोन, विज़िट के दिन और रिटर्न पॉलिसी
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
           {onBackToInventory && (
             <button
               onClick={onBackToInventory}
-              className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+              className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition text-center"
             >
               ← Back to Damaged Items
             </button>
@@ -395,23 +395,23 @@ export default function DistributorMaster({
 
           <button
             onClick={openAddModal}
-            className="flex-1 sm:flex-none py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/25 flex items-center justify-center gap-1.5 transition active:scale-95"
+            className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/25 flex items-center justify-center gap-1.5 transition active:scale-95"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>+ Add Distributor</span>
           </button>
         </div>
       </div>
 
       {/* Search Input */}
-      <div className="relative">
+      <div className="relative w-full max-w-full">
         <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by distributor firm, FMCG company (Parle, Bisleri, Tata), salesman..."
-          className="w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+          className="w-full max-w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
         />
       </div>
 
@@ -527,37 +527,37 @@ export default function DistributorMaster({
 
       {/* Add / Edit Distributor Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-scale-up my-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto max-w-[100vw]">
+          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden animate-scale-up my-auto max-w-full">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/80">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
-                  <Building2 className="w-5 h-5" />
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-800 bg-slate-950/80">
+              <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0">
+                  <Building2 className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">
                     {editingDistributor ? 'Edit Distributor' : 'Register New Distributor'}
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-[11px] sm:text-xs text-slate-400 truncate">
                     डिस्ट्रीब्यूटर व कंपनी विवरण जोड़ें
                   </p>
                 </div>
               </div>
               <button
                 onClick={closeModal}
-                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800"
+                className="p-1.5 sm:p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Voice Dictation Master Bar */}
-            <div className="p-4 mx-6 mt-4 rounded-2xl bg-gradient-to-br from-cyan-950/50 via-slate-900/90 to-indigo-950/50 border border-cyan-500/30 shadow-lg space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
+            <div className="p-3 sm:p-4 mx-3 sm:mx-6 mt-3 sm:mt-4 rounded-2xl bg-gradient-to-br from-cyan-950/50 via-slate-900/90 to-indigo-950/50 border border-cyan-500/30 shadow-lg space-y-3 max-w-full overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
                   <div
-                    className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all shrink-0 ${
                       isListening && listeningTarget === 'all'
                         ? 'bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-500/40 ring-4 ring-rose-500/20'
                         : 'bg-cyan-500/20 text-cyan-300'
@@ -565,22 +565,22 @@ export default function DistributorMaster({
                   >
                     <Mic className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-white tracking-wide">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-white tracking-wide shrink-0">
                         AI Voice Assistant
                       </span>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0">
                         Auto-Fill
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      Bol kar bharein / Speak all details naturally
+                    <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
+                      Bol kar bharein / Speak details naturally
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   {/* Language Selector */}
                   <div className="inline-flex rounded-lg bg-slate-800 p-0.5 border border-slate-700 text-[10px] font-semibold">
                     <button
@@ -614,7 +614,7 @@ export default function DistributorMaster({
                     type="button"
                     onClick={toggleFullDictation}
                     disabled={!isSpeechSupported || isParsingVoice}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                    className={`px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
                       isListening && listeningTarget === 'all'
                         ? 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse shadow-lg shadow-rose-600/40 ring-2 ring-rose-400/60'
                         : isParsingVoice
@@ -624,18 +624,18 @@ export default function DistributorMaster({
                   >
                     {isListening && listeningTarget === 'all' ? (
                       <>
-                        <Square className="w-3.5 h-3.5 fill-current" />
-                        <span>Stop Listening</span>
+                        <Square className="w-3.5 h-3.5 fill-current shrink-0" />
+                        <span>Stop</span>
                       </>
                     ) : isParsingVoice ? (
                       <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                         <span>Parsing...</span>
                       </>
                     ) : (
                       <>
-                        <Mic className="w-3.5 h-3.5" />
-                        <span>🎤 Bol kar bharein</span>
+                        <Mic className="w-3.5 h-3.5 shrink-0" />
+                        <span>🎤 Speak details</span>
                       </>
                     )}
                   </button>
@@ -771,7 +771,7 @@ export default function DistributorMaster({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Salesman Name Input with Field-Level Mic */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -840,7 +840,7 @@ export default function DistributorMaster({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Visit Day */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
