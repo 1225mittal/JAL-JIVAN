@@ -18,27 +18,22 @@ export default async function handler(req, res) {
       ? imageBase64
       : `data:image/jpeg;base64,${imageBase64}`;
 
-    const systemPrompt = `You are an automated FMCG product date auditor. Analyze the uploaded packaging photo carefully for manufacturing dates, expiry dates, and 'best before' duration. Today's date is 2026-09-25.
-Respond ONLY with valid raw JSON (no markdown formatting, no explanations):
+    const promptText = `Look at this product packaging image. Extract the Manufacturing Date (MFG), Expiry Date (EXP / Use By), and Best Before duration.
+Today's date is 2026-09-25.
+Return ONLY raw valid JSON:
 {
-  "detected": boolean,
-  "product_name": "string or unknown",
+  "detected": true,
+  "product_name": "string",
   "mfg_date": "YYYY-MM-DD or null",
   "expiry_date": "YYYY-MM-DD or null",
-  "best_before_months": number or null,
-  "computed_expiry_date": "YYYY-MM-DD or null",
-  "is_expired": boolean,
-  "days_difference": number,
-  "notes": "string rationale"
+  "is_expired": true,
+  "days_difference": -10,
+  "reason": "short explanation"
 }
+If no dates or product text are visible at all, return {"detected": false}.`;
 
-Logic Rules:
-1. If an explicit expiry date is visible (e.g., 'EXP 04/26', 'USE BY 10/25', 'EXPIRY 2026-08'), format as YYYY-MM-DD (use last day of month if only MM/YY is printed) and set expiry_date.
-2. If only MFG date and 'Best Before X Months' are found, compute computed_expiry_date = mfg_date + best_before_months.
-3. Compare the resolved date against 2026-09-25: mark is_expired: true if the date has passed (days_difference < 0), or false if still valid.
-4. If dates are unreadable, blurry, or no product packaging date is visible, return "detected": false.`;
-
-    const visionModels = ['llama-3.2-11b-vision-preview', 'llama-3.2-90b-vision-preview'];
+    // Try qwen/qwen3.8-27b first, with fallback to llama-3.2-11b-vision-preview
+    const visionModels = ['qwen/qwen3.8-27b', 'llama-3.2-11b-vision-preview'];
     let lastError = null;
     let data = null;
 
@@ -57,10 +52,15 @@ Logic Rules:
               {
                 role: 'user',
                 content: [
-                  { type: 'text', text: systemPrompt },
+                  {
+                    type: 'text',
+                    text: promptText
+                  },
                   {
                     type: 'image_url',
-                    image_url: { url: cleanImage }
+                    image_url: {
+                      url: cleanImage
+                    }
                   }
                 ]
               }
@@ -69,9 +69,12 @@ Logic Rules:
           })
         });
 
+        console.log(`Groq Response Status [${model}]:`, response.status);
+
         if (!response.ok) {
           const errText = await response.text();
-          lastError = new Error(`Groq model ${model} failed (${response.status}): ${errText}`);
+          console.error(`Groq rejection on model ${model} (${response.status}):`, errText);
+          lastError = new Error(`Groq model ${model} error (${response.status}): ${errText}`);
           continue;
         }
 
@@ -80,6 +83,7 @@ Logic Rules:
           break;
         }
       } catch (err) {
+        console.error(`Groq fetch failure on model ${model}:`, err.message || err);
         lastError = err;
       }
     }
@@ -94,36 +98,26 @@ Logic Rules:
     const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
     let parsed = JSON.parse(cleanJson);
 
-    // Backend mathematical date verification against reference date: 2026-09-25
-    const auditDate = new Date('2026-09-25T00:00:00Z');
-
-    if (parsed.mfg_date && parsed.best_before_months && !parsed.computed_expiry_date) {
-      try {
-        const mfg = new Date(parsed.mfg_date);
-        if (!isNaN(mfg.getTime())) {
-          mfg.setMonth(mfg.getMonth() + Number(parsed.best_before_months));
-          parsed.computed_expiry_date = mfg.toISOString().split('T')[0];
-        }
-      } catch (_) {}
-    }
-
-    const effectiveDateStr = parsed.expiry_date || parsed.computed_expiry_date;
-    if (effectiveDateStr) {
-      try {
-        const expDate = new Date(effectiveDateStr);
-        if (!isNaN(expDate.getTime())) {
-          const diffMs = expDate.getTime() - auditDate.getTime();
-          const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-          parsed.days_difference = diffDays;
-          parsed.is_expired = diffDays < 0;
-          parsed.detected = true;
-        }
-      } catch (_) {}
+    // Re-verify date math against reference date: 2026-09-25
+    if (parsed.detected) {
+      const auditDate = new Date('2026-09-25T00:00:00Z');
+      const targetDateStr = parsed.expiry_date;
+      if (targetDateStr) {
+        try {
+          const expDate = new Date(targetDateStr);
+          if (!isNaN(expDate.getTime())) {
+            const diffMs = expDate.getTime() - auditDate.getTime();
+            const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+            parsed.days_difference = diffDays;
+            parsed.is_expired = diffDays < 0;
+          }
+        } catch (_) {}
+      }
     }
 
     return res.status(200).json(parsed);
   } catch (error) {
-    console.error('Groq Expiry API Error:', error);
+    console.error('Groq Expiry API Handler Error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
