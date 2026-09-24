@@ -1,15 +1,9 @@
-const fileToBase64 = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = (error) => reject(error);
-    reader.readAsDataURL(file);
-  });
-};
+import { compressImage } from './imageCompressor';
 
 /**
  * Extract product name, brand, MRP, batch no, and dates from dual package photos (Front and/or Back)
  * using Groq Vision OCR.
+ * Automatically compresses images to 1280px / 0.75 JPEG to prevent 413 Payload Too Large errors.
  */
 export async function extractPackageDetails({ frontFile, backFile, frontBase64, backBase64 }) {
   if (!frontFile && !backFile && !frontBase64 && !backBase64) {
@@ -17,14 +11,25 @@ export async function extractPackageDetails({ frontFile, backFile, frontBase64, 
   }
 
   try {
-    let finalFrontBase64 = frontBase64 || null;
-    let finalBackBase64 = backBase64 || null;
+    let finalFrontBase64 = null;
+    let finalBackBase64 = null;
 
-    if (frontFile && !finalFrontBase64) {
-      finalFrontBase64 = await fileToBase64(frontFile);
+    if (frontFile || frontBase64) {
+      const compressed = await compressImage(frontFile || frontBase64, {
+        maxDimension: 1280,
+        quality: 0.75,
+        outputType: 'image/jpeg'
+      });
+      finalFrontBase64 = compressed.base64;
     }
-    if (backFile && !finalBackBase64) {
-      finalBackBase64 = await fileToBase64(backFile);
+
+    if (backFile || backBase64) {
+      const compressed = await compressImage(backFile || backBase64, {
+        maxDimension: 1280,
+        quality: 0.75,
+        outputType: 'image/jpeg'
+      });
+      finalBackBase64 = compressed.base64;
     }
 
     const response = await fetch('/api/damage-ocr', {

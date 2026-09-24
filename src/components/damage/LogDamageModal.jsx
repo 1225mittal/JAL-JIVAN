@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { extractPackageDetails } from '../../lib/damageOcr';
 import { createDamageExpiryItem, uploadDamagePhoto } from '../../lib/supabase';
+import { compressImage } from '../../lib/imageCompressor';
 
 const DAMAGE_TYPES = [
   { id: 'Damage', labelEn: 'Physical Damage (Broken/Cracked)', labelHi: 'टूटा-फूटा / डैमेज' },
@@ -107,22 +108,44 @@ export default function LogDamageModal({
 
   if (!isOpen) return null;
 
-  const handleFrontSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFrontFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setFrontPreview(reader.result);
-    reader.readAsDataURL(file);
+  const handleFrontSelect = async (e) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+    try {
+      const compressed = await compressImage(rawFile, {
+        maxDimension: 1280,
+        quality: 0.75,
+        outputType: 'image/jpeg'
+      });
+      setFrontFile(compressed.file);
+      setFrontPreview(compressed.base64);
+    } catch (err) {
+      console.warn('Front image compression failed, using original:', err);
+      setFrontFile(rawFile);
+      const reader = new FileReader();
+      reader.onload = () => setFrontPreview(reader.result);
+      reader.readAsDataURL(rawFile);
+    }
   };
 
-  const handleBackSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBackFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setBackPreview(reader.result);
-    reader.readAsDataURL(file);
+  const handleBackSelect = async (e) => {
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
+    try {
+      const compressed = await compressImage(rawFile, {
+        maxDimension: 1280,
+        quality: 0.75,
+        outputType: 'image/jpeg'
+      });
+      setBackFile(compressed.file);
+      setBackPreview(compressed.base64);
+    } catch (err) {
+      console.warn('Back image compression failed, using original:', err);
+      setBackFile(rawFile);
+      const reader = new FileReader();
+      reader.onload = () => setBackPreview(reader.result);
+      reader.readAsDataURL(rawFile);
+    }
   };
 
   // AI Groq Vision Scan

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
 import { extractOrderFromSlip } from '../lib/geminiOcr';
+import { compressImage } from '../lib/imageCompressor';
 
 // Helper to find matching product in catalog based on case-insensitive substring and synonym matching
 const findMatchingProduct = (itemName, catalogProducts = []) => {
@@ -143,18 +144,32 @@ export default function CreateTaskModal({
   const [error, setError] = useState('');
 
   const handleSlipChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile) return;
 
-    setSlipFile(file);
-    const url = URL.createObjectURL(file);
-    setSlipPreview(url);
     setAiParseSuccess(false);
+    setIsAnalyzingSlip(true);
 
-    // Automatically trigger AI handwriting extraction via serverless route (gemini-3.8-flash)
     try {
-      setIsAnalyzingSlip(true);
-      const parsed = await extractOrderFromSlip(file);
+      let fileToProcess = rawFile;
+      try {
+        const compressed = await compressImage(rawFile, {
+          maxDimension: 1280,
+          quality: 0.75,
+          outputType: 'image/jpeg'
+        });
+        setSlipFile(compressed.file);
+        setSlipPreview(compressed.base64);
+        fileToProcess = compressed.file;
+      } catch (compErr) {
+        console.warn('Image compression warning, using raw file:', compErr);
+        setSlipFile(rawFile);
+        const url = URL.createObjectURL(rawFile);
+        setSlipPreview(url);
+      }
+
+      // Automatically trigger AI handwriting extraction via serverless route
+      const parsed = await extractOrderFromSlip(fileToProcess);
       if (parsed) {
         if (parsed.customer_name) {
           setCustomerName(parsed.customer_name);
