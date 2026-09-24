@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X,
   Camera,
@@ -60,6 +60,50 @@ export default function LogDamageModal({
 
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
+
+  // Reset all form inputs, previews, and file inputs to initial state
+  const resetForm = useCallback(() => {
+    setFrontFile(null);
+    setFrontPreview(null);
+    setBackFile(null);
+    setBackPreview(null);
+    setScanning(false);
+    setScanMessage('');
+    setSubmitting(false);
+    setError('');
+
+    setProductName('');
+    setCompanyName('');
+    setDistributorId('');
+    setDistributorName('');
+    setMrp('');
+    setNetWeightVolume('');
+    setBatchNo('');
+    setMfgDate('');
+    setExpiryDate('');
+    setQuantityPcs(1);
+    setRackNumber('');
+    setDamageType('Damage');
+
+    if (frontInputRef.current) {
+      frontInputRef.current.value = '';
+    }
+    if (backInputRef.current) {
+      backInputRef.current.value = '';
+    }
+  }, []);
+
+  // Whenever isOpen prop becomes false, trigger a full form reset
+  useEffect(() => {
+    if (!isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
+
+  const handleClose = () => {
+    resetForm();
+    onClose?.();
+  };
 
   if (!isOpen) return null;
 
@@ -207,6 +251,7 @@ export default function LogDamageModal({
       if (onItemLogged) {
         onItemLogged(created);
       }
+      resetForm();
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to save damage item');
@@ -234,7 +279,8 @@ export default function LogDamageModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={handleClose}
             className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
           >
             <X className="w-5 h-5" />
@@ -565,7 +611,7 @@ export default function LogDamageModal({
           <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
             >
               Cancel / रद्द करें
