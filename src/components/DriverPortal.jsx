@@ -33,6 +33,7 @@ import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
 import {
   supabase,
+  fetchOrders as fetchOrdersApi,
   acceptOrderDelivery,
   fetchRewardSettings,
   recordDriverAttendance,
@@ -256,41 +257,63 @@ export default function DriverPortal({
     }
   };
 
-  // Supabase Realtime Listener for New Orders (Chime + Notification + Vibration)
-  useEffect(() => {
-    if (!currentDriver || !supabase) return;
+  // Live orders state driving available pool, active deliveries, and delivery history
+  const [ordersList, setOrdersList] = useState(orders || []);
 
-    let channel = null;
-    try {
-      channel = supabase
-        .channel(`driver-order-alerts-${currentDriver.id}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'orders' },
-          (payload) => {
-            if (payload.eventType === 'INSERT') {
-              console.log('🚨 Realtime new order detected:', payload.new);
-              triggerOrderAlert(payload.new);
-            } else if (payload.eventType === 'UPDATE') {
-              if (
-                payload.new?.assigned_driver_id === currentDriver.id &&
-                payload.old?.assigned_driver_id !== currentDriver.id
-              ) {
-                console.log('🚨 Order assigned to current driver:', payload.new);
-                triggerOrderAlert(payload.new);
-              }
-            }
-          }
-        )
-        .subscribe();
-    } catch (e) {
-      console.warn('Driver Realtime alerts subscription failed:', e);
+  // Sync internal orders state when parent orders prop updates
+  useEffect(() => {
+    if (orders && orders.length > 0) {
+      setOrdersList(orders);
     }
+  }, [orders]);
+
+  // Fetch available/pool and active orders directly from Supabase
+  const fetchOrders = useCallback(async () => {
+    try {
+      const data = await fetchOrdersApi();
+      if (Array.isArray(data)) {
+        setOrdersList(data);
+      }
+    } catch (err) {
+      console.error('Error fetching driver pool orders in realtime:', err);
+    }
+  }, []);
+
+  // Direct Supabase Realtime channel subscription for instant pool & order updates
+  useEffect(() => {
+    fetchOrders(); // Initial fetch
+
+    const poolChannel = supabase
+      .channel('driver-pool-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('Realtime order change detected:', payload);
+          // Instantly refresh pool and active orders
+          fetchOrders();
+
+          // Sound chime, vibration, and push notification for alerts
+          if (payload.eventType === 'INSERT') {
+            triggerOrderAlert(payload.new);
+          } else if (
+            payload.eventType === 'UPDATE' &&
+            currentDriver &&
+            payload.new?.assigned_driver_id === currentDriver.id &&
+            payload.old?.assigned_driver_id !== currentDriver.id
+          ) {
+            triggerOrderAlert(payload.new);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      supabase.removeChannel(poolChannel);
     };
-  }, [currentDriver, triggerOrderAlert]);
+  }, [fetchOrders, triggerOrderAlert, currentDriver]);
 
   // Driver Live Online Heartbeat (every 30 seconds & offline on unload)
   useEffect(() => {
@@ -619,8 +642,12 @@ export default function DriverPortal({
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
+        setOrdersList((prev) =>
+          prev.map((o) => (o.id === orderId ? { ...o, latitude, longitude } : o))
+        );
         onPinLocation(orderId, latitude, longitude);
         setPinningOrderId(null);
+        fetchOrders();
       },
       (error) => {
         setPinningOrderId(null);
@@ -647,6 +674,22 @@ export default function DriverPortal({
       driverCoords?.lng
     );
 
+    // Optimistically update ordersList so the UI reflects it instantly
+    setOrdersList((prev) =>
+      prev.map((o) =>
+        o.id === order.id
+          ? {
+              ...o,
+              assigned_driver_id: currentDriver.id,
+              driver_id: currentDriver.id,
+              driver_name: currentDriver.name,
+              status: 'Out for Delivery',
+              eta_minutes: eta
+            }
+          : o
+      )
+    );
+
     if (onAcceptOrder) {
       await onAcceptOrder(order.id, eta);
     } else {
@@ -655,38 +698,39 @@ export default function DriverPortal({
 
     // Switch to active tab so the driver immediately sees their new task
     setActiveTab('active');
+    fetchOrders();
   };
 
   // Computed Orders
   // 1. Available Pool: orders where status is 'Pending' and unassigned
   const poolOrders = useMemo(() => {
-    return orders.filter(
+    return ordersList.filter(
       (o) =>
         o.status === 'Pending' &&
         (!o.assigned_driver_id || o.assigned_driver_id === null) &&
         (!o.driver_id || o.driver_id === null)
     );
-  }, [orders]);
+  }, [ordersList]);
 
   // 2. Active Deliveries: orders assigned to current driver that are not yet Delivered
   const activeDeliveries = useMemo(() => {
     if (!currentDriver) return [];
-    return orders.filter(
+    return ordersList.filter(
       (o) =>
         (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
         o.status !== 'Delivered'
     );
-  }, [orders, currentDriver]);
+  }, [ordersList, currentDriver]);
 
   // 3. Delivered History for current driver
   const deliveredHistory = useMemo(() => {
     if (!currentDriver) return [];
-    return orders.filter(
+    return ordersList.filter(
       (o) =>
         (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
         o.status === 'Delivered'
     );
-  }, [orders, currentDriver]);
+  }, [ordersList, currentDriver]);
 
   // 4. Completed deliveries TODAY for current driver (for Star Rewards)
   const completedTodayCount = useMemo(() => {
@@ -1108,12 +1152,28 @@ export default function DriverPortal({
           {activeTab === 'pool' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between px-1">
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Open Delivery Pool (Ready for Pickup)
-                </span>
-                <span className="text-xs text-emerald-400 font-semibold">
-                  {poolOrders.length} Available
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    Open Delivery Pool (Ready for Pickup)
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-400 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    Live
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-emerald-400 font-semibold">
+                    {poolOrders.length} Available
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fetchOrders()}
+                    title="Refresh pool orders"
+                    className="p-1 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-slate-800 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               {poolOrders.length === 0 ? (
@@ -1478,7 +1538,28 @@ export default function DriverPortal({
           isOpen={Boolean(selectedOrderForPod)}
           onClose={() => setSelectedOrderForPod(null)}
           order={selectedOrderForPod}
-          onCompleteDelivery={onCompleteDelivery}
+          onCompleteDelivery={async (orderId, podData) => {
+            // Optimistically update ordersList to Delivered
+            setOrdersList((prev) =>
+              prev.map((o) =>
+                o.id === orderId
+                  ? {
+                      ...o,
+                      status: 'Delivered',
+                      delivered_at: new Date().toISOString(),
+                      payment_method: podData?.paymentMethod || o.payment_method || 'Cash',
+                      delivery_proof_url: podData?.deliveryProofUrl || o.delivery_proof_url,
+                      payment_proof_url: podData?.paymentProofUrl || o.payment_proof_url,
+                      notes: podData?.notes !== undefined ? podData.notes : o.notes
+                    }
+                  : o
+              )
+            );
+            if (onCompleteDelivery) {
+              await onCompleteDelivery(orderId, podData);
+            }
+            fetchOrders();
+          }}
         />
       )}
 
