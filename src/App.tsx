@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import AdminHub from './components/AdminHub';
+import DamageReturnHub from './components/damage/DamageReturnHub';
 import DamageManagement from './components/DamageManagement';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
@@ -623,11 +624,9 @@ export default function App() {
                   onRefreshAll={loadInitialData}
                 />
               ) : adminSubView === 'damage' ? (
-                <DamageManagement
+                <DamageReturnHub
                   onBackToHub={() => setAdminSubView('hub')}
                   drivers={drivers}
-                  damages={damages}
-                  onDamagesChange={setDamages}
                 />
               ) : (
                 <AdminDashboard
