@@ -32,7 +32,8 @@ export default function LogDamageModal({
   isOpen,
   onClose,
   distributors = [],
-  onItemLogged
+  onItemLogged,
+  initialData = null
 }) {
   const [frontFile, setFrontFile] = useState(null);
   const [frontPreview, setFrontPreview] = useState(null);
@@ -98,8 +99,30 @@ export default function LogDamageModal({
   useEffect(() => {
     if (!isOpen) {
       resetForm();
+    } else if (initialData) {
+      if (initialData.product_name && initialData.product_name !== 'unknown') {
+        setProductName(initialData.product_name);
+      }
+      if (initialData.company_name) {
+        setCompanyName(initialData.company_name);
+      }
+      const exp = initialData.expiry_date || initialData.computed_expiry_date;
+      if (exp) {
+        setExpiryDate(exp);
+      }
+      if (initialData.mfg_date) {
+        setMfgDate(initialData.mfg_date);
+      }
+      if (initialData.damageType) {
+        setDamageType(initialData.damageType);
+      } else if (initialData.is_expired) {
+        setDamageType('Expired');
+      }
+      if (initialData.capturedImage) {
+        setFrontPreview(initialData.capturedImage);
+      }
     }
-  }, [isOpen, resetForm]);
+  }, [isOpen, initialData, resetForm]);
 
   const handleClose = () => {
     resetForm();

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import LogDamageModal from './LogDamageModal';
 import DistributorMaster from './DistributorMaster';
+import LiveExpiryScanner from './LiveExpiryScanner';
 import DamageManagement from '../DamageManagement'; // Legacy water jar view for full compatibility
 import {
   fetchDamageExpiryItems,
@@ -57,6 +58,8 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
 
   // Modals
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [isExpiryCamOpen, setIsExpiryCamOpen] = useState(false);
+  const [prefillDamageData, setPrefillDamageData] = useState(null);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [slipModalDistributor, setSlipModalDistributor] = useState(null);
 
@@ -284,8 +287,21 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          {/* Live Expiry Cam Button */}
           <button
-            onClick={() => setIsLogModalOpen(true)}
+            onClick={() => setIsExpiryCamOpen(true)}
+            className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-600 hover:from-amber-400 hover:to-emerald-500 text-white text-xs font-black shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition active:scale-95"
+            title="Open Live Groq Vision Expiry Date Scanner"
+          >
+            <Camera className="w-4 h-4 shrink-0 text-white" />
+            <span>Live Expiry Cam</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setPrefillDamageData(null);
+              setIsLogModalOpen(true);
+            }}
             className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white text-xs font-black shadow-lg shadow-rose-600/30 flex items-center justify-center gap-2 transition active:scale-95"
           >
             <Plus className="w-4 h-4 shrink-0" />
@@ -749,10 +765,24 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
       {/* LOG DAMAGE MODAL WITH GROQ VISION */}
       <LogDamageModal
         isOpen={isLogModalOpen}
-        onClose={() => setIsLogModalOpen(false)}
+        onClose={() => {
+          setIsLogModalOpen(false);
+          setPrefillDamageData(null);
+        }}
         distributors={distributors}
+        initialData={prefillDamageData}
         onItemLogged={(newItem) => {
           setItems((prev) => [newItem, ...prev]);
+        }}
+      />
+
+      {/* REAL-TIME GROQ VISION EXPIRY CAMERA */}
+      <LiveExpiryScanner
+        isOpen={isExpiryCamOpen}
+        onClose={() => setIsExpiryCamOpen(false)}
+        onLogDamaged={(detectedData) => {
+          setPrefillDamageData(detectedData);
+          setIsLogModalOpen(true);
         }}
       />
 
