@@ -47,6 +47,11 @@ import {
   calculateDistanceMeters,
   calculateEtaMinutes
 } from '../lib/geoUtils';
+import {
+  playNewOrderSound,
+  playOrderCompletedSound,
+  unlockAudioContext
+} from '../lib/soundEffects';
 
 export default function DriverPortal({
   currentDriver,
@@ -162,20 +167,13 @@ export default function DriverPortal({
     }
   }, []);
 
-  // Trigger Order Alert (Loud Chime + Phone Vibration + Native Notification)
+  // Trigger Order Alert (Punchy "Toing" Chime + Phone Vibration + Native Notification)
   const triggerOrderAlert = useCallback(
     (orderData) => {
-      // 1. Play loud chime
-      playOrderAlertChime();
+      // 1. Play punchy alert "toing" sound + haptic vibration
+      playNewOrderSound();
 
-      // 2. Trigger device vibration
-      if ('vibrate' in navigator) {
-        try {
-          navigator.vibrate([200, 100, 200]);
-        } catch (e) {}
-      }
-
-      // 3. Trigger native notification
+      // 2. Trigger native notification
       if (
         typeof window !== 'undefined' &&
         'Notification' in window &&
@@ -197,18 +195,18 @@ export default function DriverPortal({
         }
       }
     },
-    [playOrderAlertChime]
+    []
   );
 
   // Notification Permission Request Handler
   const handleRequestNotificationPermission = async () => {
+    unlockAudioContext();
     if (typeof window !== 'undefined' && 'Notification' in window) {
       try {
         const permission = await Notification.requestPermission();
         setNotifPermission(permission);
         if (permission === 'granted') {
-          playOrderAlertChime();
-          if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+          playNewOrderSound();
           new Notification('🚨 Jal-Jivan Order Alerts Enabled!', {
             body: 'You will now hear a loud alert chime & receive notifications when orders arrive.',
             icon: '/pwa-192x192.png'
@@ -293,8 +291,9 @@ export default function DriverPortal({
           // Instantly refresh pool and active orders
           fetchOrders();
 
-          // Sound chime, vibration, and push notification for alerts
+          // Sound "toing" chime, vibration, and push notification for alerts
           if (payload.eventType === 'INSERT') {
+            playNewOrderSound();
             triggerOrderAlert(payload.new);
           } else if (
             payload.eventType === 'UPDATE' &&
@@ -302,6 +301,7 @@ export default function DriverPortal({
             payload.new?.assigned_driver_id === currentDriver.id &&
             payload.old?.assigned_driver_id !== currentDriver.id
           ) {
+            playNewOrderSound();
             triggerOrderAlert(payload.new);
           }
         }
@@ -922,11 +922,11 @@ export default function DriverPortal({
           {notifPermission === 'granted' && (
             <button
               onClick={() => {
-                playOrderAlertChime();
-                if ('vibrate' in navigator) navigator.vibrate([200, 100, 200]);
+                unlockAudioContext();
+                playNewOrderSound();
               }}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all"
-              title="Test loud chime sound"
+              title="Test loud toing alert sound"
             >
               <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden sm:inline">Test Alert</span>
@@ -1539,6 +1539,9 @@ export default function DriverPortal({
           onClose={() => setSelectedOrderForPod(null)}
           order={selectedOrderForPod}
           onCompleteDelivery={async (orderId, podData) => {
+            // Play rewarding delivery completion chime & success vibration pulse
+            playOrderCompletedSound();
+
             // Optimistically update ordersList to Delivered
             setOrdersList((prev) =>
               prev.map((o) =>
