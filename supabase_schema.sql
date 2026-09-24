@@ -172,3 +172,98 @@ DROP POLICY IF EXISTS "Allow public delete on order-slips" ON storage.objects;
 CREATE POLICY "Allow public delete on order-slips" ON storage.objects 
 FOR DELETE USING (bucket_id = 'order-slips');
 
+-- 13. Create Damages Tracking Table (with safe Realtime check)
+CREATE TABLE IF NOT EXISTS public.product_damages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  item_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  category TEXT DEFAULT 'Water Jar',
+  reported_by TEXT DEFAULT 'Admin',
+  reason TEXT,
+  estimated_loss NUMERIC(10, 2) DEFAULT 0.00,
+  photo_url TEXT,
+  status TEXT DEFAULT 'pending'
+);
+
+-- Safely add to realtime publication without throwing duplicate error
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+      AND schemaname = 'public' 
+      AND tablename = 'product_damages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.product_damages;
+  END IF;
+END $$;
+
+-- RLS policies for product_damages
+ALTER TABLE public.product_damages ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public read damages" ON public.product_damages;
+DROP POLICY IF EXISTS "Allow public insert damages" ON public.product_damages;
+DROP POLICY IF EXISTS "Allow public update damages" ON public.product_damages;
+DROP POLICY IF EXISTS "Allow public delete damages" ON public.product_damages;
+
+CREATE POLICY "Allow public read damages" ON public.product_damages FOR SELECT USING (true);
+CREATE POLICY "Allow public insert damages" ON public.product_damages FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update damages" ON public.product_damages FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete damages" ON public.product_damages FOR DELETE USING (true);
+
+-- 14. Distributors & Companies Directory Table
+CREATE TABLE IF NOT EXISTS public.distributors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    distributor_name TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    salesman_name TEXT DEFAULT '',
+    salesman_phone TEXT DEFAULT '',
+    visit_day TEXT DEFAULT 'Monday',
+    return_window_rule TEXT DEFAULT 'Anytime',
+    notes TEXT DEFAULT ''
+);
+
+-- 15. Damage & Expiry Tracking Items Table
+CREATE TABLE IF NOT EXISTS public.damage_expiry_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    product_name TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    distributor_id UUID REFERENCES public.distributors(id) ON DELETE SET NULL,
+    distributor_name TEXT NOT NULL,
+    mrp NUMERIC(10, 2) DEFAULT 0.00,
+    net_weight_volume TEXT DEFAULT '',
+    batch_no TEXT DEFAULT '',
+    mfg_date TEXT DEFAULT '',
+    expiry_date TEXT DEFAULT '',
+    quantity_pcs INTEGER NOT NULL DEFAULT 1,
+    rack_number TEXT NOT NULL,
+    damage_type TEXT DEFAULT 'Damage',
+    front_photo_url TEXT DEFAULT '',
+    back_photo_url TEXT DEFAULT '',
+    return_slip_photo_url TEXT DEFAULT '',
+    
+    is_slip_made BOOLEAN DEFAULT FALSE,
+    slip_made_at TIMESTAMP WITH TIME ZONE,
+    
+    is_pickup_done BOOLEAN DEFAULT FALSE,
+    pickup_done_at TIMESTAMP WITH TIME ZONE,
+    
+    is_credit_received BOOLEAN DEFAULT FALSE,
+    credit_received_at TIMESTAMP WITH TIME ZONE,
+    
+    current_status TEXT DEFAULT 'in_godown'
+);
+
+-- 16. RLS Permissions for directory and damage items
+ALTER TABLE public.distributors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.damage_expiry_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public access distributors" ON public.distributors;
+CREATE POLICY "Public access distributors" ON public.distributors FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access damage_expiry_items" ON public.damage_expiry_items;
+CREATE POLICY "Public access damage_expiry_items" ON public.damage_expiry_items FOR ALL USING (true) WITH CHECK (true);
+
+

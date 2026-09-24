@@ -38,6 +38,8 @@ const STORAGE_ORDERS = 'jal_jivan_orders';
 const STORAGE_PRODUCTS = 'jal_jivan_products';
 const STORAGE_ADDRESS_BOOK = 'jal_jivan_address_book';
 const STORAGE_DAMAGES = 'jal_jivan_damages';
+const STORAGE_DISTRIBUTORS = 'jal_jivan_distributors';
+const STORAGE_DAMAGE_EXPIRY_ITEMS = 'jal_jivan_damage_expiry_items';
 
 const getLocalDamages = () => {
   try {
@@ -57,6 +59,40 @@ const saveLocalDamages = (damages) => {
     localStorage.setItem(STORAGE_DAMAGES, JSON.stringify(damages));
   } catch (e) {
     console.error('Failed saving damages locally', e);
+  }
+};
+
+const getLocalDistributors = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_DISTRIBUTORS);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveLocalDistributors = (items) => {
+  try {
+    localStorage.setItem(STORAGE_DISTRIBUTORS, JSON.stringify(items));
+  } catch (e) {
+    console.error('Failed saving distributors locally', e);
+  }
+};
+
+const getLocalDamageExpiryItems = () => {
+  try {
+    const saved = localStorage.getItem(STORAGE_DAMAGE_EXPIRY_ITEMS);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const saveLocalDamageExpiryItems = (items) => {
+  try {
+    localStorage.setItem(STORAGE_DAMAGE_EXPIRY_ITEMS, JSON.stringify(items));
+  } catch (e) {
+    console.error('Failed saving damage expiry items locally', e);
   }
 };
 
@@ -1730,8 +1766,18 @@ export async function fetchProductDamages() {
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        saveLocalDamages(data);
-        return data;
+        // Normalize fields for frontend compatibility
+        const normalized = data.map((d) => ({
+          ...d,
+          category: d.category || d.damage_category || 'Water Jar',
+          damage_category: d.category || d.damage_category || 'Water Jar',
+          reported_by: d.reported_by || d.driver_name || 'Admin',
+          driver_name: d.reported_by || d.driver_name || 'Admin',
+          estimated_loss: Number(d.estimated_loss ?? d.estimated_value ?? 0),
+          estimated_value: Number(d.estimated_loss ?? d.estimated_value ?? 0)
+        }));
+        saveLocalDamages(normalized);
+        return normalized;
       }
       if (error) {
         console.warn('Supabase fetchProductDamages query notice:', error.message);
@@ -1744,18 +1790,32 @@ export async function fetchProductDamages() {
 }
 
 export async function createProductDamage(damagePayload) {
+  const item_name = damagePayload.item_name || damagePayload.itemName || '20L RO Purified Water Jar';
+  const quantity = Number(damagePayload.quantity) || 1;
+  const category = damagePayload.category || damagePayload.damage_category || damagePayload.damageCategory || 'Water Jar';
+  const reported_by = damagePayload.reported_by || damagePayload.driver_name || damagePayload.driverName || 'Admin';
+  const reason = damagePayload.reason || damagePayload.notes || '';
+  const estimated_loss = Number(damagePayload.estimated_loss ?? damagePayload.estimated_value ?? damagePayload.estimatedValue ?? 0);
+  const photo_url = damagePayload.photo_url || damagePayload.photoUrl || null;
+  const status = (damagePayload.status || 'pending').toLowerCase();
+
+  const insertPayload = {
+    item_name,
+    quantity,
+    category,
+    reported_by,
+    reason,
+    estimated_loss,
+    photo_url,
+    status
+  };
+
   const newDamage = {
     id: 'dmg-' + Date.now(),
-    item_name: damagePayload.item_name || damagePayload.itemName || '20L RO Purified Water Jar',
-    quantity: Number(damagePayload.quantity) || 1,
-    damage_category: damagePayload.damage_category || damagePayload.damageCategory || 'Cracked Body',
-    driver_name: damagePayload.driver_name || damagePayload.driverName || 'Unassigned / Warehouse',
-    driver_id: damagePayload.driver_id || damagePayload.driverId || null,
-    reason: damagePayload.reason || damagePayload.notes || '',
-    notes: damagePayload.notes || damagePayload.reason || '',
-    estimated_value: Number(damagePayload.estimated_value || damagePayload.estimatedValue) || 0,
-    photo_url: damagePayload.photo_url || damagePayload.photoUrl || null,
-    status: damagePayload.status || 'Pending',
+    ...insertPayload,
+    damage_category: category,
+    driver_name: reported_by,
+    estimated_value: estimated_loss,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -1764,14 +1824,20 @@ export async function createProductDamage(damagePayload) {
     try {
       const { data, error } = await supabase
         .from('product_damages')
-        .insert([newDamage])
+        .insert([insertPayload])
         .select()
         .single();
 
       if (!error && data) {
+        const fullItem = {
+          ...data,
+          damage_category: data.category || category,
+          driver_name: data.reported_by || reported_by,
+          estimated_value: Number(data.estimated_loss ?? estimated_loss)
+        };
         const local = getLocalDamages();
-        saveLocalDamages([data, ...local.filter((d) => d.id !== data.id)]);
-        return data;
+        saveLocalDamages([fullItem, ...local.filter((d) => d.id !== data.id)]);
+        return fullItem;
       }
       if (error) {
         console.warn('Supabase createProductDamage error, persisting locally:', error.message);
@@ -1793,14 +1859,14 @@ export async function updateProductDamageStatus(id, newStatus) {
     try {
       const { data, error } = await supabase
         .from('product_damages')
-        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .update({ status: newStatus.toLowerCase() })
         .eq('id', id)
         .select()
         .single();
 
       if (!error && data) {
         const local = getLocalDamages();
-        saveLocalDamages(local.map((d) => (d.id === id ? { ...d, ...data } : d)));
+        saveLocalDamages(local.map((d) => (d.id === id ? { ...d, ...data, status: newStatus } : d)));
         return data;
       }
     } catch (err) {
@@ -1809,7 +1875,7 @@ export async function updateProductDamageStatus(id, newStatus) {
   }
 
   const local = getLocalDamages();
-  const updated = local.map((d) => (d.id === id ? { ...d, status: newStatus, updated_at: new Date().toISOString() } : d));
+  const updated = local.map((d) => (d.id === id ? { ...d, status: newStatus } : d));
   saveLocalDamages(updated);
   return updated.find((d) => d.id === id) || { id, status: newStatus };
 }
@@ -1824,6 +1890,252 @@ export async function deleteProductDamage(id) {
   }
   const local = getLocalDamages();
   saveLocalDamages(local.filter((d) => d.id !== id));
+  return true;
+}
+
+// ==========================================
+// DISTRIBUTORS DIRECTORY
+// ==========================================
+
+export async function fetchDistributors() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('distributors')
+        .select('*')
+        .order('distributor_name', { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalDistributors(data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchDistributors notice:', err.message);
+    }
+  }
+  return getLocalDistributors();
+}
+
+export async function createDistributor(distributorData) {
+  const newDistributor = {
+    id: 'dist-' + Date.now(),
+    distributor_name: distributorData.distributor_name?.trim() || '',
+    company_name: distributorData.company_name?.trim() || '',
+    salesman_name: distributorData.salesman_name?.trim() || '',
+    salesman_phone: distributorData.salesman_phone?.trim() || '',
+    visit_day: distributorData.visit_day || 'Monday',
+    return_window_rule: distributorData.return_window_rule || 'Anytime',
+    notes: distributorData.notes?.trim() || '',
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const insertPayload = {
+        distributor_name: newDistributor.distributor_name,
+        company_name: newDistributor.company_name,
+        salesman_name: newDistributor.salesman_name,
+        salesman_phone: newDistributor.salesman_phone,
+        visit_day: newDistributor.visit_day,
+        return_window_rule: newDistributor.return_window_rule,
+        notes: newDistributor.notes
+      };
+
+      const { data, error } = await supabase
+        .from('distributors')
+        .insert([insertPayload])
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDistributors();
+        saveLocalDistributors([data, ...local.filter((d) => d.id !== data.id)]);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase createDistributor error:', err.message);
+    }
+  }
+
+  const local = getLocalDistributors();
+  saveLocalDistributors([newDistributor, ...local]);
+  return newDistributor;
+}
+
+export async function updateDistributor(id, updates) {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('distributors')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDistributors();
+        saveLocalDistributors(local.map((d) => (d.id === id ? { ...d, ...data } : d)));
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase updateDistributor error:', err.message);
+    }
+  }
+
+  const local = getLocalDistributors();
+  const updated = local.map((d) => (d.id === id ? { ...d, ...updates } : d));
+  saveLocalDistributors(updated);
+  return updated.find((d) => d.id === id);
+}
+
+export async function deleteDistributor(id) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('distributors').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteDistributor error:', err.message);
+    }
+  }
+  const local = getLocalDistributors();
+  saveLocalDistributors(local.filter((d) => d.id !== id));
+  return true;
+}
+
+// ==========================================
+// DAMAGE & EXPIRY TRACKING ITEMS
+// ==========================================
+
+export async function fetchDamageExpiryItems() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('damage_expiry_items')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalDamageExpiryItems(data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchDamageExpiryItems notice:', err.message);
+    }
+  }
+  return getLocalDamageExpiryItems();
+}
+
+export async function createDamageExpiryItem(itemData) {
+  const newItem = {
+    id: 'dmgexp-' + Date.now(),
+    product_name: itemData.product_name?.trim() || '',
+    company_name: itemData.company_name?.trim() || '',
+    distributor_id: itemData.distributor_id || null,
+    distributor_name: itemData.distributor_name?.trim() || '',
+    mrp: Number(itemData.mrp) || 0.0,
+    net_weight_volume: itemData.net_weight_volume?.trim() || '',
+    batch_no: itemData.batch_no?.trim() || '',
+    mfg_date: itemData.mfg_date || '',
+    expiry_date: itemData.expiry_date || '',
+    quantity_pcs: Number(itemData.quantity_pcs) || 1,
+    rack_number: itemData.rack_number?.trim() || '',
+    damage_type: itemData.damage_type || 'Damage',
+    front_photo_url: itemData.front_photo_url || '',
+    back_photo_url: itemData.back_photo_url || '',
+    return_slip_photo_url: itemData.return_slip_photo_url || '',
+    is_slip_made: Boolean(itemData.is_slip_made),
+    slip_made_at: itemData.slip_made_at || null,
+    is_pickup_done: Boolean(itemData.is_pickup_done),
+    pickup_done_at: itemData.pickup_done_at || null,
+    is_credit_received: Boolean(itemData.is_credit_received),
+    credit_received_at: itemData.credit_received_at || null,
+    current_status: itemData.current_status || 'in_godown',
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const insertPayload = {
+        product_name: newItem.product_name,
+        company_name: newItem.company_name,
+        distributor_id: newItem.distributor_id,
+        distributor_name: newItem.distributor_name,
+        mrp: newItem.mrp,
+        net_weight_volume: newItem.net_weight_volume,
+        batch_no: newItem.batch_no,
+        mfg_date: newItem.mfg_date,
+        expiry_date: newItem.expiry_date,
+        quantity_pcs: newItem.quantity_pcs,
+        rack_number: newItem.rack_number,
+        damage_type: newItem.damage_type,
+        front_photo_url: newItem.front_photo_url,
+        back_photo_url: newItem.back_photo_url,
+        return_slip_photo_url: newItem.return_slip_photo_url,
+        is_slip_made: newItem.is_slip_made,
+        slip_made_at: newItem.slip_made_at,
+        is_pickup_done: newItem.is_pickup_done,
+        pickup_done_at: newItem.pickup_done_at,
+        is_credit_received: newItem.is_credit_received,
+        credit_received_at: newItem.credit_received_at,
+        current_status: newItem.current_status
+      };
+
+      const { data, error } = await supabase
+        .from('damage_expiry_items')
+        .insert([insertPayload])
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDamageExpiryItems();
+        saveLocalDamageExpiryItems([data, ...local.filter((d) => d.id !== data.id)]);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase createDamageExpiryItem error:', err.message);
+    }
+  }
+
+  const local = getLocalDamageExpiryItems();
+  saveLocalDamageExpiryItems([newItem, ...local]);
+  return newItem;
+}
+
+export async function updateDamageExpiryItem(id, updates) {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('damage_expiry_items')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (!error && data) {
+        const local = getLocalDamageExpiryItems();
+        saveLocalDamageExpiryItems(local.map((d) => (d.id === id ? { ...d, ...data } : d)));
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase updateDamageExpiryItem error:', err.message);
+    }
+  }
+
+  const local = getLocalDamageExpiryItems();
+  const updated = local.map((d) => (d.id === id ? { ...d, ...updates } : d));
+  saveLocalDamageExpiryItems(updated);
+  return updated.find((d) => d.id === id);
+}
+
+export async function deleteDamageExpiryItem(id) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('damage_expiry_items').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteDamageExpiryItem error:', err.message);
+    }
+  }
+  const local = getLocalDamageExpiryItems();
+  saveLocalDamageExpiryItems(local.filter((d) => d.id !== id));
   return true;
 }
 
