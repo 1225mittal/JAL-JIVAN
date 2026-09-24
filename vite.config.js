@@ -68,6 +68,59 @@ export default defineConfig(({ mode }) => {
               })
               return
             }
+            if (req.url?.startsWith('/api/parse-distributor-voice') && req.method === 'POST') {
+              let body = ''
+              req.on('data', (chunk) => { body += chunk })
+              req.on('end', async () => {
+                try {
+                  req.body = JSON.parse(body || '{}')
+                  if (!process.env.GROQ_API_KEY) {
+                    process.env.GROQ_API_KEY = env.GROQ_API_KEY || env.VITE_GROQ_API_KEY || ''
+                  }
+                  if (!process.env.GEMINI_API_KEY) {
+                    process.env.GEMINI_API_KEY = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || ''
+                  }
+                  const { default: handler } = await import('./api/parse-distributor-voice.js')
+                  res.status = (code) => { res.statusCode = code; return res }
+                  res.json = (data) => {
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify(data))
+                    return res
+                  }
+                  await handler(req, res)
+                } catch (err) {
+                  res.statusCode = 500
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }))
+                }
+              })
+              return
+            }
+            if (req.url?.startsWith('/api/damage-ocr') && req.method === 'POST') {
+              let body = ''
+              req.on('data', (chunk) => { body += chunk })
+              req.on('end', async () => {
+                try {
+                  req.body = JSON.parse(body || '{}')
+                  if (!process.env.GROQ_API_KEY) {
+                    process.env.GROQ_API_KEY = env.GROQ_API_KEY || env.VITE_GROQ_API_KEY || ''
+                  }
+                  const { default: handler } = await import('./api/damage-ocr.js')
+                  res.status = (code) => { res.statusCode = code; return res }
+                  res.json = (data) => {
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify(data))
+                    return res
+                  }
+                  await handler(req, res)
+                } catch (err) {
+                  res.statusCode = 500
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }))
+                }
+              })
+              return
+            }
             next()
           })
         }
