@@ -266,4 +266,13 @@ CREATE POLICY "Public access distributors" ON public.distributors FOR ALL USING 
 DROP POLICY IF EXISTS "Public access damage_expiry_items" ON public.damage_expiry_items;
 CREATE POLICY "Public access damage_expiry_items" ON public.damage_expiry_items FOR ALL USING (true) WITH CHECK (true);
 
+-- 17. Multi-Division & FMCG Monthly Claim Cycle Schema Migration
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS divisions JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS claim_window_preset TEXT DEFAULT '1st - 10th';
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS claim_window_start INTEGER DEFAULT 1;
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS claim_window_end INTEGER DEFAULT 10;
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS return_eligibility JSONB DEFAULT '["Expired Stock", "Damage / Breakage / Leakage", "Consumer Complaint"]'::jsonb;
+ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS settlement_mode TEXT DEFAULT 'Credit Note (CN)';
+
+
 

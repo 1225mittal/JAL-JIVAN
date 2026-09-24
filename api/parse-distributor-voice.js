@@ -22,27 +22,35 @@ Return STRICTLY raw JSON matching this schema:
 {
   "distributor_name": "",
   "company_name": "",
+  "product_categories": "",
   "salesman_name": "",
   "salesman_phone": "",
   "visit_day": "Monday",
-  "return_window_rule": "Anytime / कभी भी",
+  "claim_window_preset": "1st - 10th",
+  "claim_window_start": 1,
+  "claim_window_end": 10,
+  "settlement_mode": "Credit Note (CN)",
+  "return_eligibility": ["Expired Stock", "Damage / Breakage / Leakage"],
   "notes": ""
 }
 
 RULES:
-1. "distributor_name": Agency or distributor trade name (e.g. "Laxmi Agency", "Shree Balaji Enterprises", "Krishna Traders").
-2. "company_name": FMCG Company or Brand (e.g. "Britannia", "Parle", "Bisleri", "Tata Consumer", "Nestle", "ITC", "Amul").
-3. "salesman_name": Sales representative or salesman's first/last name. Strip honorifics like "ji", "bhaiya", "bhai".
-4. "salesman_phone": 10-digit Indian phone number (starting with 6-9, digits only). Empty string if not mentioned.
-5. "visit_day": Must be STRICTLY one of: "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday".
-   (e.g., Somwar -> Monday, Mangalwar -> Tuesday, Budhwar -> Wednesday, Guruwar/Brihaspatiwar -> Thursday, Shukrawar -> Friday, Shaniwar -> Saturday, Raviwar/Itwar -> Sunday). Default to "Monday" if omitted.
-6. "return_window_rule": Must be STRICTLY one of:
-   - "Anytime / कभी भी"
-   - "Within 15 Days of Expiry"
-   - "Within 30 Days of Invoice"
-   - "Strict: Before Expiry Only"
-   - "Weekly Replacement"
-7. "notes": Any additional instructions, comments, or schedule details spoken.`;
+1. "distributor_name": Agency or distributor trade name (e.g. "Laxmi Agency", "Shree Balaji Enterprises", "Krishna Traders"). Strip conversational words like "hamara distributor", "agency name".
+2. "company_name": FMCG Company or Brand (e.g. "Britannia", "Parle", "Bisleri", "Tata Consumer", "Nestle", "ITC", "Amul", "Hindustan Unilever"). Strip words like "company", "brand", "ki".
+3. "product_categories": Specific categories/lines (e.g. "Biscuits", "Personal Care & Soaps", "Tea & Spices", "Snacks").
+4. "salesman_name": Sales representative name. Strip honorifics like "ji", "bhaiya", "bhai", "salesman".
+5. "salesman_phone": 10-digit Indian phone number (starting with 6-9, digits only).
+6. "visit_day": Must be STRICTLY one of: "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday". Default to "Monday".
+7. "claim_window_preset": Must be STRICTLY one of:
+   - "1st - 10th"
+   - "15th - 30th"
+   - "20th - End of Month"
+   - "Anytime / Weekly Visit"
+   - "Custom Range"
+8. "claim_window_start": Day of month number (1 to 31). Default 1.
+9. "claim_window_end": Day of month number (1 to 31). Default 10.
+10. "settlement_mode": "Credit Note (CN)" | "Replacement Goods" | "Bill Adjustment". Default "Credit Note (CN)".
+11. "notes": Any additional instructions or schedule details.`;
 
       const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -89,10 +97,15 @@ Schema:
 {
   "distributor_name": string,
   "company_name": string,
+  "product_categories": string,
   "salesman_name": string,
   "salesman_phone": string (10 digits),
   "visit_day": "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday",
-  "return_window_rule": "Anytime / कभी भी" | "Within 15 Days of Expiry" | "Within 30 Days of Invoice" | "Strict: Before Expiry Only" | "Weekly Replacement",
+  "claim_window_preset": "1st - 10th" | "15th - 30th" | "20th - End of Month" | "Anytime / Weekly Visit" | "Custom Range",
+  "claim_window_start": number,
+  "claim_window_end": number,
+  "settlement_mode": "Credit Note (CN)" | "Replacement Goods" | "Bill Adjustment",
+  "return_eligibility": string[],
   "notes": string
 }`;
 
@@ -122,13 +135,35 @@ Schema:
   else if (/saturday|shaniwar|शनिवार/i.test(rawTranscript)) visitDay = 'Saturday';
   else if (/sunday|raviwar|itwar|रविवार/i.test(rawTranscript)) visitDay = 'Sunday';
 
+  let preset = '1st - 10th';
+  let start = 1;
+  let end = 10;
+  if (/anytime|kabhi\s*bhi/i.test(rawTranscript)) {
+    preset = 'Anytime / Weekly Visit';
+    start = 1;
+    end = 31;
+  } else if (/15\s*(?:th|to|-|se)\s*30/i.test(rawTranscript)) {
+    preset = '15th - 30th';
+    start = 15;
+    end = 30;
+  } else if (/20\s*(?:th|to|-|se)|end\s*of\s*month/i.test(rawTranscript)) {
+    preset = '20th - End of Month';
+    start = 20;
+    end = 31;
+  }
+
   return res.status(200).json({
     distributor_name: '',
     company_name: '',
+    product_categories: '',
     salesman_name: '',
     salesman_phone: phoneMatch ? phoneMatch[1] : '',
     visit_day: visitDay,
-    return_window_rule: 'Anytime / कभी भी',
+    claim_window_preset: preset,
+    claim_window_start: start,
+    claim_window_end: end,
+    settlement_mode: 'Credit Note (CN)',
+    return_eligibility: ['Expired Stock', 'Damage / Breakage / Leakage'],
     notes: ''
   });
 }

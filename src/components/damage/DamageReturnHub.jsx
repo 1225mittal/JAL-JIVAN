@@ -35,6 +35,10 @@ import {
   fetchDistributors,
   supabase
 } from '../../lib/supabase';
+import {
+  isClaimWindowActive,
+  formatClaimWindowBadge
+} from '../../lib/distributorVoiceParser';
 
 export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
   // Navigation View: 'inventory' | 'distributors' | 'legacy_jars'
@@ -134,6 +138,36 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
       return matchesSearch && matchesStatus && matchesType && matchesDistributor;
     });
   }, [items, search, statusFilter, typeFilter, distributorFilter]);
+
+  const todayDate = new Date().getDate();
+
+  // Helper to match an item to its distributor and specific division
+  const getDistributorForItem = (item) => {
+    if (!item) return null;
+    if (item.distributor_id) {
+      const found = distributors.find((d) => d.id === item.distributor_id);
+      if (found) return found;
+    }
+    if (item.distributor_name) {
+      const name = item.distributor_name.toLowerCase().trim();
+      const found = distributors.find(
+        (d) => (d.distributor_name || '').toLowerCase().trim() === name
+      );
+      if (found) return found;
+    }
+    if (item.company_name) {
+      const cName = item.company_name.toLowerCase().trim();
+      const found = distributors.find((d) => {
+        if ((d.company_name || '').toLowerCase().includes(cName)) return true;
+        if (Array.isArray(d.divisions)) {
+          return d.divisions.some((div) => (div.company_name || '').toLowerCase().includes(cName));
+        }
+        return false;
+      });
+      if (found) return found;
+    }
+    return null;
+  };
 
   // KPIs
   const stats = useMemo(() => {
@@ -454,6 +488,8 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredItems.map((item) => {
                 const totalItemLoss = (Number(item.mrp) || 0) * (item.quantity_pcs || 1);
+                const dist = getDistributorForItem(item);
+                const windowStatus = isClaimWindowActive(dist, todayDate);
 
                 return (
                   <div
@@ -531,9 +567,41 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400">Distributor:</span>
                           <strong className="text-white truncate max-w-[160px]">
-                            {item.distributor_name || 'Direct'}
+                            {item.distributor_name || dist?.distributor_name || 'Direct'}
                           </strong>
                         </div>
+
+                        {/* FMCG Monthly Claim Window Live Badge */}
+                        <div
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${
+                            windowStatus.isOpen
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                              windowStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                            }`}
+                          />
+                          <span className="truncate">{windowStatus.badgeText}</span>
+                        </div>
+
+                        {dist?.salesman_name && (
+                          <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
+                            <span className="truncate">
+                              Salesman: <strong className="text-slate-200">{dist.salesman_name}</strong>
+                            </span>
+                            {dist.salesman_phone && (
+                              <a
+                                href={`tel:${dist.salesman_phone}`}
+                                className="text-cyan-400 hover:text-cyan-300 text-[10px] font-bold bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20 shrink-0 ml-1"
+                              >
+                                📞 {dist.salesman_phone}
+                              </a>
+                            )}
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between pt-1 border-t border-slate-800">
                           <span className="text-slate-400">
@@ -740,6 +808,24 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                 <div className="text-xs space-y-1">
                   <p><strong>Distributor / Agency:</strong> {slipModalDistributor}</p>
                   <p><strong>Items Count:</strong> {distributorSlipItems.length} items</p>
+                  {(() => {
+                    const distForSlip = distributors.find(
+                      (d) =>
+                        (d.distributor_name || '').toLowerCase() ===
+                        (slipModalDistributor || '').toLowerCase()
+                    );
+                    if (!distForSlip) return null;
+                    return (
+                      <div className="text-[10px] text-slate-700 bg-slate-100 p-2 rounded border border-slate-300 space-y-0.5 mt-1">
+                        <p><strong>Return Policy Window:</strong> {formatClaimWindowBadge(distForSlip)}</p>
+                        <p><strong>Today&apos;s Window Status:</strong> {isClaimWindowActive(distForSlip, todayDate).badgeText}</p>
+                        {distForSlip.settlement_mode && <p><strong>Settlement Mode:</strong> {distForSlip.settlement_mode}</p>}
+                        {distForSlip.salesman_name && (
+                          <p><strong>Assigned Salesman:</strong> {distForSlip.salesman_name} {distForSlip.salesman_phone ? `(${distForSlip.salesman_phone})` : ''}</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <table className="w-full text-[10px] border-collapse">

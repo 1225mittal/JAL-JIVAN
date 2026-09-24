@@ -1917,40 +1917,92 @@ export async function fetchDistributors() {
 }
 
 export async function createDistributor(distributorData) {
+  const divisions = Array.isArray(distributorData.divisions) && distributorData.divisions.length > 0
+    ? distributorData.divisions
+    : [{
+        id: 'div-' + Date.now(),
+        company_name: distributorData.company_name?.trim() || '',
+        product_categories: distributorData.product_categories?.trim() || '',
+        salesman_name: distributorData.salesman_name?.trim() || '',
+        salesman_phone: distributorData.salesman_phone?.trim() || '',
+        visit_day: distributorData.visit_day || 'Monday',
+        claim_window_preset: distributorData.claim_window_preset || '1st - 10th',
+        claim_window_start: Number(distributorData.claim_window_start) || 1,
+        claim_window_end: Number(distributorData.claim_window_end) || 10
+      }];
+
+  const primaryDiv = divisions[0] || {};
+  const allCompanies = Array.from(new Set(divisions.map((d) => d.company_name?.trim()).filter(Boolean)));
+  const companySummary = allCompanies.length > 0 ? allCompanies.join(', ') : (distributorData.company_name?.trim() || '');
+
   const newDistributor = {
-    id: 'dist-' + Date.now(),
+    id: distributorData.id || ('dist-' + Date.now()),
     distributor_name: distributorData.distributor_name?.trim() || '',
-    company_name: distributorData.company_name?.trim() || '',
-    salesman_name: distributorData.salesman_name?.trim() || '',
-    salesman_phone: distributorData.salesman_phone?.trim() || '',
-    visit_day: distributorData.visit_day || 'Monday',
-    return_window_rule: distributorData.return_window_rule || 'Anytime',
+    company_name: companySummary,
+    salesman_name: primaryDiv.salesman_name?.trim() || distributorData.salesman_name?.trim() || '',
+    salesman_phone: primaryDiv.salesman_phone?.trim() || distributorData.salesman_phone?.trim() || '',
+    visit_day: primaryDiv.visit_day || distributorData.visit_day || 'Monday',
+    return_window_rule: distributorData.return_window_rule || `${distributorData.claim_window_start || 1}th–${distributorData.claim_window_end || 10}th of Month`,
     notes: distributorData.notes?.trim() || '',
+    divisions: divisions,
+    claim_window_preset: distributorData.claim_window_preset || primaryDiv.claim_window_preset || '1st - 10th',
+    claim_window_start: Number(distributorData.claim_window_start || primaryDiv.claim_window_start) || 1,
+    claim_window_end: Number(distributorData.claim_window_end || primaryDiv.claim_window_end) || 10,
+    return_eligibility: distributorData.return_eligibility || ['Expired Stock', 'Damage / Breakage / Leakage', 'Consumer Complaint'],
+    settlement_mode: distributorData.settlement_mode || 'Credit Note (CN)',
     created_at: new Date().toISOString()
   };
 
   if (isSupabaseConfigured) {
     try {
-      const insertPayload = {
+      const fullPayload = {
         distributor_name: newDistributor.distributor_name,
         company_name: newDistributor.company_name,
         salesman_name: newDistributor.salesman_name,
         salesman_phone: newDistributor.salesman_phone,
         visit_day: newDistributor.visit_day,
         return_window_rule: newDistributor.return_window_rule,
-        notes: newDistributor.notes
+        notes: newDistributor.notes,
+        divisions: newDistributor.divisions,
+        claim_window_preset: newDistributor.claim_window_preset,
+        claim_window_start: newDistributor.claim_window_start,
+        claim_window_end: newDistributor.claim_window_end,
+        return_eligibility: newDistributor.return_eligibility,
+        settlement_mode: newDistributor.settlement_mode
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('distributors')
-        .insert([insertPayload])
+        .insert([fullPayload])
         .select()
         .single();
 
+      // Graceful fallback if table doesn't have new JSONB/columns yet
+      if (error && (error.message?.includes('column') || error.code === '42703')) {
+        console.warn('Distributor schema column pending, falling back to base columns:', error.message);
+        const basePayload = {
+          distributor_name: newDistributor.distributor_name,
+          company_name: newDistributor.company_name,
+          salesman_name: newDistributor.salesman_name,
+          salesman_phone: newDistributor.salesman_phone,
+          visit_day: newDistributor.visit_day,
+          return_window_rule: newDistributor.return_window_rule,
+          notes: newDistributor.notes
+        };
+        const fallbackRes = await supabase
+          .from('distributors')
+          .insert([basePayload])
+          .select()
+          .single();
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
+
       if (!error && data) {
+        const merged = { ...newDistributor, ...data, divisions: newDistributor.divisions };
         const local = getLocalDistributors();
-        saveLocalDistributors([data, ...local.filter((d) => d.id !== data.id)]);
-        return data;
+        saveLocalDistributors([merged, ...local.filter((d) => d.id !== merged.id)]);
+        return merged;
       }
     } catch (err) {
       console.warn('Supabase createDistributor error:', err.message);
@@ -1963,19 +2015,54 @@ export async function createDistributor(distributorData) {
 }
 
 export async function updateDistributor(id, updates) {
+  const localList = getLocalDistributors();
+  const existing = localList.find((d) => d.id === id) || {};
+
+  // Normalize divisions if provided
+  let divisions = updates.divisions;
+  if (divisions && divisions.length > 0) {
+    const primaryDiv = divisions[0];
+    const allCompanies = Array.from(new Set(divisions.map((d) => d.company_name?.trim()).filter(Boolean)));
+    updates.company_name = allCompanies.length > 0 ? allCompanies.join(', ') : (updates.company_name || existing.company_name || '');
+    if (!updates.salesman_name && primaryDiv.salesman_name) updates.salesman_name = primaryDiv.salesman_name;
+    if (!updates.salesman_phone && primaryDiv.salesman_phone) updates.salesman_phone = primaryDiv.salesman_phone;
+    if (!updates.visit_day && primaryDiv.visit_day) updates.visit_day = primaryDiv.visit_day;
+  }
+
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('distributors')
         .update(updates)
         .eq('id', id)
         .select()
         .single();
 
+      if (error && (error.message?.includes('column') || error.code === '42703')) {
+        const {
+          divisions: _div,
+          claim_window_preset: _cwp,
+          claim_window_start: _cws,
+          claim_window_end: _cwe,
+          return_eligibility: _re,
+          settlement_mode: _sm,
+          ...baseUpdates
+        } = updates;
+        const fallbackRes = await supabase
+          .from('distributors')
+          .update(baseUpdates)
+          .eq('id', id)
+          .select()
+          .single();
+        data = fallbackRes.data;
+        error = fallbackRes.error;
+      }
+
       if (!error && data) {
+        const merged = { ...existing, ...updates, ...data };
         const local = getLocalDistributors();
-        saveLocalDistributors(local.map((d) => (d.id === id ? { ...d, ...data } : d)));
-        return data;
+        saveLocalDistributors(local.map((d) => (d.id === id ? merged : d)));
+        return merged;
       }
     } catch (err) {
       console.warn('Supabase updateDistributor error:', err.message);
