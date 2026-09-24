@@ -48,10 +48,9 @@ export const RETURN_RULES = [
 export function stripCompanyName(val) {
   if (!val) return '';
   let str = String(val).trim();
-  // Strip prefixes like company, brand, kampani, fmcg, ki, ka, hai, ke, for
-  str = str.replace(/^(?:hamari\s+|apni\s+)?(?:company(?:\s*name)?|brand(?:\s*name)?|kampani|fmcg|ki|ka|hai|ke|for|कंपनी|ब्रांड)\s*[:\-]?\s*/iu, '');
-  // Strip trailing fillers
+  str = str.replace(/^(?:hamari\s+|apni\s+)?(?:company(?:\s*name)?|brand(?:\s*name)?|kampani|fmcg|ki|ka|hai|ke|for|कंपनी(?:\s*नेम|\s*नाम)?|ब्रांड(?:\s*नेम|\s*नाम)?|नेम|नाम|name)\s*[:\-]?\s*/iu, '');
   str = str.replace(/\s+(?:ki|ka|ke|hai|he|h|ki\s*hai|ka\s*hai)$/iu, '');
+  str = str.replace(/^[,\.:;\s]+|[,\.:;\s]+$/g, '');
   return str.trim();
 }
 
@@ -61,10 +60,9 @@ export function stripCompanyName(val) {
 export function stripSalesmanName(val) {
   if (!val) return '';
   let str = String(val).trim();
-  // Strip prefixes like salesman, sales boy, sales person, sales rep, bhaiya, ji, shri, mr
-  str = str.replace(/^(?:salesman(?:\s*name)?|sales\s*boy|sales\s*person|sales\s*rep|sales\s*man|sales|bhaiya|bhai|ji|shri|mr|shree|ladka|सेल्समैन|सेल्स)\s*[:\-]?\s*/iu, '');
-  // Strip trailing honorifics like ji, bhaiya, bhai, etc.
+  str = str.replace(/^(?:salesman(?:\s*name)?|sales\s*boy|sales\s*person|sales\s*rep|sales\s*man|sales|bhaiya|bhai|ji|shri|mr|shree|ladka|सेल्समैन|सेल्स\s*बॉय|सेल्स\s*पर्सन|सेल्स|नाम|नेम|name)\s*[:\-]?\s*/iu, '');
   str = str.replace(/\s+(?:ji|bhaiya|bhai|sahab|saab|sir|jiu)$/iu, '');
+  str = str.replace(/^[,\.:;\s]+|[,\.:;\s]+$/g, '');
   return str.trim();
 }
 
@@ -74,10 +72,9 @@ export function stripSalesmanName(val) {
 export function stripDistributorName(val) {
   if (!val) return '';
   let str = String(val).trim();
-  // Strip prefixes like distributor, agency, firm, trader, traders, hamara distributor
-  str = str.replace(/^(?:hamara\s+|apna\s+)?(?:distributor(?:\s*name)?|distributer|agency(?:\s*name)?|firm(?:\s*name)?|trader|traders|agency\s*name|distributor\s*ka\s*naam|naam|hai|डिस्ट्रीब्यूटर|एजेंसी|फर्म)\s*[:\-]?\s*/iu, '');
-  // Strip trailing fillers
+  str = str.replace(/^(?:hamara\s+|apna\s+)?(?:distributor(?:\s*name)?|distributer|agency(?:\s*name)?|firm(?:\s*name)?|trader|traders|agency\s*name|distributor\s*ka\s*naam|naam|hai|डिस्ट्रीब्यूटर(?:\s*का\s*नाम|\s*नाम|\s*नेम)?|नेम|नाम|name)\s*[:\-]?\s*/iu, '');
   str = str.replace(/\s+(?:hai|he|h|ka|ki|ke|ki\s*hai|ka\s*hai)$/iu, '');
+  str = str.replace(/^[,\.:;\s]+|[,\.:;\s]+$/g, '');
   return str.trim();
 }
 
@@ -87,8 +84,9 @@ export function stripDistributorName(val) {
 export function stripProductCategories(val) {
   if (!val) return '';
   let str = String(val).trim();
-  str = str.replace(/^(?:category|categories|products?|items?|saman|saaman|maal|कैटगरी)\s*[:\-]?\s*/iu, '');
+  str = str.replace(/^(?:category|categories|products?|items?|saman|saaman|maal|कैटगरी|कैटेगरी|प्रोडक्ट्स?|सामान|आइटम्स?|नेम|नाम|name)\s*[:\-]?\s*/iu, '');
   str = str.replace(/\s+(?:hai|ka|ki|ke)$/iu, '');
+  str = str.replace(/^[,\.:;\s]+|[,\.:;\s]+$/g, '');
   return str.trim();
 }
 
@@ -99,13 +97,13 @@ export function normalizeVisitDay(dayText) {
   if (!dayText) return 'Monday';
   const text = String(dayText).toLowerCase().trim();
 
-  if (/monday|somwar|somvaar|सोमवार|mon\b/i.test(text)) return 'Monday';
-  if (/tuesday|mangalwar|mangalvaar|मंगलवार|tue\b/i.test(text)) return 'Tuesday';
-  if (/wednesday|budhwar|budhvaar|बुधवार|wed\b/i.test(text)) return 'Wednesday';
-  if (/thursday|guruwar|guruvaar|brihaspatiwar|veerwar|गुरुवार|बृहस्पतिवार|वीरवार|thu\b/i.test(text)) return 'Thursday';
-  if (/friday|shukrawar|shukravaar|jumme|शुक्रवार|fri\b/i.test(text)) return 'Friday';
-  if (/saturday|shaniwar|shanivaar|शनिवार|sat\b/i.test(text)) return 'Saturday';
-  if (/sunday|raviwar|ravivaar|itwar|itvaar|रविवार|इतवार|sun\b/i.test(text)) return 'Sunday';
+  if (/wednesday|budhwar|budhvaar|बुधवार|वेनसडे|वेडनसडे|वेडनेसडे|वेडनेस्डे|wed\b/iu.test(text)) return 'Wednesday';
+  if (/tuesday|mangalwar|mangalvaar|मंगलवार|ट्यूजडे|ट्यूसडे|tue\b/iu.test(text)) return 'Tuesday';
+  if (/thursday|guruwar|guruvaar|brihaspatiwar|veerwar|गुरुवार|बृहस्पतिवार|वीरवार|थर्सडे|thu\b/iu.test(text)) return 'Thursday';
+  if (/friday|shukrawar|shukravaar|jumme|शुक्रवार|जुम्मा|फ्राइडे|fri\b/iu.test(text)) return 'Friday';
+  if (/saturday|shaniwar|shanivaar|शनिवार|सैटरडे|सैटर्डे|sat\b/iu.test(text)) return 'Saturday';
+  if (/sunday|raviwar|ravivaar|itwar|itvaar|रविवार|इतवार|संडे|sun\b/iu.test(text)) return 'Sunday';
+  if (/monday|somwar|somvaar|सोमवार|मंडे|mon\b/iu.test(text)) return 'Monday';
 
   return 'Monday';
 }
@@ -117,11 +115,11 @@ export function extractPhoneNumber(text) {
   if (!text) return '';
   const raw = String(text);
 
-  // 1. Look for phone keyword followed by numbers
-  const keywordMatch = raw.match(/(?:phone(?:\s*number|\s*no)?|mobile(?:\s*no)?|number|फ़ोन|मोबाइल|नंबर|ph)\s*[:\-]?\s*([0-9\s\-]{10,15})/i);
+  // 1. Look for phone keyword followed by numbers (supports फोन, फ़ोन, मोबाइल, etc.)
+  const keywordMatch = raw.match(/(?:phone(?:\s*number|\s*no)?|mobile(?:\s*number|\s*no)?|contact(?:\s*no)?|फ़ोन(?:\s*नंबर|\s*नं)?|फोन(?:\s*नंबर|\s*नं)?|मोबाइल(?:\s*नंबर|\s*नं)?|नंबर|number|ph)\s*[:\-]?\s*([0-9\s\-]{8,15})/iu);
   if (keywordMatch) {
     const digits = keywordMatch[1].replace(/\D/g, '');
-    if (digits.length >= 10) {
+    if (digits.length >= 8) {
       return digits.slice(-10);
     }
   }
@@ -132,14 +130,10 @@ export function extractPhoneNumber(text) {
     return directMatch[1];
   }
 
-  // 3. Fallback on all digits
+  // 3. Fallback on any 8-12 digit sequence
   const allDigits = raw.replace(/\D/g, '');
-  if (allDigits.length === 10 && /^[6-9]/.test(allDigits)) {
-    return allDigits;
-  }
-  if (allDigits.length > 10) {
-    const sub = allDigits.match(/[6-9]\d{9}/);
-    if (sub) return sub[0];
+  if (allDigits.length >= 8 && allDigits.length <= 12) {
+    return allDigits.slice(-10);
   }
 
   return '';
@@ -278,106 +272,139 @@ export function parseDistributorVoiceLocally(transcript) {
   // Extract phone number
   const phone = extractPhoneNumber(raw);
 
-  // Extract visit day
-  let visitDay = 'Monday';
-  const dayPatterns = [
-    /monday|somwar|somvaar|सोमवार/i,
-    /tuesday|mangalwar|mangalvaar|मंगलवार/i,
-    /wednesday|budhwar|budhvaar|बुधवार/i,
-    /thursday|guruwar|guruvaar|brihaspatiwar|veerwar|गुरुवार|बृहस्पतिवार|वीरवार/i,
-    /friday|shukrawar|shukravaar|शुक्रवार/i,
-    /saturday|shaniwar|shanivaar|शनिवार/i,
-    /sunday|raviwar|ravivaar|itwar|itvaar|रविवार|इतवार/i
-  ];
-  for (const pat of dayPatterns) {
-    const m = raw.match(pat);
-    if (m) {
-      visitDay = normalizeVisitDay(m[0]);
-      break;
-    }
-  }
-
   // Extract claim window
   const windowInfo = extractClaimWindowFromSpeech(raw);
 
-  // Keyword token extraction (supports English and Devanagari/Hindi script)
-  const KEYWORDS = [
-    { type: 'distributor', regex: /(?:^|[\s,;:\n])(?:distributor(?:\s*name)?|डिस्ट्रीब्यूटर|agency|firm|supplier|एजेंसी|फर्म)(?=[\s,;:\n]|$)/iu },
-    { type: 'company', regex: /(?:^|[\s,;:\n])(?:company(?:\s*name)?|brand(?:\s*name)?|fmcg|कंपनी|ब्रांड)(?=[\s,;:\n]|$)/iu },
-    { type: 'categories', regex: /(?:^|[\s,;:\n])(?:categories|category|products?|items?|कैटगरी|सामान)(?=[\s,;:\n]|$)/iu },
-    { type: 'salesman', regex: /(?:^|[\s,;:\n])(?:salesman(?:\s*name)?|sales\s*person|sales\s*boy|sales\s*rep|सेल्समैन|सेल्स)(?=[\s,;:\n]|$)/iu },
-    { type: 'phone', regex: /(?:^|[\s,;:\n])(?:phone(?:\s*number|\s*no)?|mobile(?:\s*number|\s*no)?|फ़ोन(?:\s*नंबर)?|मोबाइल|contact)(?=[\s,;:\n]|$)/iu },
-    { type: 'day', regex: /(?:^|[\s,;:\n])(?:visit(?:\s*day)?|aane\s*ka\s*din|day|दिन|वार)(?=[\s,;:\n]|$)/iu },
-    { type: 'claim', regex: /(?:^|[\s,;:\n])(?:claim(?:\s*window)?|return(?:\s*window|\s*rule)?|वापसी(?:\s*तारीख)?)(?=[\s,;:\n]|$)/iu },
-    { type: 'notes', regex: /(?:^|[\s,;:\n])(?:notes?|remarks?|instruction|नोट)(?=[\s,;:\n]|$)/iu }
+  // Comprehensive multi-lingual marker points (supporting both prefix and suffix speech patterns)
+  const MARKERS = [
+    {
+      key: 'distributor_prefix',
+      type: 'distributor_prefix',
+      regex: /(?:^|[\s,;:\n])(?:distributor(?:\s*name)?|डिस्ट्रीब्यूटर(?:\s*का\s*नाम|\s*नाम|\s*नेम)?|hamara\s*distributor|hamari\s*agency|apni\s*agency)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'distributor_suffix',
+      type: 'distributor_suffix',
+      regex: /(?:^|[\s,;:\n])(?:agency|traders?|enterprises?|distributors?|एजेंसी|ट्रेडर्स|ट्रेडिंग|एंटरप्राइजेज|डिस्ट्रीब्यूटर|फर्म)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'company',
+      type: 'company',
+      regex: /(?:^|[\s,;:\n])(?:company(?:\s*name)?|brand(?:\s*name)?|कंपनी(?:\s*का\s*नाम|\s*नेम|\s*नाम)?|ब्रांड(?:\s*का\s*नाम|\s*नेम|\s*नाम)?|fmcg)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'categories',
+      type: 'categories',
+      regex: /(?:^|[\s,;:\n])(?:categories|category|products?|items?|प्रोडक्ट्स?|कैटेगरी|कैटगरी|सामान|आइटम्स?|माल)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'salesman',
+      type: 'salesman',
+      regex: /(?:^|[\s,;:\n])(?:salesman(?:\s*name)?|sales\s*person|sales\s*boy|sales\s*rep|सेल्समैन|सेल्स\s*बॉय|सेल्स\s*पर्सन|सेल्स)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'phone',
+      type: 'phone',
+      regex: /(?:^|[\s,;:\n])(?:phone(?:\s*number|\s*no)?|mobile(?:\s*number|\s*no)?|contact(?:\s*no)?|फ़ोन(?:\s*नंबर|\s*नं)?|फोन(?:\s*नंबर|\s*नं)?|मोबाइल(?:\s*नंबर|\s*नं)?|नंबर)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'day',
+      type: 'day',
+      regex: /(?:^|[\s,;:\n])(?:visit(?:\s*day)?|aane\s*ka\s*din|day|विजिट|दिन|वार|आने\s*का\s*दिन)(?=[\s,;:\n]|$)/iu
+    },
+    {
+      key: 'claim',
+      type: 'claim',
+      regex: /(?:^|[\s,;:\n])(?:claim(?:\s*window)?|return(?:\s*window|\s*rule)?|क्लेम(?:\s*विंडो)?|रिटर्न(?:\s*विंडो)?|वापसी)(?=[\s,;:\n]|$)/iu
+    }
   ];
 
-  // Find all keyword positions
-  const rawMatches = [];
-  KEYWORDS.forEach((k) => {
+  const found = [];
+  MARKERS.forEach((m) => {
+    const r = new RegExp(m.regex.source, 'giu');
     let match;
-    const globalRegex = new RegExp(k.regex.source, 'giu');
-    while ((match = globalRegex.exec(raw)) !== null) {
-      rawMatches.push({
-        type: k.type,
+    while ((match = r.exec(raw)) !== null) {
+      found.push({
+        key: m.key,
+        type: m.type,
+        matchText: match[0].trim(),
         start: match.index,
         end: match.index + match[0].length
       });
     }
   });
 
-  // Sort matches by start position
-  rawMatches.sort((a, b) => a.start - b.start);
-
-  // Filter out redundant consecutive matches of same type
-  const matches = [];
+  found.sort((a, b) => a.start - b.start);
+  const primaryMarkers = [];
   const seenTypes = new Set();
-  for (const m of rawMatches) {
+  for (const m of found) {
     if (!seenTypes.has(m.type)) {
       seenTypes.add(m.type);
-      matches.push(m);
+      primaryMarkers.push(m);
     }
   }
+  primaryMarkers.sort((a, b) => a.start - b.start);
 
-  // Sort again in order of occurrence
-  matches.sort((a, b) => a.start - b.start);
+  const companyMarker = primaryMarkers.find((m) => m.type === 'company');
+  const distPrefix = primaryMarkers.find((m) => m.type === 'distributor_prefix');
+  const distSuffix = primaryMarkers.find((m) => m.type === 'distributor_suffix');
+  const catMarker = primaryMarkers.find((m) => m.type === 'categories');
+  const salesMarker = primaryMarkers.find((m) => m.type === 'salesman');
+  const dayMarker = primaryMarkers.find((m) => m.type === 'day');
 
-  const parsedFields = {
-    distributor: '',
-    company: '',
-    categories: '',
-    salesman: '',
-    phone: '',
-    day: '',
-    claim: '',
-    notes: ''
-  };
+  // Extract distributor
+  let rawDistributor = '';
+  if (distPrefix) {
+    const nextMarker = primaryMarkers.find(
+      (m) => m.start > distPrefix.start && m.type !== 'distributor_suffix'
+    );
+    rawDistributor = raw.slice(distPrefix.end, nextMarker ? nextMarker.start : undefined);
+  } else if (distSuffix) {
+    rawDistributor = raw.slice(0, distSuffix.end);
+  } else if (companyMarker && companyMarker.start > 0) {
+    rawDistributor = raw.slice(0, companyMarker.start);
+  }
 
-  matches.forEach((m, idx) => {
-    const nextStart = idx < matches.length - 1 ? matches[idx + 1].start : raw.length;
-    const segment = raw.slice(m.end, nextStart);
-    if (!parsedFields[m.type]) {
-      parsedFields[m.type] = cleanSegmentText(segment);
-    }
-  });
+  // Extract company
+  let rawCompany = '';
+  if (companyMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > companyMarker.start);
+    rawCompany = raw.slice(companyMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
 
-  let rawDistributor = parsedFields.distributor || '';
-  let rawCompany = parsedFields.company || '';
-  let rawCategories = parsedFields.categories || '';
-  let rawSalesman = parsedFields.salesman || '';
-  let notes = parsedFields.notes || '';
+  // Extract categories
+  let rawCategories = '';
+  if (catMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > catMarker.start);
+    rawCategories = raw.slice(catMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
 
-  // Clean entities with regex prefix strippers
+  // Extract salesman
+  let rawSalesman = '';
+  if (salesMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > salesMarker.start);
+    rawSalesman = raw.slice(salesMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
+
+  // Extract day
+  const daySegment = dayMarker ? raw.slice(dayMarker.start) : raw;
+  const visitDay = normalizeVisitDay(daySegment);
+
+  // Clean values with entity prefix strippers
   const distributorName = stripDistributorName(rawDistributor);
   let companyName = stripCompanyName(rawCompany);
   const salesmanName = stripSalesmanName(rawSalesman);
   const productCategories = stripProductCategories(rawCategories);
 
-  // Fallback brand search if company keyword was omitted
+  // Fallback brand recognition if company marker was omitted but brand was spoken
   if (!companyName) {
-    const commonBrands = ['Britannia', 'Parle', 'Bisleri', 'Tata Consumer', 'Tata', 'Nestle', 'ITC', 'Amul', 'Coca Cola', 'Pepsi', 'Haldiram', 'Cadbury', 'Patanjali', 'Hindustan Unilever', 'HUL', 'Dabur', 'Marico'];
+    const commonBrands = [
+      'टाटा', 'टाटा टी', 'ब्रिटानिया', 'पार्ले', 'बिस्लेरी', 'नेस्ले', 'आईटीसी', 'अमूल',
+      'Britannia', 'Parle', 'Bisleri', 'Tata Consumer', 'Tata', 'Nestle', 'ITC', 'Amul',
+      'Coca Cola', 'Pepsi', 'Haldiram', 'Cadbury', 'Patanjali', 'Hindustan Unilever', 'HUL', 'Dabur', 'Marico'
+    ];
     for (const b of commonBrands) {
-      if (new RegExp(`\\b${b}\\b`, 'i').test(raw)) {
+      if (new RegExp(`\\b${b}\\b`, 'iu').test(raw)) {
         companyName = b;
         break;
       }
@@ -389,14 +416,14 @@ export function parseDistributorVoiceLocally(transcript) {
     company_name: companyName,
     product_categories: productCategories,
     salesman_name: salesmanName,
-    salesman_phone: phone || parsedFields.phone.replace(/\D/g, '').slice(-10),
+    salesman_phone: phone,
     visit_day: visitDay,
     claim_window_preset: windowInfo.preset,
     claim_window_start: windowInfo.start,
     claim_window_end: windowInfo.end,
     settlement_mode: 'Credit Note (CN)',
     return_eligibility: ['Expired Stock', 'Damage / Breakage / Leakage'],
-    notes: notes
+    notes: ''
   };
 }
 
@@ -404,7 +431,7 @@ export function parseDistributorVoiceLocally(transcript) {
  * Intelligent parsing: local instant parser + AI endpoint enhancement
  */
 export async function parseDistributorVoice(transcript) {
-  // 1. Instant local extraction
+  // 1. Instant local extraction with advanced multi-lingual markers
   const localResult = parseDistributorVoiceLocally(transcript);
 
   // 2. Call backend AI parser if available
@@ -423,7 +450,7 @@ export async function parseDistributorVoice(transcript) {
         product_categories: stripProductCategories(aiResult.product_categories) || localResult.product_categories,
         salesman_name: stripSalesmanName(aiResult.salesman_name) || localResult.salesman_name,
         salesman_phone: aiResult.salesman_phone || localResult.salesman_phone,
-        visit_day: aiResult.visit_day || localResult.visit_day,
+        visit_day: normalizeVisitDay(aiResult.visit_day) || localResult.visit_day,
         claim_window_preset: aiResult.claim_window_preset || localResult.claim_window_preset,
         claim_window_start: aiResult.claim_window_start || localResult.claim_window_start,
         claim_window_end: aiResult.claim_window_end || localResult.claim_window_end,

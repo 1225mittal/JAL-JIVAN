@@ -125,39 +125,128 @@ Schema:
     }
   }
 
-  // 3. Fallback regex extraction if no LLM key configured or LLM network error
-  const phoneMatch = rawTranscript.match(/(?:phone|mobile|number|फ़ोन|नंबर)?\s*[:\-]?\s*(\b[6-9]\d{9}\b)/i);
-  let visitDay = 'Monday';
-  if (/tuesday|mangalwar|मंगलवार/i.test(rawTranscript)) visitDay = 'Tuesday';
-  else if (/wednesday|budhwar|बुधवार/i.test(rawTranscript)) visitDay = 'Wednesday';
-  else if (/thursday|guruwar|brihaspatiwar|गुरुवार/i.test(rawTranscript)) visitDay = 'Thursday';
-  else if (/friday|shukrawar|शुक्रवार/i.test(rawTranscript)) visitDay = 'Friday';
-  else if (/saturday|shaniwar|शनिवार/i.test(rawTranscript)) visitDay = 'Saturday';
-  else if (/sunday|raviwar|itwar|रविवार/i.test(rawTranscript)) visitDay = 'Sunday';
+  // 3. Fallback regex & marker extraction if no LLM key configured or LLM network error
+  const raw = rawTranscript;
 
+  // Day detection
+  let visitDay = 'Monday';
+  if (/wednesday|budhwar|budhvaar|बुधवार|वेनसडे|वेडनसडे|वेडनेसडे/iu.test(raw)) visitDay = 'Wednesday';
+  else if (/tuesday|mangalwar|mangalvaar|मंगलवार|ट्यूजडे|ट्यूसडे/iu.test(raw)) visitDay = 'Tuesday';
+  else if (/thursday|guruwar|guruvaar|brihaspatiwar|veerwar|गुरुवार|वीरवार|थर्सडे/iu.test(raw)) visitDay = 'Thursday';
+  else if (/friday|shukrawar|shukravaar|शुक्रवार|जुम्मा|फ्राइडे/iu.test(raw)) visitDay = 'Friday';
+  else if (/saturday|shaniwar|shanivaar|शनिवार|सैटरडे/iu.test(raw)) visitDay = 'Saturday';
+  else if (/sunday|raviwar|itwar|रविवार|इतवार|संडे/iu.test(raw)) visitDay = 'Sunday';
+  else if (/monday|somwar|somvaar|सोमवार|मंडे/iu.test(raw)) visitDay = 'Monday';
+
+  // Claim window detection
   let preset = '1st - 10th';
   let start = 1;
   let end = 10;
-  if (/anytime|kabhi\s*bhi/i.test(rawTranscript)) {
+  if (/anytime|kabhi\s*bhi/iu.test(raw)) {
     preset = 'Anytime / Weekly Visit';
     start = 1;
     end = 31;
-  } else if (/15\s*(?:th|to|-|se)\s*30/i.test(rawTranscript)) {
+  } else if (/15\s*(?:th|to|-|se)\s*30/iu.test(raw)) {
     preset = '15th - 30th';
     start = 15;
     end = 30;
-  } else if (/20\s*(?:th|to|-|se)|end\s*of\s*month/i.test(rawTranscript)) {
+  } else if (/20\s*(?:th|to|-|se)|end\s*of\s*month/iu.test(raw)) {
     preset = '20th - End of Month';
     start = 20;
     end = 31;
   }
 
+  // Phone number extraction
+  let phone = '';
+  const digitsMatch = raw.match(/(?:phone|mobile|contact|फ़ोन|फोन|मोबाइल|नंबर|number|ph)?\s*[:\-]?\s*([0-9\s\-]{8,14})/iu);
+  if (digitsMatch) {
+    const cleanDigits = digitsMatch[1].replace(/\D/g, '');
+    if (cleanDigits.length >= 8) phone = cleanDigits.slice(-10);
+  }
+
+  // Multi-marker extraction
+  const MARKERS = [
+    { key: 'distributor_prefix', type: 'distributor_prefix', regex: /(?:^|[\s,;:\n])(?:distributor(?:\s*name)?|डिस्ट्रीब्यूटर(?:\s*का\s*नाम|\s*नाम|\s*नेम)?|hamara\s*distributor|hamari\s*agency|apni\s*agency)(?=[\s,;:\n]|$)/iu },
+    { key: 'distributor_suffix', type: 'distributor_suffix', regex: /(?:^|[\s,;:\n])(?:agency|traders?|enterprises?|distributors?|एजेंसी|ट्रेडर्स|ट्रेडिंग|एंटरप्राइजेज|डिस्ट्रीब्यूटर|फर्म)(?=[\s,;:\n]|$)/iu },
+    { key: 'company', type: 'company', regex: /(?:^|[\s,;:\n])(?:company(?:\s*name)?|brand(?:\s*name)?|कंपनी(?:\s*का\s*नाम|\s*नेम|\s*नाम)?|ब्रांड(?:\s*का\s*नाम|\s*नेम|\s*नाम)?|fmcg)(?=[\s,;:\n]|$)/iu },
+    { key: 'categories', type: 'categories', regex: /(?:^|[\s,;:\n])(?:categories|category|products?|items?|प्रोडक्ट्स?|कैटेगरी|कैटगरी|सामान|आइटम्स?|माल)(?=[\s,;:\n]|$)/iu },
+    { key: 'salesman', type: 'salesman', regex: /(?:^|[\s,;:\n])(?:salesman(?:\s*name)?|sales\s*person|sales\s*boy|sales\s*rep|सेल्समैन|सेल्स\s*बॉय|सेल्स\s*पर्सन|सेल्स)(?=[\s,;:\n]|$)/iu }
+  ];
+
+  const found = [];
+  MARKERS.forEach((m) => {
+    const r = new RegExp(m.regex.source, 'giu');
+    let match;
+    while ((match = r.exec(raw)) !== null) {
+      found.push({
+        key: m.key,
+        type: m.type,
+        start: match.index,
+        end: match.index + match[0].length
+      });
+    }
+  });
+
+  found.sort((a, b) => a.start - b.start);
+  const primaryMarkers = [];
+  const seenTypes = new Set();
+  for (const m of found) {
+    if (!seenTypes.has(m.type)) {
+      seenTypes.add(m.type);
+      primaryMarkers.push(m);
+    }
+  }
+  primaryMarkers.sort((a, b) => a.start - b.start);
+
+  const companyMarker = primaryMarkers.find((m) => m.type === 'company');
+  const distPrefix = primaryMarkers.find((m) => m.type === 'distributor_prefix');
+  const distSuffix = primaryMarkers.find((m) => m.type === 'distributor_suffix');
+  const catMarker = primaryMarkers.find((m) => m.type === 'categories');
+  const salesMarker = primaryMarkers.find((m) => m.type === 'salesman');
+
+  let rawDistributor = '';
+  if (distPrefix) {
+    const nextMarker = primaryMarkers.find((m) => m.start > distPrefix.start && m.type !== 'distributor_suffix');
+    rawDistributor = raw.slice(distPrefix.end, nextMarker ? nextMarker.start : undefined);
+  } else if (distSuffix) {
+    rawDistributor = raw.slice(0, distSuffix.end);
+  } else if (companyMarker && companyMarker.start > 0) {
+    rawDistributor = raw.slice(0, companyMarker.start);
+  }
+
+  let rawCompany = '';
+  if (companyMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > companyMarker.start);
+    rawCompany = raw.slice(companyMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
+
+  let rawCategories = '';
+  if (catMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > catMarker.start);
+    rawCategories = raw.slice(catMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
+
+  let rawSalesman = '';
+  if (salesMarker) {
+    const nextMarker = primaryMarkers.find((m) => m.start > salesMarker.start);
+    rawSalesman = raw.slice(salesMarker.end, nextMarker ? nextMarker.start : undefined);
+  }
+
+  function clean(val) {
+    if (!val) return '';
+    return val
+      .replace(/^(?:brand\s*name|company\s*name|distributor\s*name|naam|name|नेम|नाम|की|का|के|है|hai|is)\s*[:\-]?\s*/iu, '')
+      .replace(/\s+(?:ki|ka|ke|hai|he|h)$/iu, '')
+      .replace(/^[,\.:;\s]+|[,\.:;\s]+$/g, '')
+      .trim();
+  }
+
   return res.status(200).json({
-    distributor_name: '',
-    company_name: '',
-    product_categories: '',
-    salesman_name: '',
-    salesman_phone: phoneMatch ? phoneMatch[1] : '',
+    distributor_name: clean(rawDistributor),
+    company_name: clean(rawCompany),
+    product_categories: clean(rawCategories),
+    salesman_name: clean(rawSalesman),
+    salesman_phone: phone,
     visit_day: visitDay,
     claim_window_preset: preset,
     claim_window_start: start,
