@@ -189,7 +189,8 @@ export default function DistributorMaster({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by distributor firm, company (Parle, Tata, HUL), salesman name, category..."
-          className="w-full max-w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition"
+          style={{ backgroundColor: '#0f172a', color: '#ffffff' }}
+          className="w-full max-w-full pl-10 pr-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:border-cyan-400 transition font-medium"
         />
       </div>
 
@@ -390,7 +391,7 @@ export default function DistributorMaster({
 
                   {/* Notes */}
                   {dist.notes && (
-                    <p className="text-[11px] text-slate-400 italic line-clamp-2 bg-slate-950/60 p-2 rounded-lg border border-slate-850">
+                    <p className="text-[11px] text-slate-300 italic line-clamp-2 bg-slate-950/60 p-2 rounded-lg border border-slate-800">
                       {dist.notes}
                     </p>
                   )}
