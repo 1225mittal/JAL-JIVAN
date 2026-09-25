@@ -42,6 +42,7 @@ import {
   acceptOrderDelivery,
   fetchRewardSettings,
   recordDriverAttendance,
+  recordDriverPunchOut,
   checkDriverAttendanceToday,
   fetchDriverAttendance,
   fetchStoreSettings,
@@ -116,6 +117,8 @@ export default function DriverPortal({
   const [isPunchedIn, setIsPunchedIn] = useState(() => {
     if (!currentDriver) return false;
     try {
+      const isOut = localStorage.getItem(`jal_jivan_punched_out_${currentDriver.id}_${todayStr}`);
+      if (isOut === 'true') return false;
       const saved = localStorage.getItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
       return saved === 'true';
     } catch {
@@ -126,6 +129,9 @@ export default function DriverPortal({
   const [verifyingLocation, setVerifyingLocation] = useState(false);
   const [locationError, setLocationError] = useState('');
   const [driverCoords, setDriverCoords] = useState(null);
+  const [showPunchOutConfirm, setShowPunchOutConfirm] = useState(false);
+  const [punchActionLoading, setPunchActionLoading] = useState(false);
+  const [punchFeedback, setPunchFeedback] = useState(null);
 
   // Reward Rule State
   const [rewardRule, setRewardRule] = useState({ min_deliveries: 5, stars_rewarded: 1 });
@@ -423,13 +429,14 @@ export default function DriverPortal({
 
   // Check Attendance on Load
   useEffect(() => {
-    if (!currentDriver) return;
+    if (!currentDriver?.id) return;
     async function checkAttendance() {
       const alreadyCheckedIn = await checkDriverAttendanceToday(currentDriver.id);
+      setIsPunchedIn(alreadyCheckedIn);
       if (alreadyCheckedIn) {
-        setIsPunchedIn(true);
         try {
           localStorage.setItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`, 'true');
+          localStorage.removeItem(`jal_jivan_punched_out_${currentDriver.id}_${todayStr}`);
         } catch (e) {
           // ignore
         }
@@ -437,7 +444,7 @@ export default function DriverPortal({
       loadAttendanceHistory();
     }
     checkAttendance();
-  }, [currentDriver, todayStr, loadAttendanceHistory]);
+  }, [currentDriver?.id, todayStr, loadAttendanceHistory]);
 
   // Geoguard: Listen to online/offline and GPS watch
   useEffect(() => {
@@ -522,7 +529,7 @@ export default function DriverPortal({
 
     const pushLocation = async (lat, lng) => {
       if (lat === null || lat === undefined || lng === null || lng === undefined) return;
-      console.log('Location heartbeat sent:', lat, lng);
+      console.log('Location heartbeat sent:', lat, lng, 'isPunchedIn:', isPunchedIn);
 
       // Directly update delivery_boys table if punched in
       if (isPunchedIn) {
@@ -545,7 +552,8 @@ export default function DriverPortal({
         driverId: currentDriver.id,
         driverName: currentDriver.name,
         latitude: lat,
-        longitude: lng
+        longitude: lng,
+        isOnline: isPunchedIn
       }).catch((e) => console.warn('Silent driver location update error', e));
     };
 
@@ -602,6 +610,9 @@ export default function DriverPortal({
   // Punch In Handler
   const handlePunchIn = async (overrideLat = null, overrideLng = null) => {
     setVerifyingLocation(true);
+    setLocationError('');
+    setPunchActionLoading(true);
+
     const lat = overrideLat !== null ? overrideLat : driverCoords?.lat || storeHub.latitude;
     const lng = overrideLng !== null ? overrideLng : driverCoords?.lng || storeHub.longitude;
 
@@ -612,7 +623,7 @@ export default function DriverPortal({
         checkInLng: lng
       });
 
-      // Update delivery_boys directly right after geofence verification succeeds
+      // Update delivery_boys directly right after punch in
       try {
         await supabase
           .from('delivery_boys')
@@ -627,40 +638,82 @@ export default function DriverPortal({
         console.warn('Direct delivery_boys punchIn update error:', err);
       }
 
-      // Immediately sync driver location
+      // Immediately sync driver location as online
       await updateDriverLocation({
         driverId: currentDriver.id,
         driverName: currentDriver.name,
         latitude: lat,
-        longitude: lng
+        longitude: lng,
+        isOnline: true
       });
 
       setIsPunchedIn(true);
       try {
         localStorage.setItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`, 'true');
+        localStorage.removeItem(`jal_jivan_punched_out_${currentDriver.id}_${todayStr}`);
       } catch (e) {
         // ignore
       }
+
+      setPunchFeedback({ type: 'success', message: '✅ Punched In successfully! On Duty.' });
+      setTimeout(() => setPunchFeedback(null), 4000);
       await loadAttendanceHistory();
     } catch (err) {
       setLocationError('Failed to record attendance: ' + err.message);
+      setPunchFeedback({ type: 'error', message: 'Punch-in failed: ' + err.message });
+      setTimeout(() => setPunchFeedback(null), 5000);
     } finally {
       setVerifyingLocation(false);
+      setPunchActionLoading(false);
     }
   };
 
   // Punch Out Handler
   const handlePunchOut = async () => {
-    setIsPunchedIn(false);
+    setPunchActionLoading(true);
+    setLocationError('');
+
     try {
-      localStorage.removeItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
-    } catch (e) {
-      // ignore
-    }
-    try {
+      const lat = driverCoords?.lat || null;
+      const lng = driverCoords?.lng || null;
+
+      await recordDriverPunchOut({
+        driverId: currentDriver.id,
+        checkOutLat: lat,
+        checkOutLng: lng
+      });
+
       await updateDriverHeartbeat(currentDriver.id, false);
+      if (lat && lng) {
+        await updateDriverLocation({
+          driverId: currentDriver.id,
+          driverName: currentDriver.name,
+          latitude: lat,
+          longitude: lng,
+          isOnline: false
+        }).catch(() => {});
+      }
+
+      setIsPunchedIn(false);
+      setShowPunchOutConfirm(false);
+
+      try {
+        localStorage.removeItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
+        localStorage.setItem(`jal_jivan_punched_out_${currentDriver.id}_${todayStr}`, 'true');
+      } catch (e) {
+        // ignore
+      }
+
+      setPunchFeedback({ type: 'success', message: '🚪 Punched Out successfully. Have a great rest!' });
+      setTimeout(() => setPunchFeedback(null), 4000);
+      await loadAttendanceHistory();
     } catch (err) {
-      console.warn('Punch out heartbeat update error:', err);
+      console.warn('Punch out error:', err);
+      setLocationError('Punch out error: ' + err.message);
+      setPunchFeedback({ type: 'error', message: 'Punch out error: ' + err.message });
+      setTimeout(() => setPunchFeedback(null), 5000);
+    } finally {
+      setPunchActionLoading(false);
     }
   };
 
@@ -1057,18 +1110,30 @@ export default function DriverPortal({
             </div>
           </div>
 
-          {isPunchedIn && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {isPunchedIn ? (
               <button
-                onClick={handlePunchOut}
-                className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 py-1.5 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all font-medium"
+                type="button"
+                onClick={() => setShowPunchOutConfirm(true)}
+                className="flex items-center gap-1 text-xs text-amber-300 hover:text-white py-1.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 transition-all font-bold shadow-sm active:scale-95"
                 title="Punch out from duty"
               >
-                <Clock className="w-3.5 h-3.5" />
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
                 <span>Punch Out</span>
               </button>
-            </div>
-          )}
+            ) : (
+              <button
+                type="button"
+                onClick={() => handlePunchIn()}
+                disabled={verifyingLocation || punchActionLoading}
+                className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white py-1.5 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 transition-all font-bold shadow-sm active:scale-95 disabled:opacity-50"
+                title="Punch in to start shift"
+              >
+                <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Punch In</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Feature 2: Daily Deliveries & Star Rewards Badge */}
@@ -1218,38 +1283,46 @@ export default function DriverPortal({
             <button
               id="driver-punch-in-btn"
               onClick={() => handlePunchIn()}
-              disabled={!isInsideHubGeofence || verifyingLocation}
+              disabled={verifyingLocation || punchActionLoading}
               className={`flex-1 py-2.5 px-4 text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 ${
-                isInsideHubGeofence && !verifyingLocation
+                isInsideHubGeofence
                   ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20 active:scale-[0.98]'
-                  : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
+                  : 'bg-emerald-600/30 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40'
               }`}
             >
-              {verifyingLocation ? (
+              {verifyingLocation || punchActionLoading ? (
                 <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Verifying...</span>
+                  <span>Recording Punch-In...</span>
+                </>
+              ) : isInsideHubGeofence ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Punch In (Verified at Hub)</span>
                 </>
               ) : (
                 <>
-                  <Check className="w-4 h-4" />
-                  <span>Punch In Attendance</span>
+                  <MapPin className="w-4 h-4 text-emerald-400" />
+                  <span>Punch In at Current Location</span>
                 </>
               )}
             </button>
           </div>
 
-          {/* Demo Testing Override Helper */}
-          <div className="pt-2 border-t border-slate-800/80 text-center">
-            <button
-              type="button"
-              onClick={() => handlePunchIn(storeHub.latitude, storeHub.longitude)}
-              className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1.5 py-1 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 transition-all"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>⚡ Simulate Hub Location & Punch In (Testing Override)</span>
-            </button>
-          </div>
+          {/* Quick Override / Indoors button if away from hub */}
+          {!isInsideHubGeofence && (
+            <div className="pt-2 border-t border-slate-800/80 flex items-center justify-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => handlePunchIn(storeHub.latitude, storeHub.longitude)}
+                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all"
+                title="Use Store Hub location if indoors or GPS has poor reception"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>📍 Punch In at Hub (Indoors / Override)</span>
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>
@@ -1672,16 +1745,26 @@ export default function DriverPortal({
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-base font-bold text-white">
-                      {isPunchedIn ? "Today's Attendance: Checked In" : "Today's Attendance: Pending"}
+                      {isPunchedIn
+                        ? "Today's Attendance: Checked In (On Duty)"
+                        : todayAttendanceRecord?.punched_out_at
+                        ? "Today's Attendance: Shift Ended (Punched Out)"
+                        : "Today's Attendance: Pending Check-In"}
                     </h3>
                     <span
                       className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
                         isPunchedIn
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          : todayAttendanceRecord?.punched_out_at
+                          ? 'bg-slate-700/60 text-slate-300 border border-slate-600'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                       }`}
                     >
-                      {isPunchedIn ? 'Present' : 'Not Marked'}
+                      {isPunchedIn
+                        ? 'Present / On Duty'
+                        : todayAttendanceRecord?.punched_out_at
+                        ? 'Punched Out'
+                        : 'Not Marked'}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
@@ -1694,6 +1777,8 @@ export default function DriverPortal({
                               })
                             : 'Store Hub'
                         } • Verified within ${storeHub.store_name}`
+                      : todayAttendanceRecord?.punched_out_at
+                      ? `Shift completed at ${new Date(todayAttendanceRecord.punched_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. You are currently Off Duty.`
                       : `Please punch in near ${storeHub.store_name} (within ${storeHub.radius_meters}m) to begin your shift.`}
                   </p>
                 </div>
@@ -1704,18 +1789,18 @@ export default function DriverPortal({
                 {!isPunchedIn ? (
                   <button
                     onClick={() => handlePunchIn()}
-                    disabled={verifyingLocation}
+                    disabled={verifyingLocation || punchActionLoading}
                     className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition active:scale-95"
                   >
-                    {verifyingLocation ? (
+                    {verifyingLocation || punchActionLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span>Verifying Geofence...</span>
                       </>
                     ) : (
                       <>
-                        <MapPin className="w-4 h-4" />
-                        <span>Punch In Attendance Now</span>
+                        <UserCheck className="w-4 h-4" />
+                        <span>{todayAttendanceRecord?.punched_out_at ? 'Punch In Again (New Shift)' : 'Punch In Attendance Now'}</span>
                       </>
                     )}
                   </button>
@@ -1723,8 +1808,18 @@ export default function DriverPortal({
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>Verified at Hub</span>
+                      <span>On Duty</span>
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowPunchOutConfirm(true)}
+                      disabled={punchActionLoading}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                      title="Punch out from duty"
+                    >
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Punch Out</span>
+                    </button>
                     <button
                       onClick={loadAttendanceHistory}
                       className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition"
@@ -1855,6 +1950,7 @@ export default function DriverPortal({
 
                 {attendanceRecords.map((record, idx) => {
                   const dateObj = new Date(record.created_at);
+                  const isToday = record.created_at && record.created_at.startsWith(todayStr);
                   const dateStr = !isNaN(dateObj.getTime())
                     ? dateObj.toLocaleDateString(undefined, {
                         weekday: 'short',
@@ -1863,30 +1959,52 @@ export default function DriverPortal({
                         year: 'numeric'
                       })
                     : 'Logged Day';
-                  const timeStr = !isNaN(dateObj.getTime())
+                  const inTimeStr = !isNaN(dateObj.getTime())
                     ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : 'Recorded';
+                  const punchOutObj = record.punched_out_at ? new Date(record.punched_out_at) : null;
+                  const outTimeStr = punchOutObj && !isNaN(punchOutObj.getTime())
+                    ? punchOutObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : null;
 
                   return (
                     <div
                       key={record.id || idx}
-                      className="p-3.5 hover:bg-slate-850 transition flex items-center justify-between text-xs"
+                      className="p-3.5 hover:bg-slate-850 transition flex items-center justify-between text-xs gap-2"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-slate-800/80 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold">
-                          <Check className="w-4 h-4 text-emerald-400" />
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold shrink-0 ${
+                          outTimeStr
+                            ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                            : isPunchedIn && isToday
+                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800/80 text-emerald-400 border border-slate-700'
+                        }`}>
+                          {outTimeStr ? <Clock className="w-4 h-4 text-amber-400" /> : <Check className="w-4 h-4 text-emerald-400" />}
                         </div>
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-white text-xs sm:text-sm">{dateStr}</span>
-                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
-                              Present
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                              outTimeStr
+                                ? 'bg-slate-800 text-slate-300 border-slate-700'
+                                : isPunchedIn && isToday
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25'
+                            }`}>
+                              {outTimeStr ? 'Punched Out' : isPunchedIn && isToday ? 'On Duty' : 'Present'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                             <span>
-                              Check-In: <strong className="text-slate-200">{timeStr}</strong>
+                              In: <strong className="text-slate-200">{inTimeStr}</strong>
                             </span>
+                            {outTimeStr && (
+                              <>
+                                <span>•</span>
+                                <span>Out: <strong className="text-amber-300">{outTimeStr}</strong></span>
+                              </>
+                            )}
                             <span>•</span>
                             <span>Hub Verified</span>
                             {record.check_in_lat && record.check_in_lng && (
@@ -1902,10 +2020,15 @@ export default function DriverPortal({
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-xs font-mono font-semibold text-emerald-400">
-                          {timeStr}
+                      <div className="text-right shrink-0">
+                        <span className="text-xs font-mono font-semibold text-emerald-400 block">
+                          {inTimeStr}
                         </span>
+                        {outTimeStr && (
+                          <span className="text-[10px] font-mono text-amber-400/90 block">
+                            Out: {outTimeStr}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -1964,6 +2087,69 @@ export default function DriverPortal({
         onClose={() => setIsExpiryCamOpen(false)}
         onLogDamaged={handleLogDamagedFromCam}
       />
+
+      {/* Punch Out Confirmation Modal */}
+      {showPunchOutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Punch Out / End Shift?</h3>
+                <p className="text-xs text-slate-400">Mark yourself off-duty for today</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 bg-slate-950/60 p-3 rounded-xl border border-slate-800 leading-relaxed">
+              You will be marked <strong className="text-amber-300">Off Duty</strong>. Your punch-out timestamp will be logged in your attendance record, and you will stop receiving new delivery assignments.
+            </p>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowPunchOutConfirm(false)}
+                disabled={punchActionLoading}
+                className="flex-1 py-2.5 px-3 rounded-xl border border-slate-700 bg-slate-800/80 text-slate-300 text-xs font-semibold hover:bg-slate-800 hover:text-white transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handlePunchOut}
+                disabled={punchActionLoading}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition active:scale-95 disabled:opacity-50"
+              >
+                {punchActionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Punching Out...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>Confirm Punch Out</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Punch Feedback Banner */}
+      {punchFeedback && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-fade-in pointer-events-none">
+          <div className={`px-4 py-2.5 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 ${
+            punchFeedback.type === 'error'
+              ? 'bg-rose-950/90 text-rose-300 border-rose-500/40 shadow-rose-900/40'
+              : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/40 shadow-emerald-900/40'
+          }`}>
+            <span>{punchFeedback.message}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

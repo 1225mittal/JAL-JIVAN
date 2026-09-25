@@ -994,11 +994,16 @@ export async function saveRewardSettings({ minDeliveries, starsRewarded }) {
 const STORAGE_ATTENDANCE = 'jal_jivan_driver_attendance';
 
 export async function recordDriverAttendance({ driverId, checkInLat, checkInLng }) {
+  const todayStr = new Date().toISOString().split('T')[0];
   const attendanceRecord = {
     id: 'att-' + Date.now(),
     driver_id: driverId,
     check_in_lat: checkInLat,
     check_in_lng: checkInLng,
+    check_out_lat: null,
+    check_out_lng: null,
+    punched_out_at: null,
+    status: 'present',
     created_at: new Date().toISOString()
   };
 
@@ -1009,12 +1014,16 @@ export async function recordDriverAttendance({ driverId, checkInLat, checkInLng 
         .insert([{
           driver_id: driverId,
           check_in_lat: checkInLat,
-          check_in_lng: checkInLng
+          check_in_lng: checkInLng,
+          punched_out_at: null,
+          status: 'present'
         }])
         .select()
         .single();
       if (error) throw error;
-      return data;
+      if (data) {
+        attendanceRecord.id = data.id;
+      }
     } catch (err) {
       console.warn('Supabase recordDriverAttendance failed, saving locally:', err.message);
     }
@@ -1024,14 +1033,120 @@ export async function recordDriverAttendance({ driverId, checkInLat, checkInLng 
     const existing = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
     const updated = [attendanceRecord, ...existing];
     localStorage.setItem(STORAGE_ATTENDANCE, JSON.stringify(updated));
+    localStorage.setItem(`jal_jivan_punched_in_${driverId}_${todayStr}`, 'true');
+    localStorage.removeItem(`jal_jivan_punched_out_${driverId}_${todayStr}`);
   } catch (e) {
     console.error('Failed to save attendance locally', e);
   }
   return attendanceRecord;
 }
 
+export async function recordDriverPunchOut({ driverId, checkOutLat = null, checkOutLng = null }) {
+  const nowIso = new Date().toISOString();
+  const todayStr = nowIso.split('T')[0];
+
+  if (isSupabaseConfigured) {
+    try {
+      // Find open record today (punched_out_at IS NULL)
+      const { data: openRecords } = await supabase
+        .from('driver_attendance')
+        .select('id')
+        .eq('driver_id', driverId)
+        .gte('created_at', `${todayStr}T00:00:00.000Z`)
+        .is('punched_out_at', null)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (openRecords && openRecords.length > 0) {
+        await supabase
+          .from('driver_attendance')
+          .update({
+            punched_out_at: nowIso,
+            check_out_lat: checkOutLat,
+            check_out_lng: checkOutLng,
+            status: 'checked_out'
+          })
+          .eq('id', openRecords[0].id);
+      } else {
+        // Fallback: update most recent record today
+        const { data: recentRecords } = await supabase
+          .from('driver_attendance')
+          .select('id')
+          .eq('driver_id', driverId)
+          .gte('created_at', `${todayStr}T00:00:00.000Z`)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (recentRecords && recentRecords.length > 0) {
+          await supabase
+            .from('driver_attendance')
+            .update({
+              punched_out_at: nowIso,
+              check_out_lat: checkOutLat,
+              check_out_lng: checkOutLng,
+              status: 'checked_out'
+            })
+            .eq('id', recentRecords[0].id);
+        }
+      }
+
+      // Mark driver offline in delivery_boys
+      await supabase
+        .from('delivery_boys')
+        .update({
+          is_online: false,
+          last_seen_at: nowIso
+        })
+        .eq('id', driverId);
+    } catch (err) {
+      console.warn('Supabase recordDriverPunchOut failed, updating locally:', err.message);
+    }
+  }
+
+  try {
+    const existing = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
+    let updatedRecord = false;
+    const updated = existing.map((rec) => {
+      if (!updatedRecord && rec.driver_id === driverId && (!rec.punched_out_at || rec.created_at?.startsWith(todayStr))) {
+        updatedRecord = true;
+        return {
+          ...rec,
+          punched_out_at: nowIso,
+          check_out_lat: checkOutLat,
+          check_out_lng: checkOutLng,
+          status: 'checked_out'
+        };
+      }
+      return rec;
+    });
+
+    localStorage.setItem(STORAGE_ATTENDANCE, JSON.stringify(updated));
+    localStorage.removeItem(`jal_jivan_punched_in_${driverId}_${todayStr}`);
+    localStorage.setItem(`jal_jivan_punched_out_${driverId}_${todayStr}`, 'true');
+  } catch (e) {
+    console.error('Failed to update punch-out locally', e);
+  }
+
+  return { success: true, punched_out_at: nowIso };
+}
+
 export async function checkDriverAttendanceToday(driverId) {
   const today = new Date().toISOString().split('T')[0];
+
+  // 1. Check explicit local punch-out marker first
+  try {
+    const isPunchedOutLocally = localStorage.getItem(`jal_jivan_punched_out_${driverId}_${today}`);
+    if (isPunchedOutLocally === 'true') {
+      const isPunchedInLocally = localStorage.getItem(`jal_jivan_punched_in_${driverId}_${today}`);
+      if (isPunchedInLocally !== 'true') {
+        return false;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Query Supabase for latest attendance today
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -1039,8 +1154,15 @@ export async function checkDriverAttendanceToday(driverId) {
         .select('*')
         .eq('driver_id', driverId)
         .gte('created_at', `${today}T00:00:00.000Z`)
+        .order('created_at', { ascending: false })
         .limit(1);
+
       if (!error && data && data.length > 0) {
+        const latest = data[0];
+        // If latest record has punch out time or status 'checked_out', driver is currently NOT punched in
+        if (latest.punched_out_at || latest.status === 'checked_out') {
+          return false;
+        }
         return true;
       }
     } catch (err) {
@@ -1048,11 +1170,20 @@ export async function checkDriverAttendanceToday(driverId) {
     }
   }
 
+  // 3. Fallback to local storage records
   try {
     const existing = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
-    return existing.some(
+    const todayRecords = existing.filter(
       (a) => a.driver_id === driverId && a.created_at && a.created_at.startsWith(today)
     );
+    if (todayRecords.length > 0) {
+      const latest = todayRecords[0];
+      if (latest.punched_out_at || latest.status === 'checked_out') {
+        return false;
+      }
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }
@@ -1320,7 +1451,7 @@ export async function fetchDriverLocations() {
   }
 }
 
-export async function updateDriverLocation({ driverId, driverName, latitude, longitude }) {
+export async function updateDriverLocation({ driverId, driverName, latitude, longitude, isOnline = true }) {
   if (!driverId || latitude === null || latitude === undefined || longitude === null || longitude === undefined) {
     return null;
   }
@@ -1328,17 +1459,19 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
   const now = new Date().toISOString();
   const latNum = Number(latitude);
   const lngNum = Number(longitude);
+  const onlineBool = Boolean(isOnline);
 
   const locationRecord = {
     driver_id: driverId,
     driver_name: driverName || '',
     latitude: latNum,
     longitude: lngNum,
+    is_online: onlineBool,
     updated_at: now,
     last_seen_at: now
   };
 
-  console.log('Location heartbeat sent:', latNum, lngNum);
+  console.log('Location heartbeat sent:', latNum, lngNum, 'online:', onlineBool);
 
   if (isSupabaseConfigured) {
     // 1. Upsert into driver_locations
@@ -1350,12 +1483,12 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
       console.warn('Supabase update driver_locations failed:', err.message);
     }
 
-    // 2. Also update delivery_boys table
+    // 2. Also update delivery_boys table with current online status
     try {
       await supabase
         .from('delivery_boys')
         .update({
-          is_online: true,
+          is_online: onlineBool,
           current_lat: latNum,
           current_lng: lngNum,
           last_seen_at: now

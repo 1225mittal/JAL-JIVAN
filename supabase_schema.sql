@@ -280,8 +280,18 @@ CREATE TABLE IF NOT EXISTS public.driver_attendance (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     driver_id UUID REFERENCES public.drivers(id) ON DELETE CASCADE,
     check_in_lat DOUBLE PRECISION,
-    check_in_lng DOUBLE PRECISION
+    check_in_lng DOUBLE PRECISION,
+    check_out_lat DOUBLE PRECISION,
+    check_out_lng DOUBLE PRECISION,
+    punched_out_at TIMESTAMP WITH TIME ZONE,
+    status TEXT DEFAULT 'present'
 );
+
+-- Ensure columns exist if table was already created
+ALTER TABLE public.driver_attendance ADD COLUMN IF NOT EXISTS check_out_lat DOUBLE PRECISION;
+ALTER TABLE public.driver_attendance ADD COLUMN IF NOT EXISTS check_out_lng DOUBLE PRECISION;
+ALTER TABLE public.driver_attendance ADD COLUMN IF NOT EXISTS punched_out_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.driver_attendance ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'present';
 
 ALTER TABLE public.driver_attendance ENABLE ROW LEVEL SECURITY;
 

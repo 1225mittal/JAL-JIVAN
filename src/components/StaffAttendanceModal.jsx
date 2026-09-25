@@ -215,9 +215,16 @@ export default function StaffAttendanceModal({ isOpen, onClose, drivers = [] }) 
               const formattedDate = !isNaN(dateObj.getTime())
                 ? dateObj.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
                 : 'Date N/A';
-              const formattedTime = !isNaN(dateObj.getTime())
+              const inTime = !isNaN(dateObj.getTime())
                 ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 : 'Time N/A';
+
+              const punchOutObj = record.punched_out_at ? new Date(record.punched_out_at) : null;
+              const outTime = punchOutObj && !isNaN(punchOutObj.getTime())
+                ? punchOutObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : null;
+
+              const isCurrentlyOut = Boolean(outTime);
 
               const lat = Number(record.check_in_lat);
               const lng = Number(record.check_in_lng);
@@ -226,25 +233,41 @@ export default function StaffAttendanceModal({ isOpen, onClose, drivers = [] }) 
               return (
                 <div key={record.id} className="p-4 hover:bg-slate-850 transition flex items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                    <div className={`w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-sm shrink-0 ${
+                      isCurrentlyOut
+                        ? 'bg-slate-800 text-slate-400 border-slate-700'
+                        : isToday
+                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    }`}>
                       {driver.name ? driver.name.charAt(0).toUpperCase() : 'D'}
                     </div>
 
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-white text-sm">{driver.name || 'Delivery Boy'}</span>
-                        {isToday && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            Present Today
-                          </span>
-                        )}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          isCurrentlyOut
+                            ? 'bg-slate-800 text-slate-300 border-slate-700'
+                            : isToday
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {isCurrentlyOut ? 'Punched Out' : isToday ? '🟢 On Duty Now' : 'Present'}
+                        </span>
                         <span className="text-slate-500 font-mono text-[11px]">{driver.phone}</span>
                       </div>
 
                       <div className="flex items-center gap-2 text-slate-400 text-[11px] mt-1 flex-wrap">
-                        <span>Check-In: <strong className="text-slate-200">{formattedDate} at {formattedTime}</strong></span>
+                        <span>Check-In: <strong className="text-slate-200">{formattedDate} at {inTime}</strong></span>
+                        {outTime && (
+                          <>
+                            <span>•</span>
+                            <span>Punch-Out: <strong className="text-amber-300">{outTime}</strong></span>
+                          </>
+                        )}
                         <span>•</span>
-                        <span>Hub Geofence Verified</span>
+                        <span>Hub Verified</span>
                         {hasCoords && (
                           <>
                             <span>•</span>
@@ -265,9 +288,15 @@ export default function StaffAttendanceModal({ isOpen, onClose, drivers = [] }) 
                   </div>
 
                   <div className="text-right shrink-0">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold text-xs">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Verified</span>
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl border font-semibold text-xs ${
+                      isCurrentlyOut
+                        ? 'bg-slate-800/80 text-slate-300 border-slate-700'
+                        : isToday
+                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}>
+                      {isCurrentlyOut ? <Clock className="w-3.5 h-3.5 text-amber-400" /> : <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
+                      <span>{isCurrentlyOut ? `Out: ${outTime}` : `In: ${inTime}`}</span>
                     </span>
                   </div>
                 </div>
