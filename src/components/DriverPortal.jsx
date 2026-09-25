@@ -142,6 +142,7 @@ export default function DriverPortal({
       ? Notification.permission
       : 'default'
   );
+  const [showNotifHelpModal, setShowNotifHelpModal] = useState(false);
 
   // PWA Install Prompt State for Android Chrome
   const [installPrompt, setInstallPrompt] = useState(null);
@@ -202,6 +203,7 @@ export default function DriverPortal({
   const triggerOrderAlert = useCallback(
     (orderData) => {
       // 1. Play punchy alert "toing" sound + haptic vibration
+      unlockAudioContext();
       playNewOrderSound();
 
       // 2. Trigger native notification
@@ -213,14 +215,26 @@ export default function DriverPortal({
         try {
           const orderNum = orderData?.order_number || '';
           const address = orderData?.address || 'New delivery';
-          new Notification('🚨 New Water Delivery Assigned!', {
+          const title = '🚨 New Water Delivery Assigned!';
+          const options = {
             body: orderNum
               ? `Order #${orderNum}: ${address}`
               : 'New order received. Tap to view details.',
             icon: '/pwa-192x192.png',
             badge: '/pwa-192x192.png',
+            vibrate: [200, 100, 200],
             tag: 'order-alert-' + (orderData?.id || Date.now())
-          });
+          };
+
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.ready.then((reg) => {
+              reg.showNotification(title, options);
+            }).catch(() => {
+              try { new Notification(title, options); } catch (e) {}
+            });
+          } else {
+            try { new Notification(title, options); } catch (e) {}
+          }
         } catch (err) {
           console.warn('Native notification trigger failed:', err);
         }
@@ -231,21 +245,65 @@ export default function DriverPortal({
 
   // Notification Permission Request Handler
   const handleRequestNotificationPermission = async () => {
+    // 1. Immediately unlock and play alert sound for instant confirmation
     unlockAudioContext();
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      try {
-        const permission = await Notification.requestPermission();
-        setNotifPermission(permission);
-        if (permission === 'granted') {
-          playNewOrderSound();
-          new Notification('🚨 Jal-Jivan Order Alerts Enabled!', {
-            body: 'You will now hear a loud alert chime & receive notifications when orders arrive.',
-            icon: '/pwa-192x192.png'
+    playNewOrderSound();
+
+    // 2. If Notification API is not available (e.g. non-HTTPS IP on mobile or older browser)
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      setNotifPermission('granted'); // Keep sound enabled
+      setPunchFeedback({
+        type: 'success',
+        message: '🔊 Loud sound chime enabled for orders!'
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
+      return;
+    }
+
+    // 3. If notifications were already blocked by user in browser settings
+    if (Notification.permission === 'denied') {
+      setShowNotifHelpModal(true);
+      return;
+    }
+
+    // 4. Request browser permission
+    try {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+
+      if (permission === 'granted') {
+        const title = '🚨 Jal-Jivan Order Alerts Enabled!';
+        const options = {
+          body: 'You will now hear a loud alert chime & receive notifications when orders arrive.',
+          icon: '/pwa-192x192.png',
+          badge: '/pwa-192x192.png'
+        };
+
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.showNotification(title, options);
+          }).catch(() => {
+            try { new Notification(title, options); } catch (e) {}
           });
+        } else {
+          try { new Notification(title, options); } catch (e) {}
         }
-      } catch (err) {
-        console.warn('Notification permission error:', err);
+
+        setPunchFeedback({
+          type: 'success',
+          message: '🔔 Loud order chime and notifications enabled!'
+        });
+        setTimeout(() => setPunchFeedback(null), 4000);
+      } else if (permission === 'denied') {
+        setShowNotifHelpModal(true);
       }
+    } catch (err) {
+      console.warn('Notification permission error:', err);
+      setPunchFeedback({
+        type: 'success',
+        message: '🔊 Audio alerts unlocked and active!'
+      });
+      setTimeout(() => setPunchFeedback(null), 4000);
     }
   };
 
@@ -2147,6 +2205,66 @@ export default function DriverPortal({
               : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/40 shadow-emerald-900/40'
           }`}>
             <span>{punchFeedback.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Notification Permission Unblock Instructions Modal */}
+      {showNotifHelpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Bell className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-base">Notifications Blocked</h3>
+                <p className="text-xs text-slate-400">Allow in your browser settings</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-300 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-2.5 leading-relaxed">
+              <p className="font-semibold text-white">To enable loud order popups on this phone:</p>
+              <div className="space-y-1.5 text-slate-300 text-[11px]">
+                <div className="flex items-start gap-2">
+                  <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center shrink-0 text-[10px]">1</span>
+                  <span>Tap the <strong>Lock 🔒</strong> or <strong>Tune / Settings icon</strong> in your browser's top address bar (next to the website URL).</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center shrink-0 text-[10px]">2</span>
+                  <span>Tap <strong>Permissions</strong> ➔ <strong>Notifications</strong>.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 font-bold flex items-center justify-center shrink-0 text-[10px]">3</span>
+                  <span>Switch it to <strong className="text-emerald-400">Allow</strong>.</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-emerald-400 pt-1 border-t border-slate-800">
+                ✅ Don't worry! In-app sound chime is already active and will play whenever orders arrive.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowNotifHelpModal(false)}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+              >
+                Got It
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  unlockAudioContext();
+                  playNewOrderSound();
+                  setShowNotifHelpModal(false);
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/30"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Test Sound</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
