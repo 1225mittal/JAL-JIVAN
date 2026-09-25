@@ -1,5 +1,19 @@
-import React, { useState } from 'react';
-import { X, Camera, Upload, CheckCircle2, Banknote, QrCode, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  X,
+  Camera,
+  Upload,
+  CheckCircle2,
+  Banknote,
+  QrCode,
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  RotateCcw,
+  Trash2,
+  Video,
+  AlertCircle
+} from 'lucide-react';
 import { uploadDeliveryFile } from '../lib/supabase';
 
 export default function ProofOfDeliveryModal({ isOpen, onClose, order, onCompleteDelivery }) {
@@ -14,6 +28,107 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // In-app live camera state
+  const [liveCameraTarget, setLiveCameraTarget] = useState(null); // 'photo' | 'upi' | null
+  const [facingMode, setFacingMode] = useState('environment'); // 'environment' | 'user'
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+
+  // Stop video tracks helper
+  const stopLiveCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setLiveCameraTarget(null);
+    setCameraError(null);
+    setCameraLoading(false);
+  };
+
+  // Start live in-app camera viewfinder
+  const startLiveCamera = async (target, facing = 'environment') => {
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      setLiveCameraTarget(target);
+      setFacingMode(facing);
+      setCameraLoading(true);
+      setCameraError(null);
+
+      const constraints = {
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch (err) {
+      console.warn('In-app camera stream error:', err);
+      setCameraError('Unable to access in-app camera stream. Please use the "Take Photo (Camera)" button below.');
+    } finally {
+      setCameraLoading(false);
+    }
+  };
+
+  // Flip camera between front and back
+  const flipLiveCamera = () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment';
+    startLiveCamera(liveCameraTarget, nextFacing);
+  };
+
+  // Snap photo from live camera canvas
+  const captureLiveSnapshot = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const filename = `${liveCameraTarget === 'upi' ? 'upi-proof' : 'package-proof'}-${Date.now()}.jpg`;
+      const file = new File([blob], filename, { type: 'image/jpeg' });
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+      if (liveCameraTarget === 'upi') {
+        setUpiScreenshotFile(file);
+        setUpiPreview(dataUrl);
+      } else {
+        setPhotoFile(file);
+        setPhotoPreview(dataUrl);
+      }
+      stopLiveCamera();
+    }, 'image/jpeg', 0.85);
+  };
+
+  // Cleanup camera stream on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
   if (!isOpen || !order) return null;
 
   const handlePhotoSelect = (e) => {
@@ -23,6 +138,7 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
     const reader = new FileReader();
     reader.onload = () => setPhotoPreview(reader.result);
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleUpiScreenshotSelect = (e) => {
@@ -32,6 +148,7 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
     const reader = new FileReader();
     reader.onload = () => setUpiPreview(reader.result);
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleSubmit = async (e) => {
@@ -44,7 +161,7 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
     }
 
     if (paymentMethod === 'UPI' && !upiScreenshotFile && !upiPreview) {
-      setError('Please upload the UPI payment transaction screenshot');
+      setError('Please take or upload the UPI payment transaction screenshot/photo');
       return;
     }
 
@@ -70,6 +187,7 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
         notes: notes.trim()
       });
 
+      stopLiveCamera();
       onClose();
     } catch (err) {
       setError(err.message || 'Failed to complete delivery');
@@ -79,8 +197,8 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col animate-slide-up sm:animate-scale-up">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-sm animate-fade-in overflow-y-auto">
+      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden max-h-[94vh] flex flex-col animate-slide-up sm:animate-scale-up">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/70 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -93,50 +211,181 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              stopLiveCamera();
+              onClose();
+            }}
             className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-5 overflow-y-auto flex-1">
-          {error && (
-            <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl">
-              {error}
+        {/* Live In-App Camera Viewfinder Overlay */}
+        {liveCameraTarget && (
+          <div className="relative bg-black flex flex-col items-center justify-between p-4 min-h-[360px] animate-fade-in">
+            {/* Viewfinder Header */}
+            <div className="w-full flex items-center justify-between text-xs text-white z-10 mb-2">
+              <span className="font-bold flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/80 border border-slate-700">
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                {liveCameraTarget === 'upi' ? 'Capture UPI Proof' : 'Capture Package Photo'}
+              </span>
+              <button
+                type="button"
+                onClick={stopLiveCamera}
+                className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
 
-          {/* Delivery Location Summary */}
-          <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 text-xs">
-            <p className="text-slate-400 font-medium">Delivering To:</p>
-            <p className="text-white font-semibold mt-0.5">{order.address}</p>
-            {order.landmark && (
-              <p className="text-emerald-400 mt-0.5">Landmark: {order.landmark}</p>
-            )}
-          </div>
+            {/* Video Viewport */}
+            <div className="relative w-full aspect-[4/3] max-h-72 rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
+              {cameraLoading && (
+                <div className="flex flex-col items-center gap-2 text-slate-400 text-xs">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                  <span>Starting camera stream...</span>
+                </div>
+              )}
+              {cameraError && (
+                <div className="p-4 text-center text-xs text-rose-300 flex flex-col items-center gap-2">
+                  <AlertCircle className="w-6 h-6 text-rose-400" />
+                  <span>{cameraError}</span>
+                </div>
+              )}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover ${cameraLoading || cameraError ? 'hidden' : 'block'}`}
+              />
+              <canvas ref={canvasRef} className="hidden" />
 
-          {/* 1. Package Photo Proof */}
-          <div>
-            <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2 flex items-center justify-between">
-              <span>1. Package Photo Proof <span className="text-rose-400">*</span></span>
-              <span className="text-[10px] text-slate-400 font-normal">Bucket: delivery-proofs</span>
-            </label>
-
-            {photoPreview ? (
-              <div className="relative rounded-2xl overflow-hidden border border-emerald-500/40 bg-slate-950 group">
-                <img
-                  src={photoPreview}
-                  alt="Package proof preview"
-                  className="w-full h-48 object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-3">
-                  <span className="text-xs text-emerald-300 font-medium flex items-center gap-1">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> Photo Attached
+              {/* Viewfinder Guideline Box */}
+              {!cameraLoading && !cameraError && (
+                <div className="absolute inset-4 border-2 border-dashed border-emerald-400/60 rounded-xl pointer-events-none flex items-center justify-center">
+                  <span className="text-[10px] text-emerald-300/80 bg-black/60 px-2 py-0.5 rounded backdrop-blur-sm">
+                    {liveCameraTarget === 'upi' ? 'Align UPI screen inside box' : 'Align package inside box'}
                   </span>
-                  <label className="cursor-pointer text-xs bg-slate-900/90 text-slate-200 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700">
-                    Change
+                </div>
+              )}
+            </div>
+
+            {/* Camera Controls */}
+            <div className="w-full flex items-center justify-around mt-4 pt-2">
+              <button
+                type="button"
+                onClick={flipLiveCamera}
+                className="p-3 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
+                title="Switch Camera (Front/Back)"
+              >
+                <RotateCcw className="w-5 h-5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={captureLiveSnapshot}
+                disabled={cameraLoading || Boolean(cameraError)}
+                className="w-16 h-16 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30 hover:scale-105 active:scale-95 transition-all border-4 border-white/20 disabled:opacity-40"
+                title="Take Photo"
+              >
+                <div className="w-6 h-6 rounded-full bg-white" />
+              </button>
+
+              <button
+                type="button"
+                onClick={stopLiveCamera}
+                className="px-3 py-2 text-xs rounded-xl bg-slate-800 text-slate-300 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Scrollable Form Body */}
+        {!liveCameraTarget && (
+          <form onSubmit={handleSubmit} className="p-5 space-y-5 overflow-y-auto flex-1">
+            {error && (
+              <div className="p-3 text-xs bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Delivery Location Summary */}
+            <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 text-xs">
+              <p className="text-slate-400 font-medium">Delivering To:</p>
+              <p className="text-white font-semibold mt-0.5">{order.address}</p>
+              {order.landmark && (
+                <p className="text-emerald-400 mt-0.5">Landmark: {order.landmark}</p>
+              )}
+            </div>
+
+            {/* 1. Package Photo Proof */}
+            <div>
+              <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2 flex items-center justify-between">
+                <span>1. Package Delivery Photo <span className="text-rose-400">*</span></span>
+                <span className="text-[10px] text-slate-400 font-normal">Delivery Proof</span>
+              </label>
+
+              {photoPreview ? (
+                <div className="relative rounded-2xl overflow-hidden border border-emerald-500/40 bg-slate-950 group">
+                  <img
+                    src={photoPreview}
+                    alt="Package proof preview"
+                    className="w-full h-44 object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end justify-between p-3">
+                    <span className="text-xs text-emerald-300 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Photo Attached
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <label className="cursor-pointer text-xs bg-slate-900/90 text-slate-200 hover:text-white px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 shadow">
+                        <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Camera</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handlePhotoSelect}
+                          className="hidden"
+                        />
+                      </label>
+                      <label className="cursor-pointer text-xs bg-slate-900/90 text-slate-200 hover:text-white px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 shadow">
+                        <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Gallery</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoSelect}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPhotoFile(null);
+                          setPhotoPreview(null);
+                        }}
+                        className="p-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {/* Direct Mobile Camera Button (capture="environment") */}
+                  <label className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-emerald-500/40 hover:border-emerald-400 rounded-2xl cursor-pointer bg-emerald-950/20 hover:bg-emerald-950/30 transition-all text-center group">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-bold text-emerald-300">Take Photo</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Mobile Camera</p>
                     <input
                       type="file"
                       accept="image/*"
@@ -145,98 +394,190 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
                       className="hidden"
                     />
                   </label>
+
+                  {/* In-App Live Cam Viewfinder Button */}
+                  <button
+                    type="button"
+                    onClick={() => startLiveCamera('photo', 'environment')}
+                    className="flex flex-col items-center justify-center p-3.5 border border-dashed border-teal-600/40 hover:border-teal-400 rounded-2xl bg-teal-950/20 hover:bg-teal-950/30 transition-all text-center group"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-teal-500/20 text-teal-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                      <Video className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-bold text-teal-300">Live Viewfinder</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">In-App Screen</p>
+                  </button>
+
+                  {/* Pick from Gallery Button */}
+                  <label className="col-span-2 sm:col-span-1 flex flex-col items-center justify-center p-3.5 border border-dashed border-slate-700 hover:border-slate-500 rounded-2xl cursor-pointer bg-slate-800/30 hover:bg-slate-800/60 transition-all text-center group">
+                    <div className="w-10 h-10 rounded-full bg-slate-700/50 text-slate-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                      <ImageIcon className="w-5 h-5" />
+                    </div>
+                    <p className="text-xs font-bold text-slate-200">From Gallery</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Select File</p>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoSelect}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
-              </div>
-            ) : (
-              <label className="flex flex-col items-center justify-center w-full h-36 border-2 border-dashed border-slate-700 hover:border-emerald-500/50 rounded-2xl cursor-pointer bg-slate-800/30 hover:bg-slate-800/60 transition-all p-4 text-center">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2">
-                  <Camera className="w-5 h-5" />
-                </div>
-                <p className="text-sm font-semibold text-slate-200">Tap to Capture Package Photo</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Use camera or select from gallery</p>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handlePhotoSelect}
-                  className="hidden"
-                />
-              </label>
-            )}
-          </div>
-
-          {/* 2. Payment Method Selector */}
-          <div>
-            <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2">
-              2. Payment Collection Method <span className="text-rose-400">*</span>
-            </label>
-            <div className="grid grid-cols-3 gap-2.5">
-              {/* Cash */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('Cash')}
-                className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                  paymentMethod === 'Cash'
-                    ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500'
-                    : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <Banknote className="w-5 h-5 mb-1.5" />
-                <span className="text-xs font-semibold">Cash</span>
-                <span className="text-[10px] opacity-75">₹{order.amount}</span>
-              </button>
-
-              {/* UPI */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('UPI')}
-                className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                  paymentMethod === 'UPI'
-                    ? 'bg-teal-600/20 border-teal-500 text-teal-300 shadow-md shadow-teal-500/10 ring-1 ring-teal-500'
-                    : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <QrCode className="w-5 h-5 mb-1.5" />
-                <span className="text-xs font-semibold">UPI Online</span>
-                <span className="text-[10px] opacity-75">QR / App</span>
-              </button>
-
-              {/* Credit */}
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('Credit')}
-                className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                  paymentMethod === 'Credit'
-                    ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10 ring-1 ring-amber-500'
-                    : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <FileText className="w-5 h-5 mb-1.5" />
-                <span className="text-xs font-semibold">Credit</span>
-                <span className="text-[10px] opacity-75">Khata/Postpaid</span>
-              </button>
+              )}
             </div>
-          </div>
 
-          {/* If UPI is selected: Screenshot upload requirement */}
-          {paymentMethod === 'UPI' && (
-            <div className="p-3.5 rounded-2xl bg-teal-950/30 border border-teal-800/50 space-y-2 animate-fade-in">
-              <label className="block text-xs font-semibold text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
-                <QrCode className="w-3.5 h-3.5" />
-                Upload UPI Transaction Screenshot <span className="text-rose-400">*</span>
+            {/* 2. Payment Method Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2">
+                2. Payment Collection Method <span className="text-rose-400">*</span>
               </label>
+              <div className="grid grid-cols-3 gap-2.5">
+                {/* Cash */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('Cash')}
+                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                    paymentMethod === 'Cash'
+                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500'
+                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <Banknote className="w-5 h-5 mb-1.5" />
+                  <span className="text-xs font-semibold">Cash</span>
+                  <span className="text-[10px] opacity-75">₹{order.amount}</span>
+                </button>
 
-              {upiPreview ? (
-                <div className="relative rounded-xl overflow-hidden border border-teal-500/40 bg-slate-950">
-                  <img
-                    src={upiPreview}
-                    alt="UPI Screenshot"
-                    className="w-full h-32 object-contain bg-slate-950"
-                  />
-                  <div className="p-2 bg-slate-900 flex justify-between items-center text-xs">
-                    <span className="text-teal-300">Screenshot Attached</span>
-                    <label className="cursor-pointer text-slate-300 hover:text-white underline text-[11px]">
-                      Replace
+                {/* UPI */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('UPI')}
+                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                    paymentMethod === 'UPI'
+                      ? 'bg-teal-600/20 border-teal-500 text-teal-300 shadow-md shadow-teal-500/10 ring-1 ring-teal-500'
+                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <QrCode className="w-5 h-5 mb-1.5" />
+                  <span className="text-xs font-semibold">UPI Online</span>
+                  <span className="text-[10px] opacity-75">QR / App</span>
+                </button>
+
+                {/* Credit */}
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('Credit')}
+                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                    paymentMethod === 'Credit'
+                      ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10 ring-1 ring-amber-500'
+                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <FileText className="w-5 h-5 mb-1.5" />
+                  <span className="text-xs font-semibold">Credit</span>
+                  <span className="text-[10px] opacity-75">Khata/Postpaid</span>
+                </button>
+              </div>
+            </div>
+
+            {/* If UPI is selected: Camera & Screenshot options */}
+            {paymentMethod === 'UPI' && (
+              <div className="p-4 rounded-2xl bg-teal-950/30 border border-teal-800/50 space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <QrCode className="w-4 h-4" />
+                    <span>UPI Payment Proof <span className="text-rose-400">*</span></span>
+                  </label>
+                  <span className="text-[10px] text-teal-400/80">Camera or Gallery</span>
+                </div>
+
+                {upiPreview ? (
+                  <div className="relative rounded-xl overflow-hidden border border-teal-500/40 bg-slate-950">
+                    <img
+                      src={upiPreview}
+                      alt="UPI Payment Proof"
+                      className="w-full h-36 object-contain bg-slate-950"
+                    />
+                    <div className="p-2.5 bg-slate-900/90 border-t border-slate-800 flex justify-between items-center text-xs">
+                      <span className="text-teal-300 font-medium flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" /> Proof Attached
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {/* Direct Camera Retake */}
+                        <label className="cursor-pointer text-xs bg-slate-800 text-teal-300 hover:text-white px-2.5 py-1 rounded-lg border border-teal-700/60 flex items-center gap-1 shadow-sm">
+                          <Camera className="w-3 h-3 text-teal-400" />
+                          <span>Camera</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handleUpiScreenshotSelect}
+                            className="hidden"
+                          />
+                        </label>
+                        {/* Gallery Retake */}
+                        <label className="cursor-pointer text-xs bg-slate-800 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-700 flex items-center gap-1 shadow-sm">
+                          <ImageIcon className="w-3 h-3 text-slate-400" />
+                          <span>Gallery</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleUpiScreenshotSelect}
+                            className="hidden"
+                          />
+                        </label>
+                        {/* Clear */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUpiScreenshotFile(null);
+                            setUpiPreview(null);
+                          }}
+                          className="p-1 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30"
+                          title="Remove UPI proof"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    {/* Primary Camera Button: Directly opens native device camera (NO redirect to gallery) */}
+                    <label className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-teal-500/50 hover:border-teal-400 rounded-2xl cursor-pointer bg-teal-950/40 hover:bg-teal-900/40 transition-all text-center group shadow-sm">
+                      <div className="w-10 h-10 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <Camera className="w-5 h-5 text-teal-400" />
+                      </div>
+                      <p className="text-xs font-bold text-teal-200">Take Photo</p>
+                      <p className="text-[10px] text-teal-400/80 mt-0.5">Mobile Camera</p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleUpiScreenshotSelect}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {/* In-App Live Cam Viewfinder Button */}
+                    <button
+                      type="button"
+                      onClick={() => startLiveCamera('upi', 'environment')}
+                      className="flex flex-col items-center justify-center p-3.5 border border-dashed border-cyan-600/40 hover:border-cyan-400 rounded-2xl bg-cyan-950/20 hover:bg-cyan-950/30 transition-all text-center group"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <Video className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs font-bold text-cyan-300">Live Viewfinder</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">In-App Screen</p>
+                    </button>
+
+                    {/* Gallery / Screenshot Upload Button */}
+                    <label className="col-span-2 sm:col-span-1 flex flex-col items-center justify-center p-3.5 border border-dashed border-slate-700 hover:border-slate-500 rounded-2xl cursor-pointer bg-slate-900/50 hover:bg-slate-900 transition-all text-center group">
+                      <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <ImageIcon className="w-5 h-5 text-slate-400" />
+                      </div>
+                      <p className="text-xs font-bold text-slate-200">From Gallery</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">UPI Screenshot</p>
                       <input
                         type="file"
                         accept="image/*"
@@ -245,64 +586,56 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
                       />
                     </label>
                   </div>
-                </div>
-              ) : (
-                <label className="flex items-center justify-center gap-2 w-full py-3 px-4 border border-dashed border-teal-700 hover:border-teal-500 rounded-xl cursor-pointer bg-slate-900/50 hover:bg-slate-900 transition-all text-xs text-teal-300 font-medium">
-                  <Upload className="w-4 h-4" />
-                  <span>Choose / Capture Payment Screenshot</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleUpiScreenshotSelect}
-                    className="hidden"
-                  />
-                </label>
-              )}
+                )}
+              </div>
+            )}
+
+            {/* Delivery Remarks */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Delivery Remarks / Handover Notes (Optional)
+              </label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="e.g. Handed to customer, placed at door, paid in cash"
+                className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
             </div>
-          )}
 
-          {/* Delivery Remarks */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-              Delivery Remarks / Handover Notes (Optional)
-            </label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Handed to customer, placed at door, paid in cash"
-              className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-3 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition-all"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Saving POD...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Mark as Delivered</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
+            {/* Action Buttons */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  stopLiveCamera();
+                  onClose();
+                }}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-sm font-medium hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition-all"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving POD...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Mark as Delivered</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
