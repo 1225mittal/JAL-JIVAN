@@ -1082,78 +1082,16 @@ export default function DriverPortal({
         </div>
       )}
 
-      {/* Quick Action Alerts & PWA Install Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
-        <div className="flex items-center gap-2">
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-          </span>
-          <span className="text-xs font-bold text-emerald-400">
-            🟢 Online / On Road (Heartbeat Active)
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Notification Alert Permission Button */}
-          {notifPermission !== 'granted' && (
-            <button
-              onClick={handleRequestNotificationPermission}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition-all shadow animate-pulse"
-              title="Click to enable sound alerts and push notifications on new orders"
-            >
-              <Bell className="w-3.5 h-3.5" />
-              <span>Enable Order Alerts 🔔</span>
-            </button>
-          )}
-
-          {/* Test Chime Button */}
-          {notifPermission === 'granted' && (
-            <button
-              onClick={() => {
-                unlockAudioContext();
-                playNewOrderSound();
-              }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all"
-              title="Test loud toing alert sound"
-            >
-              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Test Alert</span>
-            </button>
-          )}
-
-          {/* Live Expiry Scanner Cam for Delivery Boys */}
-          <button
-            onClick={() => setIsExpiryCamOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all shadow active:scale-95"
-            title="Open Real-time Expiry Scanner Camera to check product packaging dates"
-          >
-            <Camera className="w-3.5 h-3.5 text-amber-400" />
-            <span>Expiry Cam 📸</span>
-          </button>
-
-          {/* Fallback Install App Button */}
-          <button
-            onClick={handleInstallApp}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all shadow active:scale-95"
-            title="Install Jal-Jivan App on Android Chrome"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>📲 Install App</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Driver Header Card */}
-      <div className="glass-panel p-4 rounded-2xl border border-slate-800 space-y-3">
-        <div className="flex items-center justify-between">
+      {/* 2. Driver Profile & Punch Card (Unified & Compact) */}
+      <div className="glass-panel p-4 rounded-2xl border border-slate-800 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-base border border-emerald-500/30">
-              {currentDriver.name.charAt(0).toUpperCase()}
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black text-lg border border-emerald-500/30 shrink-0">
+              {currentDriver.name ? currentDriver.name.charAt(0).toUpperCase() : 'R'}
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-extrabold text-white text-base">{currentDriver.name}</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="font-extrabold text-white text-base tracking-tight">{currentDriver.name}</h2>
                 <span
                   className={`text-[10px] border px-2 py-0.5 rounded-full font-bold uppercase ${
                     isPunchedIn
@@ -1161,71 +1099,110 @@ export default function DriverPortal({
                       : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                   }`}
                 >
-                  {isPunchedIn ? 'On Duty (Punched In)' : 'Off Duty'}
+                  {isPunchedIn ? '🟢 On Duty' : '⚪ Off Duty'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">Phone: {currentDriver.phone}</p>
+              <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
+                <span>{currentDriver.phone}</span>
+                <span>•</span>
+                <span className="text-slate-300 font-medium">
+                  📦 <strong>{completedTodayCount}</strong> Deliveries Today
+                </span>
+                {starsEarned > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-400 font-bold flex items-center gap-0.5">
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" />
+                      {starsEarned}★
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* THE ONLY PUNCH OUT / PUNCH IN BUTTON ON THE ENTIRE SCREEN */}
+          <div className="sm:self-center shrink-0">
             {isPunchedIn ? (
               <button
                 type="button"
+                id="main-punch-out-btn"
                 onClick={() => setShowPunchOutConfirm(true)}
-                className="flex items-center gap-1 text-xs text-amber-300 hover:text-white py-1.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 transition-all font-bold shadow-sm active:scale-95"
+                disabled={punchActionLoading}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-50"
                 title="Punch out from duty"
               >
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <Clock className="w-4 h-4 text-amber-400" />
                 <span>Punch Out</span>
               </button>
             ) : (
               <button
                 type="button"
+                id="main-punch-in-btn"
                 onClick={() => handlePunchIn()}
                 disabled={verifyingLocation || punchActionLoading}
-                className="flex items-center gap-1.5 text-xs text-emerald-300 hover:text-white py-1.5 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 transition-all font-bold shadow-sm active:scale-95 disabled:opacity-50"
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/30 transition-all active:scale-95 disabled:opacity-50"
                 title="Punch in to start shift"
               >
-                <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Punch In</span>
+                {verifyingLocation || punchActionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="w-4 h-4" />
+                    <span>Punch In</span>
+                  </>
+                )}
               </button>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Feature 2: Daily Deliveries & Star Rewards Badge */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
-          <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-xl">
-            <span className="text-slate-300">
-              Deliveries Today: <strong className="text-white font-bold">{completedTodayCount}</strong>
-            </span>
-            <span className="text-slate-600">|</span>
-            <span className="text-amber-400 font-bold flex items-center gap-1">
-              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-              <span>{starsEarned} Stars</span>
-            </span>
-            <span className="text-[10px] text-slate-500 hidden sm:inline">
-              ({minPerStar} del = {starsPerTier} star)
-            </span>
-          </div>
+      {/* 3. Utility Row: Neutral Action Pills */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+        <button
+          onClick={() => setIsExpiryCamOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-medium transition shrink-0"
+          title="Open Real-time Expiry Scanner Camera to check product packaging dates"
+        >
+          <Camera className="w-3.5 h-3.5 text-amber-400" />
+          <span>Expiry Cam 📸</span>
+        </button>
 
-          {/* Attendance Status Pill */}
+        {notifPermission !== 'granted' ? (
           <button
-            type="button"
-            onClick={() => setActiveTab('attendance')}
-            className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition cursor-pointer"
-            title="Click to view Attendance details and history"
+            onClick={handleRequestNotificationPermission}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-medium transition shrink-0"
+            title="Click to enable sound alerts and push notifications on new orders"
           >
-            <span className={`w-2 h-2 rounded-full ${isPunchedIn ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span className="text-slate-400">
-              Hub Geofence:{' '}
-              <strong className={isPunchedIn ? 'text-emerald-400' : 'text-amber-400'}>
-                {isPunchedIn ? 'Verified (View 🗓️)' : 'Pending Check-In'}
-              </strong>
-            </span>
+            <Bell className="w-3.5 h-3.5 text-amber-400" />
+            <span>Enable Alerts 🔔</span>
           </button>
-        </div>
+        ) : (
+          <button
+            onClick={() => {
+              unlockAudioContext();
+              playNewOrderSound();
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-medium transition shrink-0"
+            title="Test loud toing alert sound"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Test Alert</span>
+          </button>
+        )}
+
+        <button
+          onClick={handleInstallApp}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-medium transition shrink-0"
+          title="Install Jal-Jivan App on Android Chrome"
+        >
+          <Download className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Install App 📲</span>
+        </button>
       </div>
 
       {/* TABS NAVIGATOR: 4 TABS (Pool | My Tasks | History | Attendance) */}
@@ -1781,126 +1758,86 @@ export default function DriverPortal({
       {/* TAB 4: STAFF ATTENDANCE DASHBOARD & HISTORY */}
       {activeTab === 'attendance' && (
         <div className="space-y-4 animate-fade-in">
-          {/* Today's Punch-In Status Hero */}
-          <div
-            className={`p-5 rounded-2xl border transition-all ${
-              isPunchedIn
-                ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border-emerald-500/40 shadow-lg shadow-emerald-500/5'
-                : 'bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-900 border-amber-500/40 shadow-lg shadow-amber-500/5'
-            }`}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-start gap-3">
-                <div
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
-                    isPunchedIn
-                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                      : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-                  }`}
-                >
-                  {isPunchedIn ? <UserCheck className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-base font-bold text-white">
-                      {isPunchedIn
-                        ? "Today's Attendance: Checked In (On Duty)"
-                        : todayAttendanceRecord?.punched_out_at
-                        ? "Today's Attendance: Shift Ended (Punched Out)"
-                        : "Today's Attendance: Pending Check-In"}
-                    </h3>
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
-                        isPunchedIn
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : todayAttendanceRecord?.punched_out_at
-                          ? 'bg-slate-700/60 text-slate-300 border border-slate-600'
-                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      }`}
-                    >
-                      {isPunchedIn
-                        ? 'Present / On Duty'
-                        : todayAttendanceRecord?.punched_out_at
-                        ? 'Punched Out'
-                        : 'Not Marked'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {isPunchedIn
-                      ? `Punched in at ${
-                          todayAttendanceRecord
-                            ? new Date(todayAttendanceRecord.created_at).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })
-                            : 'Store Hub'
-                        } • Verified within ${storeHub.store_name}`
-                      : todayAttendanceRecord?.punched_out_at
-                      ? `Shift completed at ${new Date(todayAttendanceRecord.punched_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. You are currently Off Duty.`
-                      : `Please punch in near ${storeHub.store_name} (within ${storeHub.radius_meters}m) to begin your shift.`}
-                  </p>
-                </div>
+          {/* Clean Summary Card: Status, Punch In Time, Hub Location, and Geofence Distance */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-emerald-400" />
+                <h3 className="font-bold text-white text-sm">Attendance Summary</h3>
               </div>
-
-              {/* Hero Action Button */}
-              <div>
-                {!isPunchedIn ? (
-                  <button
-                    onClick={() => handlePunchIn()}
-                    disabled={verifyingLocation || punchActionLoading}
-                    className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition active:scale-95"
-                  >
-                    {verifyingLocation || punchActionLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Verifying Geofence...</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserCheck className="w-4 h-4" />
-                        <span>{todayAttendanceRecord?.punched_out_at ? 'Punch In Again (New Shift)' : 'Punch In Attendance Now'}</span>
-                      </>
-                    )}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>On Duty</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowPunchOutConfirm(true)}
-                      disabled={punchActionLoading}
-                      className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-                      title="Punch out from duty"
-                    >
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Punch Out</span>
-                    </button>
-                    <button
-                      onClick={loadAttendanceHistory}
-                      className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition"
-                      title="Refresh Records"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${loadingAttendance ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={loadAttendanceHistory}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition"
+                title="Refresh Records"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingAttendance ? 'animate-spin' : ''}`} />
+              </button>
             </div>
 
-            {/* Geofence Distance Indicator */}
-            <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
-              <div className="flex items-center gap-1.5">
-                <Navigation className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Hub: <strong className="text-slate-200">{storeHub.store_name}</strong></span>
-              </div>
-              {hubDistance !== null && (
-                <span className={`font-mono ${isInsideHubGeofence ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  Distance: {hubDistance}m (Threshold: {storeHub.radius_meters}m)
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              {/* 1. Status */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Duty Status</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                    isPunchedIn
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : todayAttendanceRecord?.punched_out_at
+                      ? 'bg-slate-800 text-slate-300 border-slate-700'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  }`}
+                >
+                  {isPunchedIn
+                    ? '🟢 On Duty'
+                    : todayAttendanceRecord?.punched_out_at
+                    ? '⚪ Shift Ended (Punched Out)'
+                    : '⏳ Off Duty (Pending Check-In)'}
                 </span>
-              )}
+              </div>
+
+              {/* 2. Punch In Time */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Today's Shift Hours</span>
+                <p className="text-white font-medium">
+                  {todayAttendanceRecord?.created_at ? (
+                    <>
+                      In: <strong className="text-emerald-400">{new Date(todayAttendanceRecord.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong>
+                      {todayAttendanceRecord?.punched_out_at && (
+                        <> • Out: <strong className="text-amber-300">{new Date(todayAttendanceRecord.punched_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></>
+                      )}
+                    </>
+                  ) : isPunchedIn ? (
+                    'Punched in today'
+                  ) : (
+                    <span className="text-slate-500 italic">Not checked in yet</span>
+                  )}
+                </p>
+              </div>
+
+              {/* 3. Hub Location */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Store Hub</span>
+                <p className="text-slate-200 font-medium flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span className="truncate">{storeHub.store_name}</span>
+                </p>
+              </div>
+
+              {/* 4. Geofence Distance */}
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Hub Proximity</span>
+                {hubDistance !== null ? (
+                  <p className={`font-mono font-semibold flex items-center gap-1 ${isInsideHubGeofence ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    <Navigation className="w-3 h-3 shrink-0" />
+                    <span>{hubDistance}m away {isInsideHubGeofence ? '(Within range)' : `(Radius: ${storeHub.radius_meters}m)`}</span>
+                  </p>
+                ) : (
+                  <p className="text-slate-500 italic flex items-center gap-1">
+                    <Compass className="w-3 h-3 animate-spin text-emerald-400" />
+                    <span>Acquiring GPS...</span>
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
