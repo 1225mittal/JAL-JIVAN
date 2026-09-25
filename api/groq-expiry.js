@@ -18,22 +18,18 @@ export default async function handler(req, res) {
       ? imageBase64
       : `data:image/jpeg;base64,${imageBase64}`;
 
-    const promptText = `Look at this product packaging image. Extract the Manufacturing Date (MFG), Expiry Date (EXP / Use By), and Best Before duration.
-Today's date is 2026-09-25.
-Return ONLY raw valid JSON:
-{
-  "detected": true,
-  "product_name": "string",
-  "mfg_date": "YYYY-MM-DD or null",
-  "expiry_date": "YYYY-MM-DD or null",
-  "is_expired": true,
-  "days_difference": -10,
-  "reason": "short explanation"
-}
-If no dates or product text are visible at all, return {"detected": false}.`;
+    const promptText = `Extract product name, Manufacturing Date (MFG), and Expiry Date (EXP/Use By/Best Before) from this packaging.
+Today: 2026-09-25.
+Return ONLY raw JSON without markdown:
+{"detected":true,"product_name":"name","mfg_date":"YYYY-MM-DD or null","expiry_date":"YYYY-MM-DD or null","is_expired":true,"days_difference":-10,"reason":"explanation"}
+If no product packaging or dates are clearly visible, return {"detected":false}.`;
 
-    // Try qwen/qwen3.8-27b first, with fallback to llama-3.2-11b-vision-preview
-    const visionModels = ['qwen/qwen3.8-27b', 'llama-3.2-11b-vision-preview'];
+    // Prioritize ultra-fast Groq LPU Vision models
+    const visionModels = [
+      'llama-3.2-11b-vision-preview',
+      'llama-3.2-90b-vision-preview',
+      'qwen/qwen3.8-27b'
+    ];
     let lastError = null;
     let data = null;
 
@@ -65,16 +61,15 @@ If no dates or product text are visible at all, return {"detected": false}.`;
                 ]
               }
             ],
-            temperature: 0.1
+            temperature: 0.0,
+            max_tokens: 180
           })
         });
 
-        console.log(`Groq Response Status [${model}]:`, response.status);
-
         if (!response.ok) {
           const errText = await response.text();
-          console.error(`Groq rejection on model ${model} (${response.status}):`, errText);
-          lastError = new Error(`Groq model ${model} error (${response.status}): ${errText}`);
+          console.warn(`Groq model ${model} skipped (${response.status}):`, errText);
+          lastError = new Error(`Groq model ${model} error (${response.status})`);
           continue;
         }
 
@@ -83,7 +78,7 @@ If no dates or product text are visible at all, return {"detected": false}.`;
           break;
         }
       } catch (err) {
-        console.error(`Groq fetch failure on model ${model}:`, err.message || err);
+        console.warn(`Groq fetch failure on model ${model}:`, err.message || err);
         lastError = err;
       }
     }
