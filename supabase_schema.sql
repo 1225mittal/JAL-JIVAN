@@ -274,5 +274,20 @@ ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS claim_window_end INTEGE
 ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS return_eligibility JSONB DEFAULT '["Expired Stock", "Damage / Breakage / Leakage", "Consumer Complaint"]'::jsonb;
 ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS settlement_mode TEXT DEFAULT 'Credit Note (CN)';
 
+-- 18. Driver / Staff Attendance (Geofencing Store Hub)
+CREATE TABLE IF NOT EXISTS public.driver_attendance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    driver_id UUID REFERENCES public.drivers(id) ON DELETE CASCADE,
+    check_in_lat DOUBLE PRECISION,
+    check_in_lng DOUBLE PRECISION
+);
+
+ALTER TABLE public.driver_attendance ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public access driver_attendance" ON public.driver_attendance;
+CREATE POLICY "Public access driver_attendance" ON public.driver_attendance FOR ALL USING (true) WITH CHECK (true);
+
+
 
 

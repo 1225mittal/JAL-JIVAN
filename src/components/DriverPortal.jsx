@@ -27,7 +27,11 @@ import {
   Bell,
   Volume2,
   Smartphone,
-  Download
+  Download,
+  Calendar,
+  UserCheck,
+  ShieldCheck,
+  Flame
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
@@ -39,6 +43,7 @@ import {
   fetchRewardSettings,
   recordDriverAttendance,
   checkDriverAttendanceToday,
+  fetchDriverAttendance,
   fetchStoreSettings,
   updateDriverLocation,
   defaultStoreSettings,
@@ -73,13 +78,30 @@ export default function DriverPortal({
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
 
-  // Portal Tab State: 'pool' | 'active' | 'history'
+  // Portal Tab State: 'pool' | 'active' | 'history' | 'attendance'
   const [activeTab, setActiveTab] = useState('pool');
   const [selectedOrderForPod, setSelectedOrderForPod] = useState(null);
   const [selectedSlipOrder, setSelectedSlipOrder] = useState(null);
   const [pinningOrderId, setPinningOrderId] = useState(null);
   const [gpsError, setGpsError] = useState(null);
   const [isExpiryCamOpen, setIsExpiryCamOpen] = useState(false);
+
+  // Staff Attendance Records & State
+  const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+
+  const loadAttendanceHistory = useCallback(async () => {
+    if (!currentDriver?.id) return;
+    try {
+      setLoadingAttendance(true);
+      const records = await fetchDriverAttendance(currentDriver.id);
+      setAttendanceRecords(records || []);
+    } catch (err) {
+      console.warn('Failed to fetch attendance history:', err);
+    } finally {
+      setLoadingAttendance(false);
+    }
+  }, [currentDriver?.id]);
 
   // Attendance Geofence State
   const [storeHub, setStoreHub] = useState(() => {
@@ -412,9 +434,10 @@ export default function DriverPortal({
           // ignore
         }
       }
+      loadAttendanceHistory();
     }
     checkAttendance();
-  }, [currentDriver, todayStr]);
+  }, [currentDriver, todayStr, loadAttendanceHistory]);
 
   // Geoguard: Listen to online/offline and GPS watch
   useEffect(() => {
@@ -618,6 +641,7 @@ export default function DriverPortal({
       } catch (e) {
         // ignore
       }
+      await loadAttendanceHistory();
     } catch (err) {
       setLocationError('Failed to record attendance: ' + err.message);
     } finally {
@@ -884,6 +908,29 @@ export default function DriverPortal({
   // Determine if driver is within geofence radius (<= storeHub.radius_meters)
   const isInsideHubGeofence = hubDistance !== null && hubDistance <= (storeHub.radius_meters || 150);
 
+  // Compute Monthly Attendance Statistics
+  const currentMonthStr = todayStr.slice(0, 7);
+  const currentMonthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  const monthlyPresentDates = useMemo(() => {
+    const dates = new Set();
+    attendanceRecords.forEach((r) => {
+      if (r.created_at && r.created_at.startsWith(currentMonthStr)) {
+        dates.add(r.created_at.slice(0, 10));
+      }
+    });
+    if (isPunchedIn) {
+      dates.add(todayStr);
+    }
+    return Array.from(dates).sort().reverse();
+  }, [attendanceRecords, currentMonthStr, isPunchedIn, todayStr]);
+
+  const daysPresentCount = monthlyPresentDates.length;
+
+  const todayAttendanceRecord = useMemo(() => {
+    return attendanceRecords.find((r) => r.created_at && r.created_at.startsWith(todayStr));
+  }, [attendanceRecords, todayStr]);
+
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
       {/* Geoguard Alert Overlay if Internet or GPS lost */}
@@ -1041,27 +1088,87 @@ export default function DriverPortal({
           </div>
 
           {/* Attendance Status Pill */}
-          <div className="flex items-center gap-1.5 text-[11px]">
+          <button
+            type="button"
+            onClick={() => setActiveTab('attendance')}
+            className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition cursor-pointer"
+            title="Click to view Attendance details and history"
+          >
             <span className={`w-2 h-2 rounded-full ${isPunchedIn ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
             <span className="text-slate-400">
               Hub Geofence:{' '}
               <strong className={isPunchedIn ? 'text-emerald-400' : 'text-amber-400'}>
-                {isPunchedIn ? 'Verified' : 'Pending Check-In'}
+                {isPunchedIn ? 'Verified (View 🗓️)' : 'Pending Check-In'}
               </strong>
             </span>
-          </div>
+          </button>
         </div>
       </div>
 
-      {/* Feature 3: Store Hub Attendance Geofencing Modal/Card (if NOT punched in) */}
-      {!isPunchedIn ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-4 shadow-xl">
+      {/* TABS NAVIGATOR: 4 TABS (Pool | My Tasks | History | Attendance) */}
+      <div className="grid grid-cols-4 gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800">
+        <button
+          id="tab-available-pool"
+          onClick={() => setActiveTab('pool')}
+          className={`py-2 px-1 sm:px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1 sm:gap-1.5 transition-all ${
+            activeTab === 'pool'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Pool ({poolOrders.length})</span>
+        </button>
+
+        <button
+          id="tab-active-deliveries"
+          onClick={() => setActiveTab('active')}
+          className={`py-2 px-1 sm:px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1 sm:gap-1.5 transition-all ${
+            activeTab === 'active'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Truck className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Tasks ({activeDeliveries.length})</span>
+        </button>
+
+        <button
+          id="tab-history"
+          onClick={() => setActiveTab('history')}
+          className={`py-2 px-1 sm:px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1 sm:gap-1.5 transition-all ${
+            activeTab === 'history'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">History</span>
+        </button>
+
+        <button
+          id="tab-attendance"
+          onClick={() => setActiveTab('attendance')}
+          className={`py-2 px-1 sm:px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1 sm:gap-1.5 transition-all ${
+            activeTab === 'attendance'
+              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Calendar className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">Attendance</span>
+        </button>
+      </div>
+
+      {/* Feature 3: Store Hub Attendance Geofencing Modal/Card (if NOT punched in and accessing Pool or Tasks) */}
+      {!isPunchedIn && (activeTab === 'pool' || activeTab === 'active') ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-4 shadow-xl animate-fade-in">
           <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl mx-auto flex items-center justify-center">
             <MapPin className="w-6 h-6" />
           </div>
 
           <div>
-            <h3 className="text-base font-bold text-white">Daily Attendance Check-In</h3>
+            <h3 className="text-base font-bold text-white">Daily Attendance Check-In Required</h3>
             <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
               Drivers must punch in at the store hub ({storeHub.store_name}) before viewing or accepting delivery orders.
             </p>
@@ -1126,7 +1233,7 @@ export default function DriverPortal({
               ) : (
                 <>
                   <Check className="w-4 h-4" />
-                  <span>Punch In</span>
+                  <span>Punch In Attendance</span>
                 </>
               )}
             </button>
@@ -1145,50 +1252,7 @@ export default function DriverPortal({
           </div>
         </div>
       ) : (
-        /* FEATURE 1: TABS (Available Pool vs Active Deliveries vs History) */
         <>
-          {/* Tabs Navigator */}
-          <div className="grid grid-cols-3 gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800">
-            <button
-              id="tab-available-pool"
-              onClick={() => setActiveTab('pool')}
-              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
-                activeTab === 'pool'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Pool ({poolOrders.length})</span>
-            </button>
-
-            <button
-              id="tab-active-deliveries"
-              onClick={() => setActiveTab('active')}
-              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
-                activeTab === 'active'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Truck className="w-3.5 h-3.5" />
-              <span>My Tasks ({activeDeliveries.length})</span>
-            </button>
-
-            <button
-              id="tab-history"
-              onClick={() => setActiveTab('history')}
-              className={`py-2 px-2.5 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${
-                activeTab === 'history'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>History ({deliveredHistory.length})</span>
-            </button>
-          </div>
-
           {/* TAB 1: AVAILABLE DELIVERY OPEN POOL */}
           {activeTab === 'pool' && (
             <div className="space-y-3">
@@ -1581,6 +1645,275 @@ export default function DriverPortal({
             </div>
           )}
         </>
+      )}
+
+      {/* TAB 4: STAFF ATTENDANCE DASHBOARD & HISTORY */}
+      {activeTab === 'attendance' && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Today's Punch-In Status Hero */}
+          <div
+            className={`p-5 rounded-2xl border transition-all ${
+              isPunchedIn
+                ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border-emerald-500/40 shadow-lg shadow-emerald-500/5'
+                : 'bg-gradient-to-br from-amber-950/40 via-slate-900 to-slate-900 border-amber-500/40 shadow-lg shadow-amber-500/5'
+            }`}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                    isPunchedIn
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                  }`}
+                >
+                  {isPunchedIn ? <UserCheck className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base font-bold text-white">
+                      {isPunchedIn ? "Today's Attendance: Checked In" : "Today's Attendance: Pending"}
+                    </h3>
+                    <span
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                        isPunchedIn
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      }`}
+                    >
+                      {isPunchedIn ? 'Present' : 'Not Marked'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {isPunchedIn
+                      ? `Punched in at ${
+                          todayAttendanceRecord
+                            ? new Date(todayAttendanceRecord.created_at).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
+                            : 'Store Hub'
+                        } • Verified within ${storeHub.store_name}`
+                      : `Please punch in near ${storeHub.store_name} (within ${storeHub.radius_meters}m) to begin your shift.`}
+                  </p>
+                </div>
+              </div>
+
+              {/* Hero Action Button */}
+              <div>
+                {!isPunchedIn ? (
+                  <button
+                    onClick={() => handlePunchIn()}
+                    disabled={verifyingLocation}
+                    className="w-full sm:w-auto py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50 transition active:scale-95"
+                  >
+                    {verifyingLocation ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Verifying Geofence...</span>
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-4 h-4" />
+                        <span>Punch In Attendance Now</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      <span>Verified at Hub</span>
+                    </span>
+                    <button
+                      onClick={loadAttendanceHistory}
+                      className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition"
+                      title="Refresh Records"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingAttendance ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Geofence Distance Indicator */}
+            <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+              <div className="flex items-center gap-1.5">
+                <Navigation className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Hub: <strong className="text-slate-200">{storeHub.store_name}</strong></span>
+              </div>
+              {hubDistance !== null && (
+                <span className={`font-mono ${isInsideHubGeofence ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  Distance: {hubDistance}m (Threshold: {storeHub.radius_meters}m)
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Monthly Statistics Overview (4 Cards) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="glass-card p-3.5 rounded-2xl border border-slate-800 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-400 mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider">Days Present</span>
+                <Calendar className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-2xl font-black text-white">
+                {daysPresentCount} <span className="text-xs font-normal text-slate-400">days</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">{currentMonthName}</p>
+            </div>
+
+            <div className="glass-card p-3.5 rounded-2xl border border-slate-800 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-400 mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider">Shift Streak</span>
+                <Flame className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="text-2xl font-black text-amber-300">
+                {daysPresentCount > 0 ? `${daysPresentCount}d` : '0d'}{' '}
+                <span className="text-xs font-normal text-slate-400">active</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Consistent attendance</p>
+            </div>
+
+            <div className="glass-card p-3.5 rounded-2xl border border-slate-800 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-400 mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider">Deliveries</span>
+                <Truck className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div className="text-2xl font-black text-white">
+                {deliveredHistory.length} <span className="text-xs font-normal text-slate-400">done</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Total completed</p>
+            </div>
+
+            <div className="glass-card p-3.5 rounded-2xl border border-slate-800 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-slate-400 mb-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider">Star Rewards</span>
+                <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+              </div>
+              <div className="text-2xl font-black text-yellow-300">
+                {starsEarned} <span className="text-xs font-normal text-slate-400">stars</span>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">Incentive score</p>
+            </div>
+          </div>
+
+          {/* Historical Attendance Records Table / List */}
+          <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden">
+            <div className="px-4 py-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-emerald-400" />
+                <h4 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider">
+                  Attendance Punch Log ({currentMonthName})
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400 font-medium">
+                {attendanceRecords.length} records logged
+              </span>
+            </div>
+
+            {loadingAttendance ? (
+              <div className="p-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>Loading attendance history...</span>
+              </div>
+            ) : attendanceRecords.length === 0 && !isPunchedIn ? (
+              <div className="p-10 text-center space-y-2">
+                <Calendar className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-white font-bold text-sm">No attendance records found yet</p>
+                <p className="text-xs text-slate-400">
+                  Once you punch in at the store hub, your daily punch-in times will be logged here.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-800/80">
+                {/* Today's immediate row if punched in */}
+                {isPunchedIn && !todayAttendanceRecord && (
+                  <div className="p-3.5 bg-emerald-950/20 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
+                        ✓
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white">Today ({todayStr})</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            Present
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          Checked in at {storeHub.store_name} • Geofence Verified
+                        </p>
+                      </div>
+                    </div>
+                    <span className="font-mono text-emerald-400 font-bold text-xs">
+                      Active Today
+                    </span>
+                  </div>
+                )}
+
+                {attendanceRecords.map((record, idx) => {
+                  const dateObj = new Date(record.created_at);
+                  const dateStr = !isNaN(dateObj.getTime())
+                    ? dateObj.toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric'
+                      })
+                    : 'Logged Day';
+                  const timeStr = !isNaN(dateObj.getTime())
+                    ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : 'Recorded';
+
+                  return (
+                    <div
+                      key={record.id || idx}
+                      className="p-3.5 hover:bg-slate-850 transition flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-slate-800/80 border border-slate-700 text-emerald-400 flex items-center justify-center font-bold">
+                          <Check className="w-4 h-4 text-emerald-400" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-xs sm:text-sm">{dateStr}</span>
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                              Present
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                            <span>
+                              Check-In: <strong className="text-slate-200">{timeStr}</strong>
+                            </span>
+                            <span>•</span>
+                            <span>Hub Verified</span>
+                            {record.check_in_lat && record.check_in_lng && (
+                              <>
+                                <span>•</span>
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  {Number(record.check_in_lat).toFixed(3)},{' '}
+                                  {Number(record.check_in_lng).toFixed(3)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-xs font-mono font-semibold text-emerald-400">
+                          {timeStr}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Proof of Delivery Modal */}

@@ -33,7 +33,8 @@ import {
   Loader2,
   AlertCircle,
   X,
-  FileText
+  FileText,
+  Calendar
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -58,6 +59,7 @@ import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from '.
 import LiveFleetTracker from './LiveFleetTracker';
 import ProductCatalog from './ProductCatalog';
 import SlipViewerModal from './SlipViewerModal';
+import StaffAttendanceModal from './StaffAttendanceModal';
 
 export function AdminPanel({
   orders = [],
@@ -85,6 +87,7 @@ export function AdminPanel({
   const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'fleet' | 'addresses' | 'products' | 'analytics'
   const [viewProofOrder, setViewProofOrder] = useState(null);
   const [selectedAddressForDetail, setSelectedAddressForDetail] = useState(null);
+  const [showStaffAttendanceModal, setShowStaffAttendanceModal] = useState(false);
 
   // Aggregated addresses from orders for address book & badges
   const addresses = useMemo(() => aggregateAddressesFromOrders(orders), [orders]);
@@ -1022,17 +1025,29 @@ export function AdminPanel({
       {/* TAB 2: DELIVERY BOYS ROSTER */}
       {activeTab === 'drivers' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
               Registered Delivery Boys ({drivers.length})
             </h3>
-            <button
-              onClick={onOpenAddDriver}
-              className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>+ Add New Driver</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="admin-staff-attendance-btn"
+                onClick={() => setShowStaffAttendanceModal(true)}
+                className="text-xs px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+                title="View daily attendance punch records and history of all riders"
+              >
+                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Staff Attendance Log 📋</span>
+              </button>
+              <button
+                onClick={onOpenAddDriver}
+                className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Add New Driver</span>
+              </button>
+            </div>
           </div>
 
           {deliveryBoys.length === 0 ? (
@@ -2146,6 +2161,13 @@ export function AdminPanel({
         onClose={() => setSelectedSlipOrder(null)}
         imageUrl={selectedSlipOrder?.slip_image_url}
         orderNumber={selectedSlipOrder?.order_number}
+      />
+
+      {/* Staff Attendance Log Modal */}
+      <StaffAttendanceModal
+        isOpen={showStaffAttendanceModal}
+        onClose={() => setShowStaffAttendanceModal(false)}
+        drivers={deliveryBoys}
       />
     </div>
   );

@@ -1058,6 +1058,81 @@ export async function checkDriverAttendanceToday(driverId) {
   }
 }
 
+export async function fetchDriverAttendance(driverId) {
+  if (!driverId) return [];
+
+  let records = [];
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_attendance')
+        .select('*')
+        .eq('driver_id', driverId)
+        .order('created_at', { ascending: false })
+        .limit(60);
+      if (!error && data) {
+        records = data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchDriverAttendance failed, using local storage fallback:', err.message);
+    }
+  }
+
+  try {
+    const local = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
+    const driverLocal = local.filter((a) => a.driver_id === driverId);
+    
+    // Merge remote and local records by id / created_at timestamp
+    const combined = [...records];
+    driverLocal.forEach((item) => {
+      const exists = combined.some((r) => 
+        (r.id && r.id === item.id) || 
+        (r.created_at && item.created_at && r.created_at.slice(0, 16) === item.created_at.slice(0, 16))
+      );
+      if (!exists) {
+        combined.push(item);
+      }
+    });
+
+    return combined.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  } catch {
+    return records;
+  }
+}
+
+export async function fetchAllStaffAttendance() {
+  let records = [];
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('driver_attendance')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (!error && data) {
+        records = data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchAllStaffAttendance failed, using local fallback:', err.message);
+    }
+  }
+
+  try {
+    const local = JSON.parse(localStorage.getItem(STORAGE_ATTENDANCE) || '[]');
+    const combined = [...records];
+    local.forEach((item) => {
+      const exists = combined.some((r) => 
+        (r.id && r.id === item.id) || 
+        (r.created_at && item.created_at && r.created_at.slice(0, 16) === item.created_at.slice(0, 16))
+      );
+      if (!exists) combined.push(item);
+    });
+    return combined.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  } catch {
+    return records;
+  }
+}
+
 // ==========================================
 // STORE HUB SETTINGS & GEOFENCE
 // ==========================================
