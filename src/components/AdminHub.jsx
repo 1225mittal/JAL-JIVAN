@@ -24,6 +24,7 @@ import {
   Info
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { isDriverOnline } from '../lib/geoUtils';
 
 export default function AdminHub({
   onSelectModule,
@@ -64,14 +65,8 @@ export default function AdminHub({
     .filter((o) => o.status === 'Delivered')
     .reduce((sum, o) => sum + (parseFloat(o.amount) || 0), 0);
 
-  // Online drivers (considered ONLINE if is_online === true and active within last 2 minutes)
-  const onlineDriversList = drivers.filter((d) => {
-    const activeTime = d.last_active_at || d.last_seen_at;
-    const diffMinutes = activeTime
-      ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60)
-      : 999;
-    return Boolean(d.is_online) && diffMinutes <= 2;
-  });
+  // Online drivers (considered ONLINE if is_online === true and active within 5 minutes)
+  const onlineDriversList = drivers.filter((d) => isDriverOnline(d));
   const onlineDrivers = onlineDriversList.length;
 
   const totalDamagedUnits = damages.reduce((sum, d) => sum + (Number(d.quantity) || 1), 0);
@@ -200,11 +195,7 @@ export default function AdminHub({
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {drivers.map((d) => {
-              const activeTime = d.last_active_at || d.last_seen_at;
-              const diffMinutes = activeTime
-                ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60)
-                : 999;
-              const isOnline = Boolean(d.is_online) && diffMinutes <= 2;
+              const isOnline = isDriverOnline(d);
               return (
                 <span
                   key={d.id}

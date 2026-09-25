@@ -338,6 +338,23 @@ export default function DriverPortal({
     };
   }, [currentDriver]);
 
+  // Keep online heartbeat and orders fresh on tab focus / phone wake
+  useEffect(() => {
+    if (!currentDriver) return;
+    const handleActiveResume = () => {
+      if (document.visibilityState === 'visible' || !document.hidden) {
+        updateDriverHeartbeat(currentDriver.id, true);
+        fetchOrders();
+      }
+    };
+    document.addEventListener('visibilitychange', handleActiveResume);
+    window.addEventListener('focus', handleActiveResume);
+    return () => {
+      document.removeEventListener('visibilitychange', handleActiveResume);
+      window.removeEventListener('focus', handleActiveResume);
+    };
+  }, [currentDriver, fetchOrders]);
+
   // Geoguard State (GPS & Network Monitoring)
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [hasGps, setHasGps] = useState(true);
@@ -698,32 +715,38 @@ export default function DriverPortal({
   // Computed Orders
   // 1. Available Pool: orders where status is 'Pending' and unassigned
   const poolOrders = useMemo(() => {
-    return ordersList.filter(
-      (o) =>
-        o.status === 'Pending' &&
-        (!o.assigned_driver_id || o.assigned_driver_id === null) &&
-        (!o.driver_id || o.driver_id === null)
-    );
+    return ordersList.filter((o) => {
+      if (o.status !== 'Pending') return false;
+      const hasId = o.assigned_driver_id && String(o.assigned_driver_id).trim() !== '';
+      const hasName = o.driver_name && o.driver_name !== 'Unassigned' && o.driver_name.trim() !== '';
+      return !hasId && !hasName;
+    });
   }, [ordersList]);
 
   // 2. Active Deliveries: orders assigned to current driver that are not yet Delivered
   const activeDeliveries = useMemo(() => {
     if (!currentDriver) return [];
-    return ordersList.filter(
-      (o) =>
-        (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
-        o.status !== 'Delivered'
-    );
+    const curId = String(currentDriver.id || '').toLowerCase().trim();
+    const curName = (currentDriver.name || '').toLowerCase().trim();
+    return ordersList.filter((o) => {
+      if (o.status === 'Delivered') return false;
+      const assignedId = String(o.assigned_driver_id || o.driver_id || '').toLowerCase().trim();
+      const assignedName = (o.driver_name || '').toLowerCase().trim();
+      return (assignedId && assignedId === curId) || (assignedName && curName && assignedName === curName);
+    });
   }, [ordersList, currentDriver]);
 
   // 3. Delivered History for current driver
   const deliveredHistory = useMemo(() => {
     if (!currentDriver) return [];
-    return ordersList.filter(
-      (o) =>
-        (o.assigned_driver_id === currentDriver.id || o.driver_id === currentDriver.id) &&
-        o.status === 'Delivered'
-    );
+    const curId = String(currentDriver.id || '').toLowerCase().trim();
+    const curName = (currentDriver.name || '').toLowerCase().trim();
+    return ordersList.filter((o) => {
+      if (o.status !== 'Delivered') return false;
+      const assignedId = String(o.assigned_driver_id || o.driver_id || '').toLowerCase().trim();
+      const assignedName = (o.driver_name || '').toLowerCase().trim();
+      return (assignedId && assignedId === curId) || (assignedName && curName && assignedName === curName);
+    });
   }, [ordersList, currentDriver]);
 
   // 4. Completed deliveries TODAY for current driver (for Star Rewards)

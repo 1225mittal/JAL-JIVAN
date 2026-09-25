@@ -526,12 +526,7 @@ export function AdminPanel({
 
   // Online drivers count for badge (using exact rider status formula)
   const onlineDriversCount = useMemo(() => {
-    return deliveryBoys.filter((rider) => {
-      const diffMinutes = rider.last_seen_at 
-        ? (Date.now() - new Date(rider.last_seen_at).getTime()) / (1000 * 60) 
-        : 999;
-      return rider.is_online && diffMinutes < 5;
-    }).length;
+    return deliveryBoys.filter((rider) => isDriverOnline(rider)).length;
   }, [deliveryBoys]);
 
   // Computed Metrics
@@ -1058,11 +1053,11 @@ export function AdminPanel({
                   (o) => o.assigned_driver_id === rider.id && o.status === 'Delivered'
                 ).length;
 
-                const activeTime = rider.last_active_at || rider.last_seen_at;
+                const activeTime = rider.last_seen_at || rider.last_active_at;
                 const diffMinutes = activeTime 
                   ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60) 
                   : 999;
-                const isOnline = Boolean(rider.is_online) && diffMinutes <= 2;
+                const isOnline = isDriverOnline(rider);
 
                 const lat = rider.current_lat !== undefined && rider.current_lat !== null
                   ? Number(rider.current_lat)

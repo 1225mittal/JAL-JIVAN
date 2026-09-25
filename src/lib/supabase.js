@@ -301,46 +301,35 @@ export async function fetchDrivers() {
 }
 
 export async function addDriver({ name, phone, pin, vehicle_number, status = 'active' }) {
+  const cleanName = (name || '').trim();
+  const cleanPhone = (phone || '').trim().replace(/\D/g, '');
+  const cleanPin = pin ? pin.trim() : '1234';
+
   const newDriver = {
-    id: 'drv-' + Date.now(),
-    name: name.trim(),
-    phone: phone.trim(),
-    pin: pin ? pin.trim() : '1234',
-    vehicle_number: vehicle_number ? vehicle_number.trim() : null,
-    status: 'active',
+    name: cleanName,
+    phone: cleanPhone,
+    pin: cleanPin,
     active: true,
-    created_at: new Date().toISOString()
+    is_online: false,
+    created_at: new Date().toISOString(),
+    last_seen_at: new Date().toISOString()
   };
 
   if (isSupabaseConfigured) {
     try {
       const insertPayload = {
-        name: newDriver.name,
-        phone: newDriver.phone,
-        vehicle_number: newDriver.vehicle_number,
-        status: 'active'
+        name: cleanName,
+        phone: cleanPhone,
+        pin: cleanPin,
+        active: true,
+        is_online: false,
+        last_seen_at: new Date().toISOString()
       };
 
-      let { data, error } = await supabase
+      const { data, error } = await supabase
         .from('delivery_boys')
         .insert([insertPayload])
         .select();
-
-      if (error && error.code === 'PGRST204') {
-        const adapted = {
-          name: newDriver.name,
-          phone: newDriver.phone,
-          pin: newDriver.pin,
-          active: true
-        };
-        const retry = await supabase.from('delivery_boys').insert([adapted]).select();
-        if (!retry.error) {
-          data = retry.data;
-          error = null;
-        } else {
-          error = retry.error;
-        }
-      }
 
       if (error) {
         console.error('Supabase Add Delivery Boy Error:', error);
@@ -350,17 +339,16 @@ export async function addDriver({ name, phone, pin, vehicle_number, status = 'ac
 
       if (data && data[0]) {
         const created = data[0];
+        // Also sync into drivers table so both tables stay unified
         try {
-          await supabase.from('drivers').insert([{
+          await supabase.from('drivers').upsert([{
             id: created.id,
-            name: created.name,
-            phone: created.phone,
-            pin: newDriver.pin,
+            name: cleanName,
+            phone: cleanPhone,
+            pin: cleanPin,
             status: 'active'
           }]);
-        } catch (e) {
-          // ignore if already present
-        }
+        } catch (_) {}
         return created;
       }
     } catch (err) {
@@ -371,9 +359,10 @@ export async function addDriver({ name, phone, pin, vehicle_number, status = 'ac
   }
 
   const drivers = getLocalDrivers();
-  const updated = [newDriver, ...drivers];
+  const localDriver = { id: 'drv-' + Date.now(), ...newDriver };
+  const updated = [localDriver, ...drivers];
   saveLocalDrivers(updated);
-  return newDriver;
+  return localDriver;
 }
 
 export async function updateDeliveryBoy(id, updates = {}) {
@@ -469,10 +458,36 @@ export async function deleteDeliveryBoy(id) {
 }
 
 export async function driverLogin(phone, pin) {
-  const cleanPhone = phone.trim();
-  const cleanPin = pin.trim();
+  const cleanPhone = (phone || '').trim().replace(/\D/g, '');
+  const cleanPin = (pin || '').trim();
 
   if (isSupabaseConfigured) {
+    // 1. Try delivery_boys table (primary fleet table)
+    try {
+      const { data, error } = await supabase
+        .from('delivery_boys')
+        .select('*')
+        .eq('phone', cleanPhone)
+        .eq('pin', cleanPin)
+        .maybeSingle();
+
+      if (!error && data) {
+        // Mark online in Supabase immediately upon successful login
+        const nowIso = new Date().toISOString();
+        await supabase
+          .from('delivery_boys')
+          .update({ is_online: true, last_seen_at: nowIso })
+          .eq('id', data.id)
+          .then(() => {})
+          .catch(() => {});
+
+        return { ...data, is_online: true, last_seen_at: nowIso };
+      }
+    } catch (err) {
+      console.warn('Supabase driverLogin delivery_boys query notice:', err.message);
+    }
+
+    // 2. Fallback to drivers table
     try {
       const { data, error } = await supabase
         .from('drivers')
@@ -482,16 +497,16 @@ export async function driverLogin(phone, pin) {
         .maybeSingle();
 
       if (!error && data) {
-        return data;
+        return { ...data, is_online: true };
       }
     } catch (err) {
-      console.warn('Supabase driverLogin query failed, checking local store:', err.message);
+      console.warn('Supabase driverLogin drivers query notice:', err.message);
     }
   }
 
   const drivers = getLocalDrivers();
   const found = drivers.find(
-    (d) => d.phone.replace(/\D/g, '') === cleanPhone.replace(/\D/g, '') && d.pin === cleanPin
+    (d) => d.phone.replace(/\D/g, '') === cleanPhone && d.pin === cleanPin
   );
   return found || null;
 }
@@ -861,7 +876,6 @@ export async function acceptOrderDelivery(orderId, driverId, driverName, estimat
   const updates = {
     status: 'Out for Delivery',
     assigned_driver_id: driverId,
-    driver_id: driverId,
     driver_name: driverName,
     accepted_at: new Date().toISOString(),
     estimated_minutes: estimatedMinutes
@@ -869,12 +883,30 @@ export async function acceptOrderDelivery(orderId, driverId, driverName, estimat
 
   if (isSupabaseConfigured) {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('orders')
         .update(updates)
         .eq('id', orderId)
         .select()
         .single();
+
+      // Graceful fallback if accepted_at or estimated_minutes don't exist
+      if (error && (error.code === 'PGRST204' || error.message?.includes('schema cache'))) {
+        const coreUpdates = {
+          status: 'Out for Delivery',
+          assigned_driver_id: driverId,
+          driver_name: driverName
+        };
+        const retry = await supabase
+          .from('orders')
+          .update(coreUpdates)
+          .eq('id', orderId)
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (error) throw error;
       return data;
     } catch (err) {
@@ -884,7 +916,7 @@ export async function acceptOrderDelivery(orderId, driverId, driverName, estimat
 
   const orders = getLocalOrders();
   const updated = orders.map((o) =>
-    o.id === orderId ? { ...o, ...updates } : o
+    o.id === orderId ? { ...o, ...updates, driver_id: driverId } : o
   );
   saveLocalOrders(updated);
   return updated.find((o) => o.id === orderId);
@@ -1251,28 +1283,11 @@ export async function updateDriverLocation({ driverId, driverName, latitude, lon
           is_online: true,
           current_lat: latNum,
           current_lng: lngNum,
-          last_seen_at: now,
-          updated_at: now
+          last_seen_at: now
         })
         .eq('id', driverId);
     } catch (err) {
-      // ignore
-    }
-
-    // 3. Also update drivers table
-    try {
-      await supabase
-        .from('drivers')
-        .update({
-          is_online: true,
-          current_lat: latNum,
-          current_lng: lngNum,
-          last_seen_at: now,
-          updated_at: now
-        })
-        .eq('id', driverId);
-    } catch (err) {
-      // ignore
+      console.warn('Supabase update delivery_boys location notice:', err.message);
     }
   }
 
@@ -2232,24 +2247,29 @@ export async function updateDriverHeartbeat(driverId, isOnline = true) {
 
   if (isSupabaseConfigured) {
     try {
-      await Promise.allSettled([
-        supabase
-          .from('drivers')
-          .update({
-            is_online: isOnline,
-            last_active_at: nowIso,
-            last_seen_at: nowIso
-          })
-          .eq('id', driverId),
-        supabase
-          .from('delivery_boys')
-          .update({
-            is_online: isOnline,
-            last_active_at: nowIso,
-            last_seen_at: nowIso
-          })
-          .eq('id', driverId)
-      ]);
+      // 1. Primary update on delivery_boys (exact columns: is_online, last_seen_at)
+      const { error: dbErr } = await supabase
+        .from('delivery_boys')
+        .update({
+          is_online: Boolean(isOnline),
+          last_seen_at: nowIso
+        })
+        .eq('id', driverId);
+
+      if (dbErr) {
+        console.warn('Supabase delivery_boys heartbeat notice:', dbErr.message);
+      }
+
+      // 2. Also keep driver_locations synced
+      await supabase
+        .from('driver_locations')
+        .update({
+          is_online: Boolean(isOnline),
+          last_seen_at: nowIso
+        })
+        .eq('driver_id', driverId)
+        .then(() => {})
+        .catch(() => {});
     } catch (err) {
       console.warn('Driver heartbeat remote update notice:', err.message);
     }

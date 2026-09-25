@@ -70,26 +70,26 @@ export function formatDistance(meters) {
 }
 
 /**
- * Determines whether a rider is online based on is_online flag and last_active_at/last_seen_at timestamp.
- * Considers a driver ONLINE if is_online === true and last_active_at was within 2 minutes.
+ * Determines whether a rider is online based on is_online flag and last_seen_at timestamp.
+ * Considers a driver ONLINE if is_online === true and last_seen_at was within 5 minutes.
  */
-export function isDriverOnline(driverOrLastSeen, thresholdMs = 2 * 60 * 1000) {
+export function isDriverOnline(driverOrLastSeen, thresholdMs = 5 * 60 * 1000) {
   if (!driverOrLastSeen) return false;
   if (typeof driverOrLastSeen === 'object') {
     const d = driverOrLastSeen;
     if (d.is_online === false) return false;
-    const timeStr = d.last_active_at || d.last_seen_at || d.updated_at;
+    const timeStr = d.last_seen_at || d.last_active_at || d.updated_at;
     if (!timeStr) return Boolean(d.is_online);
     try {
       const diff = Date.now() - new Date(timeStr).getTime();
-      return diff >= -15000 && diff < thresholdMs;
+      return diff >= -60000 && diff < thresholdMs;
     } catch {
       return Boolean(d.is_online);
     }
   }
   try {
     const diff = Date.now() - new Date(driverOrLastSeen).getTime();
-    return diff >= -15000 && diff < thresholdMs;
+    return diff >= -60000 && diff < thresholdMs;
   } catch {
     return false;
   }
