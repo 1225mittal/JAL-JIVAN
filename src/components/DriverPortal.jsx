@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
+import LiveExpiryScanner from './LiveExpiryScanner';
 import {
   supabase,
   fetchOrders as fetchOrdersApi,
@@ -41,7 +42,8 @@ import {
   fetchStoreSettings,
   updateDriverLocation,
   defaultStoreSettings,
-  updateDriverHeartbeat
+  updateDriverHeartbeat,
+  createDamageExpiryItem
 } from '../lib/supabase';
 import {
   calculateDistanceMeters,
@@ -77,6 +79,7 @@ export default function DriverPortal({
   const [selectedSlipOrder, setSelectedSlipOrder] = useState(null);
   const [pinningOrderId, setPinningOrderId] = useState(null);
   const [gpsError, setGpsError] = useState(null);
+  const [isExpiryCamOpen, setIsExpiryCamOpen] = useState(false);
 
   // Attendance Geofence State
   const [storeHub, setStoreHub] = useState(() => {
@@ -252,6 +255,29 @@ export default function DriverPortal({
       alert(
         'To install Jal-Jivan on Android: Tap the 3 dots (⋮) in Chrome and select "Install app" or "Add to Home screen".'
       );
+    }
+  };
+
+  // Log expired/damaged item scanned by delivery boy directly into inventory
+  const handleLogDamagedFromCam = async (detectedData) => {
+    try {
+      await createDamageExpiryItem({
+        product_name: detectedData.product_name && detectedData.product_name !== 'unknown'
+          ? detectedData.product_name
+          : 'Expired Item (Field Return)',
+        company_name: 'FMCG Return',
+        damage_type: 'Expired',
+        expiry_date: detectedData.expiry_date || '',
+        mfg_date: detectedData.mfg_date || '',
+        quantity_pcs: 1,
+        rack_number: `Delivery Van (${currentDriver?.name || 'Field Rider'})`,
+        front_photo_url: detectedData.capturedImage || '',
+        notes: `Scanned & logged by delivery boy ${currentDriver?.name || 'Rider'}: ${detectedData.notes || detectedData.reason || 'Flagged expired by Live Expiry Cam'}`
+      });
+      alert(`✅ Expired product "${detectedData.product_name || 'Item'}" logged to Return Stock by ${currentDriver?.name || 'Rider'}!`);
+    } catch (err) {
+      console.warn('Field damage log error:', err);
+      alert(`Item scanned: Expired on ${detectedData.expiry_date || 'date'}.`);
     }
   };
 
@@ -938,6 +964,16 @@ export default function DriverPortal({
             </button>
           )}
 
+          {/* Live Expiry Scanner Cam for Delivery Boys */}
+          <button
+            onClick={() => setIsExpiryCamOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-emerald-500/20 hover:from-amber-500/30 hover:to-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all shadow active:scale-95"
+            title="Open Real-time Expiry Scanner Camera to check product packaging dates"
+          >
+            <Camera className="w-3.5 h-3.5 text-amber-400" />
+            <span>Expiry Cam 📸</span>
+          </button>
+
           {/* Fallback Install App Button */}
           <button
             onClick={handleInstallApp}
@@ -1437,12 +1473,22 @@ export default function DriverPortal({
                       </div>
 
                       {/* Proof of Delivery / Complete Action */}
-                      <div className="pt-2 border-t border-slate-800">
+                      <div className="pt-2 border-t border-slate-800 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsExpiryCamOpen(true)}
+                          className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                          title="Check product packaging expiry / return date"
+                        >
+                          <Camera className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="hidden xs:inline">Check Expiry</span>
+                        </button>
+
                         <button
                           onClick={() => setSelectedOrderForPod(order)}
-                          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
+                          className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
                         >
-                          <Camera className="w-4 h-4" />
+                          <CheckCircle2 className="w-4 h-4" />
                           <span>Take POD Photo & Deliver (₹{order.amount})</span>
                         </button>
                       </div>
@@ -1577,6 +1623,13 @@ export default function DriverPortal({
         onClose={() => setSelectedSlipOrder(null)}
         imageUrl={selectedSlipOrder?.slip_image_url}
         orderNumber={selectedSlipOrder?.order_number}
+      />
+
+      {/* Live Groq Vision Expiry Scanner Modal for Delivery Boys */}
+      <LiveExpiryScanner
+        isOpen={isExpiryCamOpen}
+        onClose={() => setIsExpiryCamOpen(false)}
+        onLogDamaged={handleLogDamagedFromCam}
       />
     </div>
   );
