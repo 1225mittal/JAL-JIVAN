@@ -621,12 +621,6 @@ export default function DriverPortal({
     }
   };
 
-  // Quick Login for testing convenience
-  const handleQuickLogin = (driver) => {
-    setPhone(driver.phone);
-    setPin(driver.pin);
-    onLogin(driver.phone, driver.pin);
-  };
 
   // Pin Current Location (GPS)
   const handlePinCurrentLocation = (orderId) => {
@@ -827,24 +821,12 @@ export default function DriverPortal({
             </button>
           </form>
 
-          {/* Quick Demo Login Helpers */}
-          {drivers.length > 0 && (
-            <div className="pt-3 border-t border-slate-800 space-y-2 text-center">
-              <span className="text-[11px] text-slate-400 font-medium">Quick Test Login (Demo):</span>
-              <div className="flex flex-wrap justify-center gap-1.5">
-                {drivers.slice(0, 3).map((d) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => handleQuickLogin(d)}
-                    className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-800 text-emerald-300 border border-slate-700 transition-colors"
-                  >
-                    {d.name} ({d.pin})
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* Security Notice */}
+          <div className="pt-4 border-t border-slate-800 text-center">
+            <p className="text-[11px] text-slate-500">
+              🔒 Authorized Delivery Personnel Only • Jal-Jivan Logistics
+            </p>
+          </div>
         </div>
       </div>
     );

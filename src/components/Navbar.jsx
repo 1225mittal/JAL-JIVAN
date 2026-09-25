@@ -140,7 +140,7 @@ export default function Navbar({
                   <UserCheck className="w-3 h-3 text-emerald-400" />
                   <span>{currentDriver.name}</span>
                 </p>
-                <p className="text-[10px] text-slate-400">PIN: {currentDriver.pin}</p>
+                <p className="text-[10px] text-slate-400">{currentDriver.vehicle_no || currentDriver.phone || 'Active'}</p>
               </div>
               <button
                 id="driver-navbar-logout-btn"
