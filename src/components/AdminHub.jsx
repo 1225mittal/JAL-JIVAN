@@ -281,7 +281,7 @@ export default function AdminHub({
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">
-              JAL-JIVAN Central Command
+              Mittal Brothers Central Command
             </h1>
             <p className="text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
               Unified enterprise control center. Manage fleet logistics, damage claims, and upcoming business pipelines from a single master hub.

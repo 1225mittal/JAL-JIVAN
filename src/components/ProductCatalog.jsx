@@ -433,7 +433,7 @@ export default function ProductCatalog({
                 <div>
                   <h3 className="font-semibold text-white text-base">Add New Product</h3>
                   <p className="text-[11px] text-slate-400">
-                    Add item to Jal-Jivan water dispatch catalog
+                    Add item to Mittal Brothers water dispatch catalog
                   </p>
                 </div>
               </div>

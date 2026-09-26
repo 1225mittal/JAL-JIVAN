@@ -126,7 +126,7 @@ export const BUSINESS_QUOTES = [
   },
   {
     quote: "When you build trust with your community, business stops being a transaction and becomes a mission.",
-    author: "JAL-JIVAN Philosophy",
+    author: "Mittal Brothers Philosophy",
     topic: "Trust & Community"
   },
   {

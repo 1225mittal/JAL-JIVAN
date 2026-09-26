@@ -830,7 +830,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
             <div className="p-6 overflow-y-auto space-y-4 text-xs">
               <div className="p-4 rounded-xl bg-white text-slate-900 space-y-3 font-mono">
                 <div className="text-center border-b pb-2">
-                  <h2 className="font-extrabold text-base">JAL-JIVAN STORE / GODOWN</h2>
+                  <h2 className="font-extrabold text-base">MITTAL BROTHERS STORE / GODOWN</h2>
                   <p className="text-[10px] text-slate-600">Goods Return & Breakage Dispatch Memo</p>
                   <p className="text-[10px] text-slate-600">Date: {new Date().toLocaleDateString()}</p>
                 </div>

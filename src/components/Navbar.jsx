@@ -42,7 +42,7 @@ export default function Navbar({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">JAL-JIVAN</span>
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">Mittal Brothers</span>
                 <span className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-cyan-500/20 text-cyan-300 border-cyan-500/30">
                   Staff Workspace
                 </span>
@@ -59,7 +59,7 @@ export default function Navbar({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">JAL-JIVAN</span>
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">Mittal Brothers</span>
                 <span
                   className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
                 >
