@@ -54,12 +54,13 @@ import {
   updateSavedAddress,
   deleteSavedAddress
 } from '../lib/supabase';
-import { isDriverOnline, formatLastSeen, parseUtcTimestamp } from '../lib/geoUtils';
+import { isDriverOnline, formatLastSeen, parseUtcTimestamp, calculateRiderMovementStatus } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 import LiveFleetTracker from './LiveFleetTracker';
 import ProductCatalog from './ProductCatalog';
 import SlipViewerModal from './SlipViewerModal';
 import StaffAttendanceModal from './StaffAttendanceModal';
+import RiderMiniMap from './RiderMiniMap';
 
 // Lightweight URL search params hook adhering to useSearchParams standard without react-router-dom dependency
 export function useSearchParams() {
@@ -1179,6 +1180,11 @@ export function AdminPanel({
                   ? (diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`)
                   : 'Offline (No GPS signal)';
 
+                const movement = calculateRiderMovementStatus(rider, orders, {
+                  lat: storeSettings?.latitude || 28.667,
+                  lng: storeSettings?.longitude || 77.385
+                });
+
                 return (
                   <div
                     key={rider.id}
@@ -1186,6 +1192,46 @@ export function AdminPanel({
                       isOnline ? 'border-emerald-500/40 bg-slate-900/90 shadow-lg shadow-emerald-500/5' : 'border-slate-800 bg-slate-950/60'
                     }`}
                   >
+                    {/* 1. Prominent Rider Movement Status Badge */}
+                    <div className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col gap-1 transition-all shadow-sm ${
+                      movement.type === 'EN_ROUTE'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-amber-500/10'
+                        : movement.type === 'RETURNING'
+                        ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300 shadow-cyan-500/10'
+                        : movement.type === 'AT_BASE'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-emerald-500/10'
+                        : 'bg-slate-900/90 border-slate-800 text-slate-400'
+                    }`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-xs sm:text-[13px] font-extrabold tracking-wide">
+                          {movement.status}
+                        </span>
+                        {movement.type === 'EN_ROUTE' && (
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30 shrink-0">
+                            In Transit
+                          </span>
+                        )}
+                        {movement.type === 'RETURNING' && (
+                          <span className="px-2 py-0.5 rounded-md bg-cyan-500/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/30 shrink-0">
+                            Returning
+                          </span>
+                        )}
+                        {movement.type === 'AT_BASE' && (
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30 shrink-0">
+                            Base Ready
+                          </span>
+                        )}
+                      </div>
+                      {movement.type === 'EN_ROUTE' && movement.targetAddress && (
+                        <div className="flex items-center gap-1 text-[11px] font-medium text-amber-200/90 pt-1 border-t border-amber-500/20 truncate">
+                          <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span className="truncate" title={movement.targetAddress}>
+                            Target: <strong>{movement.targetAddress}</strong>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2">
@@ -1206,7 +1252,7 @@ export function AdminPanel({
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                             </span>
-                            <span>🟢 Online / On Road</span>
+                            <span>🟢 Online</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
@@ -1266,6 +1312,16 @@ export function AdminPanel({
                         <p className="text-base font-bold text-emerald-400 mt-0.5">{completedCount}</p>
                       </div>
                     </div>
+
+                    {/* Mini-Map Under Each Rider Card */}
+                    <RiderMiniMap
+                      rider={rider}
+                      movementStatus={movement}
+                      baseCoords={{
+                        lat: storeSettings?.latitude || 28.667,
+                        lng: storeSettings?.longitude || 77.385
+                      }}
+                    />
 
                     {/* Rider Card Edit & Remove Buttons */}
                     <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">

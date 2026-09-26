@@ -154,3 +154,124 @@ export function formatLastSeen(dateStr) {
     return 'Offline (No GPS signal)';
   }
 }
+
+/**
+ * Calculates a rider's movement status based on active tasks, recent deliveries, and base hub proximity:
+ * - "🚀 En Route to Delivery" (Amber/Orange) if assigned order in 'out_for_delivery', 'in_transit', or 'dispatched'
+ * - "🏠 Returning to Base" (Cyan/Blue) if order marked 'delivered' in last 45m and rider not within 50m of hub
+ * - "🟢 Available at Base Hub" (Green) if rider is online and within 50m of base coordinates (28.667, 77.385)
+ * - "⚪ Offline / Idle" (Slate) otherwise
+ */
+export function calculateRiderMovementStatus(rider, orders = [], baseCoords = { lat: 28.667, lng: 77.385 }) {
+  if (!rider) {
+    return {
+      type: 'OFFLINE_IDLE',
+      status: '⚪ Offline / Idle',
+      badgeColor: 'slate',
+      targetAddress: null,
+      destinationCoords: null
+    };
+  }
+
+  const riderOrders = orders.filter(
+    (o) => o.assigned_driver_id === rider.id || o.driver_id === rider.id
+  );
+
+  const lat = rider.current_lat !== undefined && rider.current_lat !== null
+    ? Number(rider.current_lat)
+    : null;
+  const lng = rider.current_lng !== undefined && rider.current_lng !== null
+    ? Number(rider.current_lng)
+    : null;
+  const hasRiderCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
+
+  const baseLat = baseCoords?.lat || 28.667;
+  const baseLng = baseCoords?.lng || 77.385;
+
+  const distToBase = hasRiderCoords
+    ? calculateDistanceMeters(lat, lng, baseLat, baseLng)
+    : null;
+
+  // 1. Active delivery check ('out_for_delivery', 'in_transit', or 'dispatched')
+  const activeDelivery = riderOrders.find((o) => {
+    const s = (o.status || '').toLowerCase().replace(/\s+/g, '_');
+    return s === 'out_for_delivery' || s === 'in_transit' || s === 'dispatched';
+  });
+
+  if (activeDelivery) {
+    const targetAddress = activeDelivery.address || activeDelivery.landmark || 'Customer Address';
+    const destCoords = (activeDelivery.latitude !== null && activeDelivery.latitude !== undefined && activeDelivery.longitude !== null && activeDelivery.longitude !== undefined && !isNaN(activeDelivery.latitude) && !isNaN(activeDelivery.longitude))
+      ? { lat: Number(activeDelivery.latitude), lng: Number(activeDelivery.longitude) }
+      : null;
+
+    return {
+      type: 'EN_ROUTE',
+      status: '🚀 En Route to Delivery',
+      badgeColor: 'amber',
+      targetAddress,
+      activeOrder: activeDelivery,
+      destinationCoords: destCoords,
+      distToBase
+    };
+  }
+
+  // 2. Returning to base check: delivered within last 45 minutes and not at central hub (> 50m)
+  const isAtHub = distToBase !== null && distToBase <= 50;
+
+  const deliveredOrders = riderOrders.filter((o) => {
+    const s = (o.status || '').toLowerCase();
+    return s === 'delivered';
+  });
+
+  let recentDeliveredOrder = null;
+  let minDeliveredDiffMins = 9999;
+
+  deliveredOrders.forEach((o) => {
+    const deliveredTimeStr = o.delivered_at || o.delivered_time || o.completed_at || o.updated_at;
+    if (deliveredTimeStr) {
+      const utcTime = parseUtcTimestamp(deliveredTimeStr);
+      if (!isNaN(utcTime)) {
+        const diffMins = (Date.now() - utcTime) / (1000 * 60);
+        if (diffMins >= 0 && diffMins <= 45 && diffMins < minDeliveredDiffMins) {
+          minDeliveredDiffMins = diffMins;
+          recentDeliveredOrder = o;
+        }
+      }
+    }
+  });
+
+  if (recentDeliveredOrder && !isAtHub) {
+    return {
+      type: 'RETURNING',
+      status: '🏠 Returning to Base',
+      badgeColor: 'cyan',
+      targetAddress: null,
+      recentOrder: recentDeliveredOrder,
+      destinationCoords: { lat: baseLat, lng: baseLng },
+      distToBase
+    };
+  }
+
+  // 3. Available at Base Hub check: online and within 50m of base coordinates
+  const isOnline = isDriverOnline(rider);
+  if (isOnline && isAtHub) {
+    return {
+      type: 'AT_BASE',
+      status: '🟢 Available at Base Hub',
+      badgeColor: 'green',
+      targetAddress: null,
+      destinationCoords: { lat: baseLat, lng: baseLng },
+      distToBase
+    };
+  }
+
+  // 4. Otherwise: Offline / Idle
+  return {
+    type: 'OFFLINE_IDLE',
+    status: '⚪ Offline / Idle',
+    badgeColor: 'slate',
+    targetAddress: null,
+    destinationCoords: null,
+    distToBase
+  };
+}
