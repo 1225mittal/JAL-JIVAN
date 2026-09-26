@@ -2836,14 +2836,26 @@ export async function fetchPurchaseInvoices() {
     try {
       const { data, error } = await supabase
         .from('purchase_invoices')
-        .select(`
-          *,
-          items:purchase_items(*)
-        `)
+        .select('*, purchase_items(*)')
         .order('created_at', { ascending: false });
 
-      if (!error && Array.isArray(data)) {
-        return data;
+      if (error) {
+        console.error('Supabase fetchPurchaseInvoices error:', error);
+        throw error;
+      }
+
+      if (Array.isArray(data)) {
+        // Normalize purchase_items and items so both access patterns work smoothly
+        const normalized = data.map((inv) => {
+          const itemsList = inv.purchase_items || inv.items || [];
+          return {
+            ...inv,
+            purchase_items: itemsList,
+            items: itemsList
+          };
+        });
+        saveLocalPurchaseInvoices(normalized);
+        return normalized;
       }
     } catch (err) {
       console.warn('Supabase fetchPurchaseInvoices notice:', err.message);
@@ -2854,82 +2866,104 @@ export async function fetchPurchaseInvoices() {
 }
 
 export async function savePurchaseInvoice(invoiceData, itemsData = []) {
-  const invoiceId = invoiceData.id || `inv_${Date.now()}`;
   const nowIso = new Date().toISOString();
 
-  const record = {
-    ...invoiceData,
-    id: invoiceId,
-    created_at: invoiceData.created_at || nowIso,
-    status: invoiceData.status || 'verified'
+  // 1. Build clean invoice payload for purchase_invoices
+  const invoicePayload = {
+    invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
+    invoice_date: invoiceData.invoice_date || nowIso.split('T')[0],
+    seller_name: invoiceData.seller_name || '',
+    seller_gst: invoiceData.seller_gst || '',
+    seller_fssai: invoiceData.seller_fssai || '',
+    seller_contact: invoiceData.seller_contact || '',
+    seller_address: invoiceData.seller_address || '',
+    salesman_name: invoiceData.salesman_name || '',
+    salesman_number: invoiceData.salesman_number || '',
+    bank_name: invoiceData.bank_name || '',
+    account_no: invoiceData.account_no || '',
+    ifsc: invoiceData.ifsc || '',
+    taxable_amount: Number(invoiceData.taxable_amount) || 0,
+    total_tax: Number(invoiceData.total_tax) || 0,
+    grand_total: Number(invoiceData.grand_total) || 0,
+    bill_image_url: invoiceData.bill_image_url || '',
+    status: invoiceData.status || 'verified',
+    raw_ocr_data: invoiceData.raw_ocr_data || {}
   };
 
-  const formattedItems = (itemsData || []).map((item, idx) => ({
-    id: item.id || `item_${Date.now()}_${idx}`,
-    invoice_id: invoiceId,
-    created_at: nowIso,
-    barcode: item.barcode || '',
-    item_name: item.item_name || 'Item',
-    hsn_code: item.hsn_code || '',
-    quantity: Number(item.quantity) || 1,
-    mrp: Number(item.mrp) || 0,
-    purchase_price: Number(item.purchase_price) || 0,
-    price_before_gst: Number(item.price_before_gst) || 0,
-    gst_rate: Number(item.gst_rate) || 0,
-    cess: Number(item.cess) || 0,
-    discount: Number(item.discount) || 0,
-    price_after_gst: Number(item.price_after_gst) || 0
-  }));
+  // Only pass id if it is an existing valid UUID (e.g. for update). Otherwise omit to let DB generate UUID / primary key
+  const isUuid =
+    typeof invoiceData.id === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoiceData.id);
+  if (isUuid) {
+    invoicePayload.id = invoiceData.id;
+  }
 
-  // 1. Try Supabase Insert
+  let savedInvoiceId = invoiceData.id || `inv_${Date.now()}`;
+  let savedRecord = null;
+  let savedItems = [];
+
+  // Write to Supabase if configured
   if (isSupabaseConfigured) {
-    try {
-      const { data: invRow, error: invErr } = await supabase
-        .from('purchase_invoices')
-        .upsert({
-          id: record.id,
-          invoice_number: record.invoice_number,
-          invoice_date: record.invoice_date,
-          seller_name: record.seller_name,
-          seller_gst: record.seller_gst,
-          seller_fssai: record.seller_fssai,
-          seller_contact: record.seller_contact,
-          seller_address: record.seller_address,
-          salesman_name: record.salesman_name,
-          salesman_number: record.salesman_number,
-          bank_name: record.bank_name,
-          account_no: record.account_no,
-          ifsc: record.ifsc,
-          taxable_amount: record.taxable_amount,
-          total_tax: record.total_tax,
-          grand_total: record.grand_total,
-          bill_image_url: record.bill_image_url || '',
-          status: record.status,
-          raw_ocr_data: record.raw_ocr_data || {}
-        })
-        .select()
-        .single();
+    // Step 2.1: Write to purchase_invoices first, obtain generated invoice id
+    const { data: invRow, error: invErr } = await supabase
+      .from('purchase_invoices')
+      .insert(invoicePayload)
+      .select()
+      .single();
 
-      if (!invErr && invRow) {
-        if (formattedItems.length > 0) {
-          await supabase
-            .from('purchase_items')
-            .upsert(formattedItems);
-        }
+    if (invErr) {
+      console.error('Supabase purchase_invoices insert error:', invErr);
+      throw new Error(`Database error on purchase_invoices: ${invErr.message || invErr.details || 'Insert failed'}`);
+    }
+
+    if (!invRow || !invRow.id) {
+      throw new Error('Database inserted purchase invoice but returned no ID');
+    }
+
+    savedInvoiceId = invRow.id;
+    savedRecord = invRow;
+
+    // Step 2.2: Insert line items into purchase_items with purchase_invoice_id: id
+    if (Array.isArray(itemsData) && itemsData.length > 0) {
+      const formattedItems = itemsData.map((item) => ({
+        purchase_invoice_id: savedInvoiceId,
+        barcode: item.barcode || '',
+        item_name: item.item_name || 'Item',
+        hsn_code: item.hsn_code || '',
+        quantity: Number(item.quantity) || 1,
+        mrp: Number(item.mrp) || 0,
+        purchase_price: Number(item.purchase_price) || 0,
+        price_before_gst: Number(item.price_before_gst) || 0,
+        gst_rate: Number(item.gst_rate) || 0,
+        cess: Number(item.cess) || 0,
+        discount: Number(item.discount) || 0,
+        price_after_gst: Number(item.price_after_gst) || 0
+      }));
+
+      const { data: itemsRows, error: itemsErr } = await supabase
+        .from('purchase_items')
+        .insert(formattedItems)
+        .select();
+
+      if (itemsErr) {
+        console.error('Supabase purchase_items insert error:', itemsErr);
+        throw new Error(`Database error on purchase_items: ${itemsErr.message || itemsErr.details || 'Items insert failed'}`);
       }
-    } catch (err) {
-      console.warn('Supabase savePurchaseInvoice notice:', err.message);
+
+      savedItems = itemsRows || formattedItems;
     }
   }
 
-  // 2. Local Storage Sync
-  const existing = getLocalPurchaseInvoices();
+  // 3. Local Storage Sync (Fallback or Cache)
   const fullInvoice = {
-    ...record,
-    items: formattedItems
+    ...(savedRecord || invoicePayload),
+    id: savedInvoiceId,
+    purchase_items: savedItems.length > 0 ? savedItems : itemsData,
+    items: savedItems.length > 0 ? savedItems : itemsData
   };
 
-  const filtered = existing.filter((inv) => inv.id !== invoiceId);
+  const existing = getLocalPurchaseInvoices();
+  const filtered = existing.filter((inv) => inv.id !== savedInvoiceId);
   saveLocalPurchaseInvoices([fullInvoice, ...filtered]);
 
   return fullInvoice;
@@ -2938,17 +2972,29 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
 export async function deletePurchaseInvoice(invoiceId) {
   if (isSupabaseConfigured) {
     try {
-      await supabase
+      // Delete child line items referencing purchase_invoice_id first
+      const { error: itemsDelErr } = await supabase
         .from('purchase_items')
         .delete()
-        .eq('invoice_id', invoiceId);
+        .eq('purchase_invoice_id', invoiceId);
 
-      await supabase
+      if (itemsDelErr) {
+        console.warn('Supabase purchase_items delete notice:', itemsDelErr.message);
+      }
+
+      // Delete parent purchase invoice
+      const { error: invDelErr } = await supabase
         .from('purchase_invoices')
         .delete()
         .eq('id', invoiceId);
+
+      if (invDelErr) {
+        console.error('Supabase purchase_invoices delete error:', invDelErr);
+        throw new Error(invDelErr.message || 'Failed to delete purchase invoice from database');
+      }
     } catch (err) {
-      console.warn('Supabase deletePurchaseInvoice notice:', err.message);
+      console.error('deletePurchaseInvoice error:', err);
+      throw err;
     }
   }
 

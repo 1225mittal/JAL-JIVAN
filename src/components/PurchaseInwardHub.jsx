@@ -27,7 +27,10 @@ import {
   Clock,
   Package,
   Layers,
-  Check
+  Check,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
@@ -44,7 +47,9 @@ export default function PurchaseInwardHub({
   const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history'
   const [invoicesHistory, setInvoicesHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState(null);
 
   // Bill Upload & Processing State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -89,11 +94,13 @@ export default function PurchaseInwardHub({
   // Load purchase history
   const loadHistory = async () => {
     setHistoryLoading(true);
+    setHistoryError('');
     try {
       const data = await fetchPurchaseInvoices();
       setInvoicesHistory(data || []);
     } catch (err) {
-      console.warn('Failed to load purchase history:', err);
+      console.error('Failed to load purchase history:', err);
+      setHistoryError(err.message || 'Failed to fetch purchase invoices from database');
     } finally {
       setHistoryLoading(false);
     }
@@ -325,10 +332,12 @@ export default function PurchaseInwardHub({
   const handleSavePurchaseEntry = async () => {
     if (!sellerData.name.trim()) {
       showToast('Please enter the Seller / Vendor Name', 'error');
+      alert('⚠️ Validation Notice:\nPlease enter the Seller / Vendor Name before saving.');
       return;
     }
     if (items.length === 0) {
       showToast('At least one line item is required', 'error');
+      alert('⚠️ Validation Notice:\nAt least one line item is required in the bill.');
       return;
     }
 
@@ -337,32 +346,36 @@ export default function PurchaseInwardHub({
       const invoicePayload = {
         invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
         invoice_date: invoiceData.invoice_date || new Date().toISOString().split('T')[0],
-        seller_name: sellerData.name,
-        seller_gst: sellerData.gst,
-        seller_fssai: sellerData.fssai,
-        seller_contact: sellerData.contact,
-        seller_address: sellerData.address,
-        salesman_name: sellerData.salesman_name,
-        salesman_number: sellerData.salesman_number,
-        bank_name: bankDetails.bank_name,
-        account_no: bankDetails.account_no,
-        ifsc: bankDetails.ifsc,
+        seller_name: sellerData.name.trim(),
+        seller_gst: sellerData.gst.trim(),
+        seller_fssai: sellerData.fssai.trim(),
+        seller_contact: sellerData.contact.trim(),
+        seller_address: sellerData.address.trim(),
+        salesman_name: sellerData.salesman_name.trim(),
+        salesman_number: sellerData.salesman_number.trim(),
+        bank_name: bankDetails.bank_name.trim(),
+        account_no: bankDetails.account_no.trim(),
+        ifsc: bankDetails.ifsc.trim(),
         taxable_amount: Number(totalTaxable.toFixed(2)),
         total_tax: Number(totalTax.toFixed(2)),
         grand_total: Number(grandTotal.toFixed(2)),
-        bill_image_url: billPreviewUrl || ''
+        bill_image_url: billPreviewUrl || '',
+        status: 'verified'
       };
 
+      // Write to purchase_invoices first, obtain generated invoice id, and insert line items into purchase_items with purchase_invoice_id: id
       const saved = await savePurchaseInvoice(invoicePayload, items);
       showToast('🎉 Purchase invoice & inward stock committed successfully!', 'success');
 
-      // Refresh history & switch tab
+      // Immediately trigger a re-fetch after saving so the new bill appears without a page reload
       await loadHistory();
       setActiveTab('history');
       resetUploadState();
     } catch (err) {
       console.error('Save purchase error:', err);
-      showToast(err.message || 'Failed to save purchase invoice', 'error');
+      const errorMessage = err?.message || 'Database or RLS permission error occurred';
+      showToast(`Save Failed: ${errorMessage}`, 'error');
+      alert(`⚠️ Database / RLS Failure:\n\n${errorMessage}\n\nPlease check Supabase RLS policies and table permissions for 'purchase_invoices' and 'purchase_items'.`);
     } finally {
       setIsSaving(false);
     }
@@ -391,13 +404,16 @@ export default function PurchaseInwardHub({
   };
 
   const handleDeleteInvoice = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this purchase entry?')) return;
+    if (!window.confirm('Are you sure you want to delete this purchase entry? This will also remove associated line items.')) return;
     try {
       await deletePurchaseInvoice(id);
-      showToast('Purchase invoice deleted', 'info');
+      showToast('Purchase invoice deleted successfully', 'info');
       await loadHistory();
     } catch (err) {
-      showToast('Failed to delete invoice', 'error');
+      console.error('Delete invoice error:', err);
+      const errMsg = err?.message || 'Failed to delete invoice from database';
+      showToast(`Delete Failed: ${errMsg}`, 'error');
+      alert(`⚠️ Delete Failed:\n\n${errMsg}`);
     }
   };
 
@@ -459,7 +475,10 @@ export default function PurchaseInwardHub({
 
           <button
             type="button"
-            onClick={() => setActiveTab('history')}
+            onClick={() => {
+              setActiveTab('history');
+              loadHistory();
+            }}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'history'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
@@ -1044,22 +1063,53 @@ export default function PurchaseInwardHub({
               </p>
             </div>
 
-            {/* Search Filter */}
-            <div className="relative w-full sm:w-64">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search vendor, bill, GST..."
-                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
-              />
+            {/* Search Filter & Refresh */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search vendor, bill, GST..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={loadHistory}
+                disabled={historyLoading}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition shrink-0 shadow-sm"
+                title="Refresh Purchase Invoices Ledger"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${historyLoading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
             </div>
           </div>
 
+          {/* History Error Alert */}
+          {historyError && (
+            <div className="p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{historyError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={loadHistory}
+                className="px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 font-bold transition text-[11px]"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {historyLoading ? (
-            <div className="py-12 text-center text-slate-400 text-xs">
-              Loading purchase invoices ledger...
+            <div className="py-12 text-center text-slate-400 text-xs space-y-2">
+              <RefreshCw className="w-6 h-6 animate-spin text-amber-400 mx-auto" />
+              <p>Loading purchase invoices ledger from database...</p>
             </div>
           ) : filteredHistory.length === 0 ? (
             <div className="py-12 text-center text-slate-500 text-xs space-y-2">
@@ -1075,51 +1125,170 @@ export default function PurchaseInwardHub({
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredHistory.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="p-4 sm:p-5 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-extrabold text-white text-sm">
-                        {inv.seller_name || 'Vendor'}
-                      </h4>
-                      <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                        {inv.invoice_number || 'No Bill#'}
-                      </span>
-                      <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        <span>{inv.invoice_date || 'Today'}</span>
-                      </span>
-                    </div>
+              {filteredHistory.map((inv) => {
+                const lineItems = inv.purchase_items || inv.items || [];
+                const isExpanded = expandedInvoiceId === inv.id;
 
-                    <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                      {inv.seller_gst && <span>GST: <strong className="text-slate-300">{inv.seller_gst}</strong></span>}
-                      {inv.seller_contact && <span>Ph: <strong className="text-slate-300">{inv.seller_contact}</strong></span>}
-                      <span>Items: <strong className="text-slate-200">{inv.items?.length || 0} lines</strong></span>
-                    </div>
-                  </div>
+                return (
+                  <div
+                    key={inv.id}
+                    className="rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition overflow-hidden"
+                  >
+                    <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-extrabold text-white text-sm">
+                            {inv.seller_name || 'Vendor'}
+                          </h4>
+                          <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                            {inv.invoice_number || 'No Bill#'}
+                          </span>
+                          <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                            <Calendar className="w-3 h-3" />
+                            <span>{inv.invoice_date || 'Today'}</span>
+                          </span>
+                        </div>
 
-                  <div className="flex items-center gap-4 self-end md:self-center">
-                    <div className="text-right">
-                      <div className="text-[10px] uppercase tracking-wider text-slate-400">Grand Total</div>
-                      <div className="font-mono font-black text-emerald-400 text-base">
-                        ₹{Number(inv.grand_total || 0).toFixed(2)}
+                        <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
+                          {inv.seller_gst && (
+                            <span>
+                              GST: <strong className="text-slate-300">{inv.seller_gst}</strong>
+                            </span>
+                          )}
+                          {inv.seller_contact && (
+                            <span>
+                              Ph: <strong className="text-slate-300">{inv.seller_contact}</strong>
+                            </span>
+                          )}
+                          <span>
+                            Items:{' '}
+                            <strong className="text-emerald-400 font-semibold">
+                              {lineItems.length} lines
+                            </strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 sm:gap-4 self-end md:self-center flex-wrap">
+                        <div className="text-right">
+                          <div className="text-[10px] uppercase tracking-wider text-slate-400">Grand Total</div>
+                          <div className="font-mono font-black text-emerald-400 text-base">
+                            ₹{Number(inv.grand_total || 0).toFixed(2)}
+                          </div>
+                        </div>
+
+                        {/* Toggle Inspect Items */}
+                        <button
+                          type="button"
+                          onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
+                          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
+                            isExpanded
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                          }`}
+                          title="Inspect Line Items"
+                        >
+                          <span>Items ({lineItems.length})</span>
+                          {isExpanded ? (
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteInvoice(inv.id)}
+                          className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                          title="Delete Entry"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteInvoice(inv.id)}
-                      className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
-                      title="Delete Entry"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {/* Expandable Line Items & Bill Preview Drawer */}
+                    {isExpanded && (
+                      <div className="border-t border-slate-800/80 bg-slate-900/60 p-4 sm:p-5 space-y-4 animate-in fade-in duration-200">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <h5 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                            <Layers className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Committed Inward Line Items ({lineItems.length})</span>
+                          </h5>
+
+                          {inv.bill_image_url && (
+                            <a
+                              href={inv.bill_image_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 font-semibold underline"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>View Uploaded Bill</span>
+                            </a>
+                          )}
+                        </div>
+
+                        {lineItems.length === 0 ? (
+                          <p className="text-xs text-slate-500 italic">No line items stored for this entry.</p>
+                        ) : (
+                          <div className="overflow-x-auto rounded-xl border border-slate-800">
+                            <table className="w-full text-left text-xs">
+                              <thead className="bg-slate-950 text-slate-400 font-bold uppercase text-[10px]">
+                                <tr>
+                                  <th className="py-2.5 px-3">#</th>
+                                  <th className="py-2.5 px-3">Item Name</th>
+                                  <th className="py-2.5 px-3">Barcode</th>
+                                  <th className="py-2.5 px-3">HSN</th>
+                                  <th className="py-2.5 px-3 text-right">Qty</th>
+                                  <th className="py-2.5 px-3 text-right">Purchase Rate</th>
+                                  <th className="py-2.5 px-3 text-right">MRP</th>
+                                  <th className="py-2.5 px-3 text-right">GST %</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                                {lineItems.map((item, idx) => (
+                                  <tr key={item.id || idx} className="hover:bg-slate-800/40">
+                                    <td className="py-2 px-3 text-slate-500">{idx + 1}</td>
+                                    <td className="py-2 px-3 font-semibold text-white">
+                                      {item.item_name || 'Item'}
+                                    </td>
+                                    <td className="py-2 px-3 font-mono text-[11px] text-amber-300">
+                                      {item.barcode ? (
+                                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                                          {item.barcode}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-600">—</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2 px-3 font-mono text-slate-400">
+                                      {item.hsn_code || '—'}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-bold text-emerald-400">
+                                      {item.quantity}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-200">
+                                      ₹{Number(item.purchase_price || 0).toFixed(2)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-400">
+                                      ₹{Number(item.mrp || 0).toFixed(2)}
+                                    </td>
+                                    <td className="py-2 px-3 text-right font-mono text-slate-300">
+                                      {item.gst_rate ? `${item.gst_rate}%` : '0%'}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
