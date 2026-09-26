@@ -114,7 +114,7 @@ export function isDriverOnline(driverOrLastSeen, thresholdMs = 10 * 60 * 1000) {
       return false;
     }
 
-    const timeStr = rider.last_seen || rider.last_seen_at || rider.last_active_at || rider.updated_at;
+    const timeStr = rider?.last_seen || rider?.lastSeenAt || rider?.last_seen_at || rider?.last_active_at || rider?.updated_at || null;
     if (!timeStr) {
       return rider.status === 'online' || Boolean(rider.is_online);
     }
@@ -137,23 +137,22 @@ export function isDriverOnline(driverOrLastSeen, thresholdMs = 10 * 60 * 1000) {
 }
 
 /**
- * Formats a relative time string (e.g. "Just now", "25 seconds ago", "2m ago") with UTC safety.
+ * Formats a relative time string (e.g. "Just now", "2m ago", "1h ago") with UTC safety.
  */
-export function formatLastSeen(dateStr) {
-  if (!dateStr) return 'Offline (No GPS signal)';
+export const formatLastSeen = (timestampOrRider) => {
+  const timestamp = typeof timestampOrRider === 'object' && timestampOrRider !== null
+    ? (timestampOrRider?.last_seen || timestampOrRider?.lastSeenAt || timestampOrRider?.last_seen_at || null)
+    : timestampOrRider;
+
+  if (!timestamp) return 'Offline';
   try {
-    const time = parseUtcTimestamp(dateStr);
-    if (isNaN(time)) return 'Offline (No GPS signal)';
-    const diff = Math.floor((Date.now() - time) / 1000);
-    if (diff < 10) return 'Just now';
-    if (diff < 60) return `${diff} seconds ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return new Date(time).toLocaleDateString();
-  } catch {
-    return 'Offline (No GPS signal)';
+    const diff = Math.floor((Date.now() - new Date(timestamp).getTime()) / 60000);
+    if (isNaN(diff) || diff < 0) return 'Just now';
+    return diff < 60 ? `${diff}m ago` : `${Math.floor(diff / 60)}h ago`;
+  } catch (e) {
+    return 'Offline';
   }
-}
+};
 
 /**
  * Calculates a rider's movement status based on active tasks, recent deliveries, and base hub proximity:

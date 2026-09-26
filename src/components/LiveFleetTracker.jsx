@@ -93,7 +93,8 @@ export default function LiveFleetTracker({
         : (loc?.longitude !== undefined && loc?.longitude !== null ? Number(loc.longitude) : null);
 
       const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-      const rawLastSeen = driver.last_seen || driver.last_seen_at || loc?.last_seen || loc?.last_seen_at || loc?.updated_at || driver.updated_at || null;
+      const rawLastSeen = (driver?.last_seen || driver?.last_seen_at || driver?.lastSeenAt || loc?.last_seen || loc?.last_seen_at || loc?.updated_at || driver?.updated_at || null);
+      const lastSeenAt = rawLastSeen;
 
       // Exact rider status formula with UTC timestamp parsing to avoid timezone offset discrepancies:
       const utcTime = parseUtcTimestamp(rawLastSeen);
@@ -168,7 +169,9 @@ export default function LiveFleetTracker({
         lat,
         lng,
         hasCoords,
-        lastSeenAt,
+        last_seen: rawLastSeen,
+        last_seen_at: rawLastSeen,
+        lastSeenAt: rawLastSeen,
         diffMinutes,
         lastSeenText,
         isOnline,

@@ -1163,7 +1163,7 @@ export function AdminPanel({
                   (o) => o.assigned_driver_id === rider.id && o.status === 'Delivered'
                 ).length;
 
-                const activeTime = rider.last_seen || rider.last_seen_at || rider.last_active_at || rider.updated_at;
+                const activeTime = (rider?.last_seen || rider?.lastSeenAt || rider?.last_seen_at || rider?.last_active_at || rider?.updated_at || null);
                 const utcTime = parseUtcTimestamp(activeTime);
                 const diffMinutes = !isNaN(utcTime) 
                   ? (Date.now() - utcTime) / (1000 * 60) 
