@@ -32,7 +32,8 @@ import {
   ShieldCheck,
   Flame,
   Package,
-  Banknote
+  Banknote,
+  Radio
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
@@ -157,9 +158,11 @@ export default function DriverPortal({
       const isOut = localStorage.getItem(`jal_jivan_punched_out_${currentDriver.id}_${todayStr}`);
       if (isOut === 'true') return false;
       const saved = localStorage.getItem(`jal_jivan_punched_in_${currentDriver.id}_${todayStr}`);
-      return saved === 'true';
+      if (saved === 'true') return true;
+      // Default to active on duty upon login unless rider explicitly punched out
+      return true;
     } catch {
-      return false;
+      return true;
     }
   });
   const [hubDistance, setHubDistance] = useState(null);
@@ -602,22 +605,40 @@ export default function DriverPortal({
 
     const pushLocation = async (lat, lng) => {
       if (lat === null || lat === undefined || lng === null || lng === undefined) return;
+      if (!currentDriver?.id) return;
+      const nowIso = new Date().toISOString();
       console.log('Location heartbeat sent:', lat, lng, 'isPunchedIn:', isPunchedIn);
 
-      // Directly update delivery_boys table if punched in
+      // Directly update delivery_boys table if punched in / on duty
       if (isPunchedIn) {
         try {
-          await supabase
+          const { error } = await supabase
             .from('delivery_boys')
             .update({
-              is_online: true,
-              current_lat: lat,
-              current_lng: lng,
-              last_seen_at: new Date().toISOString()
+              current_lat: Number(lat),
+              current_lng: Number(lng),
+              last_seen: nowIso,
+              last_seen_at: nowIso,
+              status: 'online',
+              is_online: true
             })
             .eq('id', currentDriver.id);
+
+          if (error) {
+            // Graceful fallback for schema variations
+            await supabase
+              .from('delivery_boys')
+              .update({
+                current_lat: Number(lat),
+                current_lng: Number(lng),
+                last_seen: nowIso,
+                status: 'online'
+              })
+              .eq('id', currentDriver.id)
+              .catch(() => {});
+          }
         } catch (err) {
-          console.warn('Direct delivery_boys update error:', err);
+          console.warn('Direct delivery_boys heartbeat error:', err);
         }
       }
 
@@ -631,7 +652,7 @@ export default function DriverPortal({
     };
 
     // If we already have live coords, push immediately
-    if (driverCoords?.lat && driverCoords?.lng) {
+    if (driverCoords?.lat && driverCoords?.lng && isPunchedIn) {
       pushLocation(driverCoords.lat, driverCoords.lng);
     }
 
@@ -648,13 +669,13 @@ export default function DriverPortal({
       );
     }
 
-    // 15-second recurring interval
+    // 20-second recurring heartbeat interval (15-30 seconds specification)
     timerId = setInterval(() => {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           async (pos) => {
             const { latitude, longitude } = pos.coords;
-            console.log('Location heartbeat sent:', latitude, longitude);
+            console.log('Location interval heartbeat sent:', latitude, longitude);
             setDriverCoords({ lat: latitude, lng: longitude });
             await pushLocation(latitude, longitude);
           },
@@ -668,7 +689,7 @@ export default function DriverPortal({
       } else if (driverCoords?.lat && driverCoords?.lng) {
         pushLocation(driverCoords.lat, driverCoords.lng);
       }
-    }, 15000);
+    }, 20000);
 
     return () => {
       if (watchId && navigator.geolocation?.clearWatch) {
@@ -698,13 +719,16 @@ export default function DriverPortal({
 
       // Update delivery_boys directly right after punch in
       try {
+        const nowIso = new Date().toISOString();
         await supabase
           .from('delivery_boys')
           .update({
-            is_online: true,
             current_lat: lat,
             current_lng: lng,
-            last_seen_at: new Date().toISOString()
+            last_seen: nowIso,
+            last_seen_at: nowIso,
+            status: 'online',
+            is_online: true
           })
           .eq('id', currentDriver.id);
       } catch (err) {
@@ -749,6 +773,7 @@ export default function DriverPortal({
     try {
       const lat = driverCoords?.lat || null;
       const lng = driverCoords?.lng || null;
+      const nowIso = new Date().toISOString();
 
       await recordDriverPunchOut({
         driverId: currentDriver.id,
@@ -756,7 +781,22 @@ export default function DriverPortal({
         checkOutLng: lng
       });
 
-      await updateDriverHeartbeat(currentDriver.id, false);
+      await updateDriverHeartbeat(currentDriver.id, false, lat && lng ? { latitude: lat, longitude: lng } : null);
+
+      try {
+        await supabase
+          .from('delivery_boys')
+          .update({
+            status: 'offline',
+            is_online: false,
+            last_seen: nowIso,
+            last_seen_at: nowIso
+          })
+          .eq('id', currentDriver.id);
+      } catch (err) {
+        console.warn('Direct delivery_boys punchOut update error:', err);
+      }
+
       if (lat && lng) {
         await updateDriverLocation({
           driverId: currentDriver.id,
@@ -1175,6 +1215,33 @@ export default function DriverPortal({
           </div>
         </div>
       </div>
+
+      {/* Explicit "You are Online - Keep this tab open" banner */}
+      {isPunchedIn && (
+        <div
+          id="rider-online-heartbeat-banner"
+          className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs shadow-lg shadow-emerald-950/40 animate-fade-in"
+        >
+          <div className="flex items-center gap-3">
+            <span className="relative flex h-3 w-3 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <div>
+              <p className="font-extrabold text-white text-xs sm:text-sm tracking-wide flex items-center gap-1.5">
+                <span>You are Online — Keep this tab open</span>
+              </p>
+              <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">
+                Live Fleet Radar is transmitting your real-time GPS signal to dispatch.
+              </p>
+            </div>
+          </div>
+          <div className="hidden xs:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-[10px] font-bold text-emerald-300 uppercase tracking-wider shrink-0">
+            <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-400" />
+            <span>Radar Active</span>
+          </div>
+        </div>
+      )}
 
       {/* 3. Utility Row: Neutral Action Pills */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">

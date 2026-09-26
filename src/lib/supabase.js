@@ -245,7 +245,7 @@ export async function fetchDeliveryBoys() {
     try {
       const { data, error } = await supabase
         .from('delivery_boys')
-        .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
+        .select('*')
         .order('name', { ascending: true });
       if (!error && Array.isArray(data)) {
         return data;
@@ -257,7 +257,7 @@ export async function fetchDeliveryBoys() {
     try {
       const { data: dData, error: dError } = await supabase
         .from('drivers')
-        .select('id, name, phone, is_online, current_lat, current_lng, last_seen_at')
+        .select('*')
         .order('name', { ascending: true });
       if (!dError && Array.isArray(dData)) {
         return dData;
@@ -476,12 +476,17 @@ export async function driverLogin(phone, pin) {
         const nowIso = new Date().toISOString();
         await supabase
           .from('delivery_boys')
-          .update({ is_online: true, last_seen_at: nowIso })
+          .update({
+            status: 'online',
+            is_online: true,
+            last_seen: nowIso,
+            last_seen_at: nowIso
+          })
           .eq('id', data.id)
           .then(() => {})
           .catch(() => {});
 
-        return { ...data, is_online: true, last_seen_at: nowIso };
+        return { ...data, status: 'online', is_online: true, last_seen: nowIso, last_seen_at: nowIso };
       }
     } catch (err) {
       console.warn('Supabase driverLogin delivery_boys query notice:', err.message);
@@ -2527,32 +2532,59 @@ export async function deleteDamageExpiryItem(id) {
   return true;
 }
 
-export async function updateDriverHeartbeat(driverId, isOnline = true) {
+export async function updateDriverHeartbeat(driverId, isOnline = true, coords = null) {
   if (!driverId) return;
   const nowIso = new Date().toISOString();
 
   if (isSupabaseConfigured) {
     try {
-      // 1. Primary update on delivery_boys (exact columns: is_online, last_seen_at)
+      const updateData = {
+        is_online: Boolean(isOnline),
+        status: isOnline ? 'online' : 'offline',
+        last_seen: nowIso,
+        last_seen_at: nowIso
+      };
+      if (coords && coords.latitude !== undefined && coords.latitude !== null) {
+        updateData.current_lat = Number(coords.latitude);
+      }
+      if (coords && coords.longitude !== undefined && coords.longitude !== null) {
+        updateData.current_lng = Number(coords.longitude);
+      }
+
+      // 1. Primary update on delivery_boys
       const { error: dbErr } = await supabase
         .from('delivery_boys')
-        .update({
-          is_online: Boolean(isOnline),
-          last_seen_at: nowIso
-        })
+        .update(updateData)
         .eq('id', driverId);
 
       if (dbErr) {
-        console.warn('Supabase delivery_boys heartbeat notice:', dbErr.message);
+        // Fallback for schema variations
+        await supabase
+          .from('delivery_boys')
+          .update({
+            status: isOnline ? 'online' : 'offline',
+            last_seen: nowIso,
+            ...(coords && coords.latitude ? { current_lat: Number(coords.latitude), current_lng: Number(coords.longitude) } : {})
+          })
+          .eq('id', driverId)
+          .catch(() => {});
       }
 
       // 2. Also keep driver_locations synced
+      const locData = {
+        is_online: Boolean(isOnline),
+        last_seen_at: nowIso,
+        last_seen: nowIso
+      };
+      if (coords && coords.latitude !== undefined && coords.latitude !== null) {
+        locData.latitude = Number(coords.latitude);
+      }
+      if (coords && coords.longitude !== undefined && coords.longitude !== null) {
+        locData.longitude = Number(coords.longitude);
+      }
       await supabase
         .from('driver_locations')
-        .update({
-          is_online: Boolean(isOnline),
-          last_seen_at: nowIso
-        })
+        .update(locData)
         .eq('driver_id', driverId)
         .then(() => {})
         .catch(() => {});
@@ -2566,7 +2598,15 @@ export async function updateDriverHeartbeat(driverId, isOnline = true) {
     const drivers = getLocalDrivers();
     const updated = drivers.map((d) =>
       d.id === driverId
-        ? { ...d, is_online: isOnline, last_active_at: nowIso, last_seen_at: nowIso }
+        ? {
+            ...d,
+            is_online: isOnline,
+            status: isOnline ? 'online' : 'offline',
+            last_active_at: nowIso,
+            last_seen: nowIso,
+            last_seen_at: nowIso,
+            ...(coords && coords.latitude ? { current_lat: Number(coords.latitude), current_lng: Number(coords.longitude) } : {})
+          }
         : d
     );
     saveLocalDrivers(updated);
@@ -2576,8 +2616,14 @@ export async function updateDriverHeartbeat(driverId, isOnline = true) {
       const parsed = JSON.parse(savedCurrent);
       if (parsed.id === driverId) {
         parsed.is_online = isOnline;
+        parsed.status = isOnline ? 'online' : 'offline';
         parsed.last_active_at = nowIso;
+        parsed.last_seen = nowIso;
         parsed.last_seen_at = nowIso;
+        if (coords && coords.latitude) {
+          parsed.current_lat = Number(coords.latitude);
+          parsed.current_lng = Number(coords.longitude);
+        }
         localStorage.setItem('jal_jivan_current_driver', JSON.stringify(parsed));
       }
     }

@@ -30,7 +30,8 @@ import {
   calculateEtaMinutes,
   isDriverOnline,
   formatLastSeen,
-  formatDistance
+  formatDistance,
+  parseUtcTimestamp
 } from '../lib/geoUtils';
 
 export default function LiveFleetTracker({
@@ -92,14 +93,16 @@ export default function LiveFleetTracker({
         : (loc?.longitude !== undefined && loc?.longitude !== null ? Number(loc.longitude) : null);
 
       const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-      const lastSeenAt = driver.last_seen_at || loc?.last_seen_at || loc?.updated_at || driver.updated_at || null;
+      const rawLastSeen = driver.last_seen || driver.last_seen_at || loc?.last_seen || loc?.last_seen_at || loc?.updated_at || driver.updated_at || null;
 
-      // Exact rider status formula requested:
-      const diffMinutes = lastSeenAt 
-        ? (Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60) 
+      // Exact rider status formula with UTC timestamp parsing to avoid timezone offset discrepancies:
+      const utcTime = parseUtcTimestamp(rawLastSeen);
+      const diffMinutes = !isNaN(utcTime)
+        ? (Date.now() - utcTime) / (1000 * 60)
         : 999;
-      const isOnline = Boolean(driver.is_online) && diffMinutes < 5;
-      const lastSeenText = lastSeenAt 
+      // Allow a reasonable 10-minute grace window
+      const isOnline = (driver.status === 'online' || Boolean(driver.is_online)) && diffMinutes < 10 && driver.status !== 'offline';
+      const lastSeenText = !isNaN(utcTime)
         ? (diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`)
         : 'Offline (No GPS signal)';
 

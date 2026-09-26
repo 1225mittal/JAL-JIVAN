@@ -54,7 +54,7 @@ import {
   updateSavedAddress,
   deleteSavedAddress
 } from '../lib/supabase';
-import { isDriverOnline, formatLastSeen } from '../lib/geoUtils';
+import { isDriverOnline, formatLastSeen, parseUtcTimestamp } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 import LiveFleetTracker from './LiveFleetTracker';
 import ProductCatalog from './ProductCatalog';
@@ -1161,9 +1161,10 @@ export function AdminPanel({
                   (o) => o.assigned_driver_id === rider.id && o.status === 'Delivered'
                 ).length;
 
-                const activeTime = rider.last_seen_at || rider.last_active_at;
-                const diffMinutes = activeTime 
-                  ? (Date.now() - new Date(activeTime).getTime()) / (1000 * 60) 
+                const activeTime = rider.last_seen || rider.last_seen_at || rider.last_active_at || rider.updated_at;
+                const utcTime = parseUtcTimestamp(activeTime);
+                const diffMinutes = !isNaN(utcTime) 
+                  ? (Date.now() - utcTime) / (1000 * 60) 
                   : 999;
                 const isOnline = isDriverOnline(rider);
 
@@ -1174,7 +1175,9 @@ export function AdminPanel({
                   ? Number(rider.current_lng)
                   : null;
                 const hasCoords = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng);
-                const lastSeenText = diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`;
+                const lastSeenText = !isNaN(utcTime)
+                  ? (diffMinutes < 1 ? 'Just now' : `${Math.floor(diffMinutes)}m ago`)
+                  : 'Offline (No GPS signal)';
 
                 return (
                   <div

@@ -70,45 +70,86 @@ export function formatDistance(meters) {
 }
 
 /**
- * Determines whether a rider is online based on is_online flag and last_seen_at timestamp.
- * Considers a driver ONLINE if is_online === true and last_seen_at was within 5 minutes.
+ * Safely parses any date/time string into a UTC epoch timestamp in milliseconds.
+ * Prevents local timezone parsing discrepancies (e.g. UTC stored timestamps without 'Z' being parsed as local time).
  */
-export function isDriverOnline(driverOrLastSeen, thresholdMs = 5 * 60 * 1000) {
-  if (!driverOrLastSeen) return false;
-  if (typeof driverOrLastSeen === 'object') {
-    const d = driverOrLastSeen;
-    if (d.is_online === false) return false;
-    const timeStr = d.last_seen_at || d.last_active_at || d.updated_at;
-    if (!timeStr) return Boolean(d.is_online);
-    try {
-      const diff = Date.now() - new Date(timeStr).getTime();
-      return diff >= -60000 && diff < thresholdMs;
-    } catch {
-      return Boolean(d.is_online);
-    }
+export function parseUtcTimestamp(timeInput) {
+  if (!timeInput) return NaN;
+  if (typeof timeInput === 'number') return timeInput;
+  if (timeInput instanceof Date) return timeInput.getTime();
+
+  let str = String(timeInput).trim();
+  if (!str) return NaN;
+
+  // If format is like "YYYY-MM-DD HH:mm:ss...", replace space with T
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(str)) {
+    str = str.replace(/\s+/, 'T');
   }
-  try {
-    const diff = Date.now() - new Date(driverOrLastSeen).getTime();
-    return diff >= -60000 && diff < thresholdMs;
-  } catch {
-    return false;
+
+  // If no timezone offset (Z or +/-HH or +/-HH:mm), append Z so it parses strictly as UTC
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(str)) {
+    str = str + 'Z';
+  } else if (!/[zZ]|([+-]\d{2}(:?\d{2})?)$/.test(str)) {
+    str = str + 'Z';
   }
+
+  const parsed = new Date(str).getTime();
+  if (!isNaN(parsed)) return parsed;
+
+  return new Date(timeInput).getTime();
 }
 
 /**
- * Formats a relative time string (e.g. "Just now", "25 seconds ago", "2m ago").
+ * Determines whether a rider is online based on status/is_online flag and last_seen timestamp.
+ * Considers a driver ONLINE if status === 'online' (or is_online === true) and last_seen was within 10 minutes.
+ * Uses strict UTC timestamp parsing to eliminate client timezone mismatches.
+ */
+export function isDriverOnline(driverOrLastSeen, thresholdMs = 10 * 60 * 1000) {
+  if (!driverOrLastSeen) return false;
+
+  if (typeof driverOrLastSeen === 'object') {
+    const rider = driverOrLastSeen;
+    // Explicit offline check
+    if (rider.status === 'offline' || (rider.is_online === false && rider.status !== 'online')) {
+      return false;
+    }
+
+    const timeStr = rider.last_seen || rider.last_seen_at || rider.last_active_at || rider.updated_at;
+    if (!timeStr) {
+      return rider.status === 'online' || Boolean(rider.is_online);
+    }
+
+    const utcTime = parseUtcTimestamp(timeStr);
+    if (isNaN(utcTime)) {
+      return rider.status === 'online' || Boolean(rider.is_online);
+    }
+
+    const diffMinutes = (Date.now() - utcTime) / (1000 * 60);
+    const isStatusOnline = rider.status === 'online' || Boolean(rider.is_online) || rider.status === 'active';
+    // Allow a reasonable 10-minute grace window (diffMinutes < 10) with clock drift tolerance
+    return isStatusOnline && diffMinutes >= -1 && diffMinutes < (thresholdMs / 60000);
+  }
+
+  const utcTime = parseUtcTimestamp(driverOrLastSeen);
+  if (isNaN(utcTime)) return false;
+  const diffMinutes = (Date.now() - utcTime) / (1000 * 60);
+  return diffMinutes >= -1 && diffMinutes < (thresholdMs / 60000);
+}
+
+/**
+ * Formats a relative time string (e.g. "Just now", "25 seconds ago", "2m ago") with UTC safety.
  */
 export function formatLastSeen(dateStr) {
   if (!dateStr) return 'Offline (No GPS signal)';
   try {
-    const time = new Date(dateStr).getTime();
+    const time = parseUtcTimestamp(dateStr);
     if (isNaN(time)) return 'Offline (No GPS signal)';
     const diff = Math.floor((Date.now() - time) / 1000);
     if (diff < 10) return 'Just now';
     if (diff < 60) return `${diff} seconds ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return new Date(dateStr).toLocaleDateString();
+    return new Date(time).toLocaleDateString();
   } catch {
     return 'Offline (No GPS signal)';
   }
