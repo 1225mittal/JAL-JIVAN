@@ -81,6 +81,13 @@ export default function App() {
   useEffect(() => {
     const handleUrlChange = () => {
       setIsAdminView(checkIsAdminUrl());
+      const search = new URLSearchParams(window.location.search);
+      const urlParam = search.get('module');
+      if (urlParam) {
+        setCurrentModule(urlParam);
+      } else if (search.get('tab')) {
+        setCurrentModule('delivery');
+      }
     };
 
     window.addEventListener('popstate', handleUrlChange);
@@ -112,8 +119,10 @@ export default function App() {
   // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
   const [currentModule, setCurrentModule] = useState(() => {
     if (typeof window !== 'undefined') {
-      const urlParam = new URLSearchParams(window.location.search).get('module');
+      const search = new URLSearchParams(window.location.search);
+      const urlParam = search.get('module');
       if (urlParam) return urlParam;
+      if (search.get('tab')) return 'delivery';
       const saved = localStorage.getItem('active_module');
       if (saved) return saved;
     }

@@ -61,6 +61,38 @@ import ProductCatalog from './ProductCatalog';
 import SlipViewerModal from './SlipViewerModal';
 import StaffAttendanceModal from './StaffAttendanceModal';
 
+// Lightweight URL search params hook adhering to useSearchParams standard without react-router-dom dependency
+export function useSearchParams() {
+  const [searchParams, setSearchParamsState] = useState(() => {
+    return new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  });
+
+  useEffect(() => {
+    const onLocationChange = () => {
+      setSearchParamsState(new URLSearchParams(window.location.search));
+    };
+
+    window.addEventListener('popstate', onLocationChange);
+    return () => {
+      window.removeEventListener('popstate', onLocationChange);
+    };
+  }, []);
+
+  const setSearchParams = useCallback((updater) => {
+    setSearchParamsState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : new URLSearchParams(updater);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.search = next.toString();
+        window.history.pushState(null, '', url.toString());
+      }
+      return next;
+    });
+  }, []);
+
+  return [searchParams, setSearchParams];
+}
+
 export function AdminPanel({
   orders = [],
   drivers = [],
@@ -84,7 +116,33 @@ export function AdminPanel({
 }) {
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'Pending' | 'Out for Delivery' | 'Delivered'
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('orders'); // 'orders' | 'drivers' | 'fleet' | 'addresses' | 'products' | 'analytics'
+
+  // Persist active tab across page reloads via URL query parameter ?tab=...
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'deliveries';
+
+  const handleTabChange = useCallback((newTab) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', newTab);
+      return next;
+    });
+  }, [setSearchParams]);
+
+  // Backward compatibility alias for any sub-components calling setActiveTab
+  const setActiveTab = handleTabChange;
+
+  // Normalized active tab identifier mapping URLs to dashboard sub-views
+  const activeTab = useMemo(() => {
+    const raw = (currentTab || '').toLowerCase();
+    if (raw === 'orders' || raw === 'deliveries') return 'deliveries';
+    if (raw === 'drivers' || raw === 'riders') return 'riders';
+    if (raw === 'fleet' || raw === 'radar' || raw === 'live-fleet-radar') return 'fleet';
+    if (raw === 'addresses') return 'addresses';
+    if (raw === 'products') return 'products';
+    if (raw === 'analytics' || raw === 'settings') return 'analytics';
+    return raw || 'deliveries';
+  }, [currentTab]);
   const [viewProofOrder, setViewProofOrder] = useState(null);
   const [selectedAddressForDetail, setSelectedAddressForDetail] = useState(null);
   const [showStaffAttendanceModal, setShowStaffAttendanceModal] = useState(false);
@@ -694,40 +752,42 @@ export function AdminPanel({
         <div className="overflow-x-auto w-full no-scrollbar min-w-0">
           <div className="flex items-center space-x-2 min-w-max pb-1">
             <button
-              onClick={() => setActiveTab('orders')}
+              id="admin-deliveries-tab"
+              onClick={() => handleTabChange('deliveries')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'orders'
+                activeTab === 'deliveries' || activeTab === 'orders'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               <Truck className="w-4 h-4" />
-              <span>Live Status Board ({orders.length})</span>
+              <span>Deliveries ({orders.length})</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('drivers')}
+              id="admin-riders-tab"
+              onClick={() => handleTabChange('riders')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'drivers'
+                activeTab === 'riders' || activeTab === 'drivers'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               <Users className="w-4 h-4" />
-              <span>Delivery Boys ({drivers.length})</span>
+              <span>Riders ({drivers.length})</span>
             </button>
 
             <button
               id="admin-fleet-tab"
-              onClick={() => setActiveTab('fleet')}
+              onClick={() => handleTabChange('fleet')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'fleet'
+                activeTab === 'fleet' || activeTab === 'radar'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
               <Radio className="w-4 h-4" />
-              <span>Live Fleet Tracker</span>
+              <span>Live Fleet Radar</span>
               {onlineDriversCount > 0 ? (
                 <span className="flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -740,7 +800,7 @@ export function AdminPanel({
 
             <button
               id="admin-addresses-tab"
-              onClick={() => setActiveTab('addresses')}
+              onClick={() => handleTabChange('addresses')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'addresses'
                   ? 'border-emerald-500 text-emerald-400'
@@ -753,7 +813,7 @@ export function AdminPanel({
 
             <button
               id="admin-products-tab"
-              onClick={() => setActiveTab('products')}
+              onClick={() => handleTabChange('products')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'products'
                   ? 'border-emerald-500 text-emerald-400'
@@ -766,9 +826,9 @@ export function AdminPanel({
 
             <button
               id="admin-analytics-tab"
-              onClick={() => setActiveTab('analytics')}
+              onClick={() => handleTabChange('analytics')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'analytics'
+                activeTab === 'analytics' || activeTab === 'settings'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
@@ -791,7 +851,7 @@ export function AdminPanel({
       </div>
 
       {/* TAB 1: LIVE STATUS BOARD */}
-      {activeTab === 'orders' && (
+      {(activeTab === 'deliveries' || activeTab === 'orders') && (
         <div className="space-y-4">
           {/* Controls: Search & Filter Pills */}
           <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
@@ -1056,7 +1116,7 @@ export function AdminPanel({
       )}
 
       {/* TAB 2: DELIVERY BOYS ROSTER */}
-      {activeTab === 'drivers' && (
+      {(activeTab === 'riders' || activeTab === 'drivers') && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
@@ -1232,7 +1292,7 @@ export function AdminPanel({
       )}
 
       {/* TAB 3: LIVE FLEET TRACKER */}
-      {activeTab === 'fleet' && (
+      {(activeTab === 'fleet' || activeTab === 'radar') && (
         <LiveFleetTracker
           drivers={deliveryBoys}
           orders={orders}
@@ -1248,7 +1308,7 @@ export function AdminPanel({
           }}
           loading={loading || deliveryBoysLoading}
           onOpenStoreSettings={() => {
-            setActiveTab('analytics');
+            handleTabChange('analytics');
             setTimeout(() => {
               const el = document.getElementById('store-hub-settings-section');
               if (el) el.scrollIntoView({ behavior: 'smooth' });
@@ -1279,7 +1339,7 @@ export function AdminPanel({
       )}
 
       {/* TAB 5: DELIVERY ANALYTICS & STORE SETTINGS */}
-      {activeTab === 'analytics' && (
+      {(activeTab === 'analytics' || activeTab === 'settings') && (
         <div className="space-y-5 animate-fade-in">
           {/* Section A: Store Hub & Attendance Geofence Settings */}
           <div id="store-hub-settings-section" className="glass-card p-5 rounded-2xl border border-slate-800 space-y-4">
