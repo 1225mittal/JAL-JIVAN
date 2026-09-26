@@ -86,6 +86,7 @@ export default function PurchaseInwardHub({
   });
 
   const [items, setItems] = useState([]);
+  const [rawOcrData, setRawOcrData] = useState(null);
 
   // File input refs
   const cameraInputRef = useRef(null);
@@ -166,6 +167,7 @@ export default function PurchaseInwardHub({
       }
 
       const parsed = await response.json();
+      setRawOcrData(parsed);
 
       // Populate Editable Fields
       if (parsed.seller) {
@@ -359,12 +361,18 @@ export default function PurchaseInwardHub({
         bank_name: bankDetails.bank_name.trim() || null,
         bank_account_no: bankAccountNo || null,
         bank_ifsc: bankIfsc || null,
-        taxable_amount: Number(totalTaxable.toFixed(2)),
-        total_tax: Number(totalTax.toFixed(2)),
+        account_no: bankAccountNo || null,
+        ifsc: bankIfsc || null,
+        total_taxable_amount: Number(totalTaxable.toFixed(2)),
+        total_tax_amount: Number(totalTax.toFixed(2)),
         grand_total: Number(grandTotal.toFixed(2)),
         bill_image_url: billPreviewUrl || '',
         status: 'verified'
       };
+
+      if (rawOcrData && typeof rawOcrData === 'object' && Object.keys(rawOcrData).length > 0) {
+        invoicePayload.raw_ocr_data = rawOcrData;
+      }
 
       // Write to purchase_invoices first, obtain generated invoice id, and insert line items into purchase_items with purchase_invoice_id: id
       const saved = await savePurchaseInvoice(invoicePayload, items);
@@ -404,6 +412,7 @@ export default function PurchaseInwardHub({
     });
     setBankDetails({ bank_name: '', account_no: '', ifsc: '' });
     setItems([]);
+    setRawOcrData(null);
   };
 
   const handleDeleteInvoice = async (id) => {

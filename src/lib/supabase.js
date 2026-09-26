@@ -2868,21 +2868,23 @@ export async function fetchPurchaseInvoices() {
 export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   const nowIso = new Date().toISOString();
 
-  // Safely map bank account fields according to Supabase schema:
-  // Use bank_account_no and bank_ifsc, falling back to account_no and ifsc
-  const bankAccountNo = (
+  // Safely map bank account fields according to known Supabase columns:
+  // Supports both account_no/ifsc and bank_account_no/bank_ifsc
+  const accountNo = (
     invoiceData.account_no ||
     invoiceData.bank_account_no ||
     ''
   ).toString().trim();
 
-  const bankIfsc = (
+  const ifscCode = (
     invoiceData.ifsc ||
     invoiceData.bank_ifsc ||
     ''
   ).toString().trim();
 
-  // 1. Build clean invoice payload matching purchase_invoices table in Supabase
+  // 1. Build clean invoice payload containing known columns matching purchase_invoices:
+  // invoice_number, invoice_date, seller_name, seller_gst, seller_fssai, seller_contact, seller_address,
+  // total_taxable_amount, total_tax_amount, grand_total, bill_image_url, raw_ocr_data, account_no, ifsc
   const invoicePayload = {
     invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
     invoice_date: invoiceData.invoice_date || nowIso.split('T')[0],
@@ -2894,19 +2896,42 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     salesman_name: invoiceData.salesman_name || '',
     salesman_number: invoiceData.salesman_number || '',
     bank_name: (invoiceData.bank_name || '').toString().trim() || null,
-    bank_account_no: bankAccountNo || null,
-    bank_ifsc: bankIfsc || null,
-    taxable_amount: Number(invoiceData.taxable_amount) || 0,
-    total_tax: Number(invoiceData.total_tax) || 0,
+    account_no: accountNo || null,
+    ifsc: ifscCode || null,
+    bank_account_no: accountNo || null,
+    bank_ifsc: ifscCode || null,
+    total_taxable_amount: Number(invoiceData.total_taxable_amount ?? invoiceData.taxable_amount) || 0,
+    total_tax_amount: Number(invoiceData.total_tax_amount ?? invoiceData.total_tax) || 0,
     grand_total: Number(invoiceData.grand_total) || 0,
     bill_image_url: invoiceData.bill_image_url || '',
-    status: invoiceData.status || 'verified',
-    raw_ocr_data: invoiceData.raw_ocr_data || {}
+    status: invoiceData.status || 'verified'
   };
 
-  // Explicitly ensure NO raw unmapped legacy keys like 'account_no' or 'ifsc' exist in the DB insert payload
-  delete invoicePayload.account_no;
-  delete invoicePayload.ifsc;
+  // 2. Ensure raw_ocr_data is saved as valid JSON (or stringified JSON), or if null/undefined, omit it from the payload
+  let validOcr = null;
+  if (invoiceData.raw_ocr_data !== null && invoiceData.raw_ocr_data !== undefined) {
+    if (typeof invoiceData.raw_ocr_data === 'string') {
+      try {
+        const parsed = JSON.parse(invoiceData.raw_ocr_data);
+        if (parsed && typeof parsed === 'object') {
+          validOcr = parsed;
+        }
+      } catch {
+        if (invoiceData.raw_ocr_data.trim()) {
+          validOcr = invoiceData.raw_ocr_data.trim();
+        }
+      }
+    } else if (typeof invoiceData.raw_ocr_data === 'object') {
+      if (Object.keys(invoiceData.raw_ocr_data).length > 0) {
+        validOcr = invoiceData.raw_ocr_data;
+      }
+    }
+  }
+
+  // Only include raw_ocr_data if valid JSON exists; omit if null, undefined, or empty
+  if (validOcr !== null && validOcr !== undefined) {
+    invoicePayload.raw_ocr_data = validOcr;
+  }
 
   // Only pass id if it is an existing valid UUID (e.g. for update). Otherwise omit to let DB generate UUID / primary key
   const isUuid =
@@ -2923,11 +2948,25 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   // Write to Supabase if configured
   if (isSupabaseConfigured) {
     // Step 2.1: Write to purchase_invoices first, obtain generated invoice id
-    const { data: invRow, error: invErr } = await supabase
+    let { data: invRow, error: invErr } = await supabase
       .from('purchase_invoices')
       .insert(invoicePayload)
       .select()
       .single();
+
+    // If PostgREST schema cache complains about raw_ocr_data, retry cleanly without it
+    if (invErr && invErr.message?.includes('raw_ocr_data') && 'raw_ocr_data' in invoicePayload) {
+      console.warn('Retrying purchase_invoices insert without raw_ocr_data due to schema cache...');
+      const fallbackPayload = { ...invoicePayload };
+      delete fallbackPayload.raw_ocr_data;
+      const retryResult = await supabase
+        .from('purchase_invoices')
+        .insert(fallbackPayload)
+        .select()
+        .single();
+      invRow = retryResult.data;
+      invErr = retryResult.error;
+    }
 
     if (invErr) {
       console.error('Supabase purchase_invoices insert error:', invErr);
@@ -2942,20 +2981,17 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     savedRecord = invRow;
 
     // Step 2.2: Insert line items into purchase_items with purchase_invoice_id: id
+    // Only pass known columns matching purchase_items:
+    // purchase_invoice_id, barcode, item_name, hsn_code, quantity, purchase_price, mrp
     if (Array.isArray(itemsData) && itemsData.length > 0) {
       const formattedItems = itemsData.map((item) => ({
         purchase_invoice_id: savedInvoiceId,
-        barcode: item.barcode || '',
-        item_name: item.item_name || 'Item',
-        hsn_code: item.hsn_code || '',
+        barcode: (item.barcode || '').toString().trim(),
+        item_name: (item.item_name || 'Item').toString().trim(),
+        hsn_code: (item.hsn_code || '').toString().trim(),
         quantity: Number(item.quantity) || 1,
-        mrp: Number(item.mrp) || 0,
-        purchase_price: Number(item.purchase_price) || 0,
-        price_before_gst: Number(item.price_before_gst) || 0,
-        gst_rate: Number(item.gst_rate) || 0,
-        cess: Number(item.cess) || 0,
-        discount: Number(item.discount) || 0,
-        price_after_gst: Number(item.price_after_gst) || 0
+        purchase_price: Number(item.purchase_price ?? item.price_before_gst) || 0,
+        mrp: Number(item.mrp) || 0
       }));
 
       const { data: itemsRows, error: itemsErr } = await supabase
