@@ -2868,7 +2868,21 @@ export async function fetchPurchaseInvoices() {
 export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   const nowIso = new Date().toISOString();
 
-  // 1. Build clean invoice payload for purchase_invoices
+  // Safely map bank account fields according to Supabase schema:
+  // Use bank_account_no and bank_ifsc, falling back to account_no and ifsc
+  const bankAccountNo = (
+    invoiceData.account_no ||
+    invoiceData.bank_account_no ||
+    ''
+  ).toString().trim();
+
+  const bankIfsc = (
+    invoiceData.ifsc ||
+    invoiceData.bank_ifsc ||
+    ''
+  ).toString().trim();
+
+  // 1. Build clean invoice payload matching purchase_invoices table in Supabase
   const invoicePayload = {
     invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
     invoice_date: invoiceData.invoice_date || nowIso.split('T')[0],
@@ -2879,9 +2893,9 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     seller_address: invoiceData.seller_address || '',
     salesman_name: invoiceData.salesman_name || '',
     salesman_number: invoiceData.salesman_number || '',
-    bank_name: invoiceData.bank_name || '',
-    account_no: invoiceData.account_no || '',
-    ifsc: invoiceData.ifsc || '',
+    bank_name: (invoiceData.bank_name || '').toString().trim() || null,
+    bank_account_no: bankAccountNo || null,
+    bank_ifsc: bankIfsc || null,
     taxable_amount: Number(invoiceData.taxable_amount) || 0,
     total_tax: Number(invoiceData.total_tax) || 0,
     grand_total: Number(invoiceData.grand_total) || 0,
@@ -2889,6 +2903,10 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     status: invoiceData.status || 'verified',
     raw_ocr_data: invoiceData.raw_ocr_data || {}
   };
+
+  // Explicitly ensure NO raw unmapped legacy keys like 'account_no' or 'ifsc' exist in the DB insert payload
+  delete invoicePayload.account_no;
+  delete invoicePayload.ifsc;
 
   // Only pass id if it is an existing valid UUID (e.g. for update). Otherwise omit to let DB generate UUID / primary key
   const isUuid =

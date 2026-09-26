@@ -343,6 +343,9 @@ export default function PurchaseInwardHub({
 
     setIsSaving(true);
     try {
+      const bankAccountNo = (bankDetails.account_no || bankDetails.bank_account_no || '').trim();
+      const bankIfsc = (bankDetails.ifsc || bankDetails.bank_ifsc || '').trim();
+
       const invoicePayload = {
         invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
         invoice_date: invoiceData.invoice_date || new Date().toISOString().split('T')[0],
@@ -353,9 +356,9 @@ export default function PurchaseInwardHub({
         seller_address: sellerData.address.trim(),
         salesman_name: sellerData.salesman_name.trim(),
         salesman_number: sellerData.salesman_number.trim(),
-        bank_name: bankDetails.bank_name.trim(),
-        account_no: bankDetails.account_no.trim(),
-        ifsc: bankDetails.ifsc.trim(),
+        bank_name: bankDetails.bank_name.trim() || null,
+        bank_account_no: bankAccountNo || null,
+        bank_ifsc: bankIfsc || null,
         taxable_amount: Number(totalTaxable.toFixed(2)),
         total_tax: Number(totalTax.toFixed(2)),
         grand_total: Number(grandTotal.toFixed(2)),
