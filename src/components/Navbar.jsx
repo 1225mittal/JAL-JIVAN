@@ -63,7 +63,12 @@ export default function Navbar({
                 <span
                   className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
                 >
-                  {adminSubView === 'damage' ? (
+                  {adminSubView === 'purchase' ? (
+                    <>
+                      <span className="sm:hidden">Purchase</span>
+                      <span className="hidden sm:inline">Purchase & Inward</span>
+                    </>
+                  ) : adminSubView === 'damage' ? (
                     <>
                       <span className="sm:hidden">Damage</span>
                       <span className="hidden sm:inline">Damage & Returns</span>

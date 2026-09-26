@@ -113,18 +113,23 @@ export default function AdminHub({
       id: 'purchase',
       title: 'Purchase & Inward',
       category: 'Procurement',
-      tag: 'Coming Soon / Planned',
-      isLive: false,
+      tag: 'Active / Live',
+      isLive: true,
       icon: FileSpreadsheet,
       accentColor: 'from-amber-600 to-orange-600',
-      tagColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-      description: 'OCR Bill Extraction, Multi-Vendor Price Compare, Purchase Returns',
+      tagColor: 'bg-amber-500/15 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/20',
+      description: 'Groq Vision OCR, Barcode Scanning, Vendor Inward Entry',
       features: [
-        'AI OCR Extraction from Supplier Tax Invoices',
-        'Multi-Vendor Price Comparison Matrix',
-        'Raw Material & Cap/Jar Stock Inward Logging',
-        'Damaged Inward Consignment Returns'
-      ]
+        'Groq Vision LPU OCR Extraction from Vendor Bills',
+        'PDF Multi-Page & Camera Upload Drop-Zone',
+        'USB Gun & Phone Camera Barcode Assignment',
+        'GST Breakdown, HSN & Landed Cost Computation'
+      ],
+      stats: {
+        item1: { label: 'OCR Engine', value: 'Groq AI', color: 'text-amber-400' },
+        item2: { label: 'Barcode', value: 'Active', color: 'text-emerald-400' },
+        item3: { label: 'Format', value: 'PDF/Img', color: 'text-cyan-400' }
+      }
     },
     {
       id: 'delivery',
@@ -424,12 +429,12 @@ export default function AdminHub({
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
-              <strong className="text-slate-200">2 Active</strong>
+              <strong className="text-slate-200">3 Active</strong>
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-              <span>6 Planned</span>
+              <span>5 Planned</span>
             </span>
           </div>
         </div>

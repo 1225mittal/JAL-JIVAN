@@ -298,6 +298,52 @@ ALTER TABLE public.driver_attendance ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public access driver_attendance" ON public.driver_attendance;
 CREATE POLICY "Public access driver_attendance" ON public.driver_attendance FOR ALL USING (true) WITH CHECK (true);
 
+-- 19. Purchase Invoices & Items (Inward Stock Management)
+CREATE TABLE IF NOT EXISTS public.purchase_invoices (
+    id TEXT PRIMARY KEY,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    invoice_number TEXT,
+    invoice_date DATE,
+    seller_name TEXT NOT NULL,
+    seller_gst TEXT,
+    seller_fssai TEXT,
+    seller_contact TEXT,
+    seller_address TEXT,
+    salesman_name TEXT,
+    salesman_number TEXT,
+    bank_name TEXT,
+    account_no TEXT,
+    ifsc TEXT,
+    taxable_amount NUMERIC(12, 2) DEFAULT 0.00,
+    total_tax NUMERIC(12, 2) DEFAULT 0.00,
+    grand_total NUMERIC(12, 2) DEFAULT 0.00,
+    bill_image_url TEXT,
+    status TEXT DEFAULT 'verified',
+    raw_ocr_data JSONB DEFAULT '{}'::jsonb
+);
 
+CREATE TABLE IF NOT EXISTS public.purchase_items (
+    id TEXT PRIMARY KEY,
+    invoice_id TEXT REFERENCES public.purchase_invoices(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    barcode TEXT,
+    item_name TEXT NOT NULL,
+    hsn_code TEXT,
+    quantity NUMERIC(10, 2) DEFAULT 1,
+    mrp NUMERIC(10, 2) DEFAULT 0.00,
+    purchase_price NUMERIC(10, 2) DEFAULT 0.00,
+    price_before_gst NUMERIC(10, 2) DEFAULT 0.00,
+    gst_rate NUMERIC(5, 2) DEFAULT 0.00,
+    cess NUMERIC(10, 2) DEFAULT 0.00,
+    discount NUMERIC(10, 2) DEFAULT 0.00,
+    price_after_gst NUMERIC(10, 2) DEFAULT 0.00
+);
 
+ALTER TABLE public.purchase_invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_items ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public access purchase_invoices" ON public.purchase_invoices;
+CREATE POLICY "Public access purchase_invoices" ON public.purchase_invoices FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access purchase_items" ON public.purchase_items;
+CREATE POLICY "Public access purchase_items" ON public.purchase_items FOR ALL USING (true) WITH CHECK (true);

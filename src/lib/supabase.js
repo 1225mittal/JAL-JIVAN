@@ -2811,3 +2811,150 @@ export async function staffLogin(mobile, pin) {
   return null;
 }
 
+// ==========================================
+// PURCHASE INVOICES & INWARD OPERATIONS
+// ==========================================
+export const STORAGE_PURCHASE_INVOICES = 'jal_jivan_purchase_invoices';
+
+export function getLocalPurchaseInvoices() {
+  try {
+    const saved = localStorage.getItem(STORAGE_PURCHASE_INVOICES);
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalPurchaseInvoices(invoices) {
+  try {
+    localStorage.setItem(STORAGE_PURCHASE_INVOICES, JSON.stringify(invoices));
+  } catch (e) {}
+}
+
+export async function fetchPurchaseInvoices() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_invoices')
+        .select(`
+          *,
+          items:purchase_items(*)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchPurchaseInvoices notice:', err.message);
+    }
+  }
+
+  return getLocalPurchaseInvoices();
+}
+
+export async function savePurchaseInvoice(invoiceData, itemsData = []) {
+  const invoiceId = invoiceData.id || `inv_${Date.now()}`;
+  const nowIso = new Date().toISOString();
+
+  const record = {
+    ...invoiceData,
+    id: invoiceId,
+    created_at: invoiceData.created_at || nowIso,
+    status: invoiceData.status || 'verified'
+  };
+
+  const formattedItems = (itemsData || []).map((item, idx) => ({
+    id: item.id || `item_${Date.now()}_${idx}`,
+    invoice_id: invoiceId,
+    created_at: nowIso,
+    barcode: item.barcode || '',
+    item_name: item.item_name || 'Item',
+    hsn_code: item.hsn_code || '',
+    quantity: Number(item.quantity) || 1,
+    mrp: Number(item.mrp) || 0,
+    purchase_price: Number(item.purchase_price) || 0,
+    price_before_gst: Number(item.price_before_gst) || 0,
+    gst_rate: Number(item.gst_rate) || 0,
+    cess: Number(item.cess) || 0,
+    discount: Number(item.discount) || 0,
+    price_after_gst: Number(item.price_after_gst) || 0
+  }));
+
+  // 1. Try Supabase Insert
+  if (isSupabaseConfigured) {
+    try {
+      const { data: invRow, error: invErr } = await supabase
+        .from('purchase_invoices')
+        .upsert({
+          id: record.id,
+          invoice_number: record.invoice_number,
+          invoice_date: record.invoice_date,
+          seller_name: record.seller_name,
+          seller_gst: record.seller_gst,
+          seller_fssai: record.seller_fssai,
+          seller_contact: record.seller_contact,
+          seller_address: record.seller_address,
+          salesman_name: record.salesman_name,
+          salesman_number: record.salesman_number,
+          bank_name: record.bank_name,
+          account_no: record.account_no,
+          ifsc: record.ifsc,
+          taxable_amount: record.taxable_amount,
+          total_tax: record.total_tax,
+          grand_total: record.grand_total,
+          bill_image_url: record.bill_image_url || '',
+          status: record.status,
+          raw_ocr_data: record.raw_ocr_data || {}
+        })
+        .select()
+        .single();
+
+      if (!invErr && invRow) {
+        if (formattedItems.length > 0) {
+          await supabase
+            .from('purchase_items')
+            .upsert(formattedItems);
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase savePurchaseInvoice notice:', err.message);
+    }
+  }
+
+  // 2. Local Storage Sync
+  const existing = getLocalPurchaseInvoices();
+  const fullInvoice = {
+    ...record,
+    items: formattedItems
+  };
+
+  const filtered = existing.filter((inv) => inv.id !== invoiceId);
+  saveLocalPurchaseInvoices([fullInvoice, ...filtered]);
+
+  return fullInvoice;
+}
+
+export async function deletePurchaseInvoice(invoiceId) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('purchase_items')
+        .delete()
+        .eq('invoice_id', invoiceId);
+
+      await supabase
+        .from('purchase_invoices')
+        .delete()
+        .eq('id', invoiceId);
+    } catch (err) {
+      console.warn('Supabase deletePurchaseInvoice notice:', err.message);
+    }
+  }
+
+  const existing = getLocalPurchaseInvoices();
+  saveLocalPurchaseInvoices(existing.filter((inv) => inv.id !== invoiceId));
+  return true;
+}
+
+

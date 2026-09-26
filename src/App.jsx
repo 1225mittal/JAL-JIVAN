@@ -6,6 +6,7 @@ import DamageManagement from './components/DamageManagement';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import StaffPortal from './components/StaffPortal';
+import PurchaseInwardHub from './components/PurchaseInwardHub';
 import DriverPortal from './components/DriverPortal';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
@@ -75,11 +76,13 @@ function parseUrlRoute() {
       pathname === '/admin' ||
       pathname.startsWith('/admin') ||
       pathname === '/hub' ||
+      pathname.includes('purchase') ||
       pathname.includes('delivery') ||
       pathname.includes('dispatch') ||
       pathname.includes('damage') ||
       hash.includes('admin') ||
       hash.includes('hub') ||
+      hash.includes('purchase') ||
       hash.includes('delivery') ||
       hash.includes('dispatch') ||
       Boolean(moduleParam)
@@ -87,7 +90,8 @@ function parseUrlRoute() {
 
     let module = moduleParam || 'hub';
     if (!moduleParam) {
-      if (pathname.includes('delivery') || hash.includes('delivery')) module = 'delivery';
+      if (pathname.includes('purchase') || hash.includes('purchase')) module = 'purchase';
+      else if (pathname.includes('delivery') || hash.includes('delivery')) module = 'delivery';
       else if (pathname.includes('damage') || hash.includes('damage')) module = 'damage';
     }
 
@@ -778,28 +782,40 @@ export default function App() {
                     </button>
                     <span className="text-slate-600 font-bold">/</span>
                     <span className="text-white font-semibold truncate max-w-[170px] sm:max-w-none">
-                      {currentModule === 'delivery'
+                      {currentModule === 'purchase'
+                        ? 'Purchase & Inward Management'
+                        : currentModule === 'delivery'
                         ? 'Delivery & Dispatch System'
                         : 'Damage & Returns Management'}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    {currentModule === 'delivery' ? (
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {currentModule !== 'purchase' && (
                       <button
                         type="button"
-                        onClick={() => setCurrentModule('damage')}
-                        className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
+                        onClick={() => setCurrentModule('purchase')}
+                        className="text-xs text-amber-300 hover:text-white px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all font-medium"
                       >
-                        <span className="hidden sm:inline">Switch to </span>Damage Portal →
+                        <span className="hidden sm:inline">Switch to </span>Purchase →
                       </button>
-                    ) : (
+                    )}
+                    {currentModule !== 'delivery' && (
                       <button
                         type="button"
                         onClick={() => setCurrentModule('delivery')}
                         className="text-xs text-emerald-300 hover:text-white px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all font-medium"
                       >
-                        <span className="hidden sm:inline">Switch to </span>Dispatch Console →
+                        <span className="hidden sm:inline">Switch to </span>Dispatch →
+                      </button>
+                    )}
+                    {currentModule !== 'damage' && (
+                      <button
+                        type="button"
+                        onClick={() => setCurrentModule('damage')}
+                        className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
+                      >
+                        <span className="hidden sm:inline">Switch to </span>Damage →
                       </button>
                     )}
                   </div>
@@ -817,6 +833,11 @@ export default function App() {
                   onOpenAddDriver={() => setIsAddDriverOpen(true)}
                   onRefreshAll={loadInitialData}
                   onAdminLogout={handleAdminLogout}
+                />
+              ) : currentModule === 'purchase' ? (
+                <PurchaseInwardHub
+                  onBackToHub={handleBackToHub}
+                  showToast={showToast}
                 />
               ) : currentModule === 'damage' ? (
                 <DamageReturnHub
