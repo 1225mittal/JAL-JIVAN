@@ -13,10 +13,12 @@ export default function RiderMiniMap({
   const mapInstanceRef = useRef(null);
   const layersGroupRef = useRef(null);
 
-  const riderLat = rider.current_lat !== undefined && rider.current_lat !== null
+  if (!rider) return null;
+
+  const riderLat = rider?.current_lat !== undefined && rider?.current_lat !== null
     ? Number(rider.current_lat)
     : null;
-  const riderLng = rider.current_lng !== undefined && rider.current_lng !== null
+  const riderLng = rider?.current_lng !== undefined && rider?.current_lng !== null
     ? Number(rider.current_lng)
     : null;
   const hasRiderCoords = riderLat !== null && riderLng !== null && !isNaN(riderLat) && !isNaN(riderLng);
@@ -37,22 +39,26 @@ export default function RiderMiniMap({
         delete container._leaflet_id;
       }
 
-      const map = L.map(container, {
-        zoomControl: false,
-        attributionControl: false,
-        dragging: true,
-        scrollWheelZoom: false,
-        touchZoom: true
-      });
+      try {
+        const map = L.map(container, {
+          zoomControl: false,
+          attributionControl: false,
+          dragging: true,
+          scrollWheelZoom: false,
+          touchZoom: true
+        });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
-      }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 19
+        }).addTo(map);
 
-      const layersGroup = L.layerGroup().addTo(map);
-      layersGroupRef.current = layersGroup;
-      mapInstanceRef.current = map;
+        const layersGroup = L.layerGroup().addTo(map);
+        layersGroupRef.current = layersGroup;
+        mapInstanceRef.current = map;
+      } catch (mapInitErr) {
+        console.warn('RiderMiniMap Leaflet init warning:', mapInitErr);
+      }
     }
 
     const map = mapInstanceRef.current;

@@ -196,10 +196,16 @@ export default function LiveFleetTracker({
       // Search Query
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
-      const matchesName = rider.name.toLowerCase().includes(q);
-      const matchesPhone = rider.phone.includes(q);
-      const matchesOrder = rider.activeOrder?.order_number.toLowerCase().includes(q);
-      const matchesAddress = rider.activeOrder?.address.toLowerCase().includes(q);
+      const matchesName = Boolean(rider?.name && String(rider.name).toLowerCase().includes(q));
+      const matchesPhone = Boolean(rider?.phone && String(rider.phone).includes(q));
+      const matchesOrder = Boolean(
+        rider?.activeOrder?.order_number &&
+        String(rider.activeOrder.order_number).toLowerCase().includes(q)
+      );
+      const matchesAddress = Boolean(
+        rider?.activeOrder?.address &&
+        String(rider.activeOrder.address).toLowerCase().includes(q)
+      );
 
       return matchesName || matchesPhone || matchesOrder || matchesAddress;
     });
@@ -220,22 +226,31 @@ export default function LiveFleetTracker({
     if (viewMode === 'LIST') return;
     if (!mapContainerRef.current) return;
 
+    const container = mapContainerRef.current;
+
     if (!mapInstanceRef.current) {
-      const map = L.map(mapContainerRef.current, {
-        center: [storeLat, storeLng],
-        zoom: 13,
-        zoomControl: true,
-        attributionControl: true
-      });
+      if (container._leaflet_id) {
+        delete container._leaflet_id;
+      }
+      try {
+        const map = L.map(container, {
+          center: [storeLat, storeLng],
+          zoom: 13,
+          zoomControl: true,
+          attributionControl: true
+        });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        maxZoom: 19
-      }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+          maxZoom: 19
+        }).addTo(map);
 
-      const markersGroup = L.layerGroup().addTo(map);
-      markersLayerRef.current = markersGroup;
-      mapInstanceRef.current = map;
+        const markersGroup = L.layerGroup().addTo(map);
+        markersLayerRef.current = markersGroup;
+        mapInstanceRef.current = map;
+      } catch (mapInitErr) {
+        console.warn('LiveFleetTracker map init warning:', mapInitErr);
+      }
     }
 
     const map = mapInstanceRef.current;

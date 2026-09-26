@@ -10,6 +10,7 @@ import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
 import Toast from './components/Toast';
+import ErrorBoundary from './components/ErrorBoundary';
 import {
   fetchDrivers,
   addDriver,
@@ -38,7 +39,7 @@ import {
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
-// Robust helper to determine if current URL path, hash, or query points to admin
+// Robust helper to determine if current URL path, hash, or query points to admin or dispatch
 function checkIsAdminUrl() {
   if (typeof window === 'undefined') return false;
   try {
@@ -46,24 +47,32 @@ function checkIsAdminUrl() {
     const hash = (window.location.hash || '').toLowerCase().replace(/\/+$/, '');
     const search = (window.location.search || '').toLowerCase();
 
-    // 1. Path check: /admin, .../admin, ending in "admin"
+    // 1. Path check: /admin, /delivery, /dispatch, /orders, ending in "admin"
     const isPathAdmin =
       pathname === '/admin' ||
       pathname.endsWith('/admin') ||
       pathname.endsWith('admin') ||
-      pathname.split('/').includes('admin');
+      pathname.split('/').includes('admin') ||
+      pathname.includes('delivery') ||
+      pathname.includes('dispatch') ||
+      pathname.includes('orders');
 
-    // 2. Hash check (supports hash routing e.g. #/admin, #admin)
+    // 2. Hash check (supports hash routing e.g. #/admin, #admin, #delivery, #dispatch)
     const isHashAdmin =
       hash === '#/admin' ||
       hash === '#admin' ||
       hash.endsWith('/admin') ||
-      hash.endsWith('admin');
+      hash.endsWith('admin') ||
+      hash.includes('admin') ||
+      hash.includes('delivery') ||
+      hash.includes('dispatch');
 
-    // 3. Search query check (e.g. ?admin or ?view=admin)
+    // 3. Search query check (e.g. ?admin, ?module=delivery, ?tab=deliveries, etc.)
     const isSearchAdmin =
       search === '?admin' ||
-      search.includes('admin');
+      search.includes('admin') ||
+      search.includes('module=delivery') ||
+      search.includes('tab=');
 
     return Boolean(isPathAdmin || isHashAdmin || isSearchAdmin);
   } catch {
@@ -80,12 +89,22 @@ export default function App() {
   // Listen to popstate, hashchange, and custom navigation events so refreshes & navigation persist
   useEffect(() => {
     const handleUrlChange = () => {
-      setIsAdminView(checkIsAdminUrl());
+      const isAdmin = checkIsAdminUrl();
+      setIsAdminView(isAdmin);
+      const pathname = (window.location.pathname || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase();
       const search = new URLSearchParams(window.location.search);
       const urlParam = search.get('module');
       if (urlParam) {
         setCurrentModule(urlParam);
-      } else if (search.get('tab')) {
+      } else if (
+        search.get('tab') ||
+        pathname.includes('delivery') ||
+        pathname.includes('dispatch') ||
+        pathname.includes('orders') ||
+        hash.includes('delivery') ||
+        hash.includes('dispatch')
+      ) {
         setCurrentModule('delivery');
       }
     };
@@ -119,10 +138,21 @@ export default function App() {
   // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
   const [currentModule, setCurrentModule] = useState(() => {
     if (typeof window !== 'undefined') {
+      const pathname = (window.location.pathname || '').toLowerCase();
+      const hash = (window.location.hash || '').toLowerCase();
       const search = new URLSearchParams(window.location.search);
       const urlParam = search.get('module');
       if (urlParam) return urlParam;
-      if (search.get('tab')) return 'delivery';
+      if (
+        search.get('tab') ||
+        pathname.includes('delivery') ||
+        pathname.includes('dispatch') ||
+        pathname.includes('orders') ||
+        hash.includes('delivery') ||
+        hash.includes('dispatch')
+      ) {
+        return 'delivery';
+      }
       const saved = localStorage.getItem('active_module');
       if (saved) return saved;
     }
@@ -131,7 +161,7 @@ export default function App() {
 
   // Sync currentModule with localStorage and URL query string to preserve screen on page refresh
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && isAdminView) {
       try {
         localStorage.setItem('active_module', currentModule);
         const url = new URL(window.location.href);
@@ -141,7 +171,7 @@ export default function App() {
         }
       } catch (e) {}
     }
-  }, [currentModule]);
+  }, [currentModule, isAdminView]);
 
   // Alias for backward compatibility across modules
   const adminSubView = currentModule;
@@ -705,27 +735,29 @@ export default function App() {
                   drivers={drivers}
                 />
               ) : (
-                <AdminDashboard
-                  orders={orders}
-                  drivers={drivers}
-                  products={products}
-                  loading={loading}
-                  onOpenAddDriver={() => setIsAddDriverOpen(true)}
-                  onOpenCreateTask={() => setIsCreateTaskOpen(true)}
-                  onUpdateStatus={handleUpdateStatus}
-                  onAssignDriver={handleAssignDriver}
-                  onAddProduct={handleAddProduct}
-                  onUpdateProduct={handleUpdateProduct}
-                  onDeleteProduct={handleDeleteProduct}
-                  onUpdateOrder={handleUpdateOrder}
-                  onDeleteOrder={handleDeleteOrder}
-                  onUpdateDriver={handleUpdateDriver}
-                  onDeleteDriver={handleDeleteDriver}
-                  onUpdateAddress={handleUpdateAddress}
-                  onDeleteAddress={handleDeleteAddress}
-                  onRefresh={loadInitialData}
-                  onLogout={handleAdminLogout}
-                />
+                <ErrorBoundary title="Delivery & Dispatch Console">
+                  <AdminDashboard
+                    orders={orders}
+                    drivers={drivers}
+                    products={products}
+                    loading={loading}
+                    onOpenAddDriver={() => setIsAddDriverOpen(true)}
+                    onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+                    onUpdateStatus={handleUpdateStatus}
+                    onAssignDriver={handleAssignDriver}
+                    onAddProduct={handleAddProduct}
+                    onUpdateProduct={handleUpdateProduct}
+                    onDeleteProduct={handleDeleteProduct}
+                    onUpdateOrder={handleUpdateOrder}
+                    onDeleteOrder={handleDeleteOrder}
+                    onUpdateDriver={handleUpdateDriver}
+                    onDeleteDriver={handleDeleteDriver}
+                    onUpdateAddress={handleUpdateAddress}
+                    onDeleteAddress={handleDeleteAddress}
+                    onRefresh={loadInitialData}
+                    onLogout={handleAdminLogout}
+                  />
+                </ErrorBoundary>
               )}
             </div>
           ) : (

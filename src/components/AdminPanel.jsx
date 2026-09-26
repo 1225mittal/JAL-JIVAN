@@ -81,7 +81,8 @@ export function useSearchParams() {
 
   const setSearchParams = useCallback((updater) => {
     setSearchParamsState((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : new URLSearchParams(updater);
+      const current = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : prev;
+      const next = typeof updater === 'function' ? updater(current) : new URLSearchParams(updater);
       if (typeof window !== 'undefined') {
         const url = new URL(window.location.href);
         url.search = next.toString();
@@ -618,13 +619,13 @@ export function AdminPanel({
       const matchesFilter =
         activeFilter === 'ALL' ? true : order.status === activeFilter;
 
-      const q = searchQuery.toLowerCase();
+      const q = (searchQuery || '').toLowerCase().trim();
       const matchesSearch =
         !q ||
-        order.order_number.toLowerCase().includes(q) ||
-        order.address.toLowerCase().includes(q) ||
-        (order.landmark && order.landmark.toLowerCase().includes(q)) ||
-        (order.driver_name && order.driver_name.toLowerCase().includes(q));
+        Boolean(order.order_number && String(order.order_number).toLowerCase().includes(q)) ||
+        Boolean(order.address && String(order.address).toLowerCase().includes(q)) ||
+        Boolean(order.landmark && String(order.landmark).toLowerCase().includes(q)) ||
+        Boolean(order.driver_name && String(order.driver_name).toLowerCase().includes(q));
 
       return matchesFilter && matchesSearch;
     });
