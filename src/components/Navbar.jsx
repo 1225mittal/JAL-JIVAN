@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShieldCheck, Droplets, Database, LogOut, UserCheck, Truck, LayoutGrid } from 'lucide-react';
+import { ShieldCheck, Droplets, Database, LogOut, UserCheck, Truck, LayoutGrid, Users } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
@@ -12,15 +12,20 @@ export default function Navbar({
   onDriverLogout,
   onOpenDbInfo,
   isAdminLoggedIn = false,
-  onAdminLogout
+  onAdminLogout,
+  isStaffView = false,
+  staffSession = null,
+  onStaffLogout,
+  onNavigateToStaff,
+  onNavigateToAdmin
 }) {
   const isViewAdmin = Boolean(isAdminView || isAdminRoute);
 
   return (
     <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md overflow-x-hidden">
       <div className="w-full max-w-full sm:max-w-6xl mx-auto px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-        {/* Left Section: Driver View shows ONLY status indicator ("🟢 Online"); Admin View shows Brand */}
-        {!isViewAdmin ? (
+        {/* Left Section: Driver View shows ONLY status indicator ("🟢 Online"); Admin/Staff View shows Brand */}
+        {!isViewAdmin && !isStaffView ? (
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm">
               <span className="relative flex h-2 w-2">
@@ -29,6 +34,23 @@ export default function Navbar({
               </span>
               <span>🟢 Online</span>
             </span>
+          </div>
+        ) : isStaffView ? (
+          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold shrink-0">
+              <Users className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">JAL-JIVAN</span>
+                <span className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-cyan-500/20 text-cyan-300 border-cyan-500/30">
+                  Staff Workspace
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium hidden sm:block truncate">
+                Authorized Operations Access
+              </p>
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
@@ -54,7 +76,7 @@ export default function Navbar({
                   ) : (
                     <>
                       <span className="sm:hidden">Admin Hub</span>
-                      <span className="hidden sm:inline">Admin Command Hub</span>
+                      <span className="hidden sm:inline">Master Admin Hub</span>
                     </>
                   )}
                 </span>
@@ -71,39 +93,33 @@ export default function Navbar({
           {/* Quick Hub button if inside Admin sub-module */}
           {isViewAdmin && isAdminLoggedIn && adminSubView !== 'hub' && onSelectAdminSubView && (
             <button
+              type="button"
               onClick={() => onSelectAdminSubView('hub')}
               className="flex items-center gap-1 text-[11px] sm:text-xs px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-semibold transition-all shadow-sm shrink-0"
-              title="Return to Admin Hub Home"
+              title="Return to Master Admin Hub"
             >
               <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
               <span className="hidden xs:inline">Hub</span>
             </button>
           )}
 
-          {/* Toggle Driver / Admin View */}
-          {onToggleAdminView && (
+          {/* Quick Hub button if staff is in a sub-module */}
+          {isStaffView && staffSession && adminSubView !== 'hub' && onSelectAdminSubView && (
             <button
-              onClick={onToggleAdminView}
-              className="flex items-center gap-1 text-[11px] sm:text-xs px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 font-medium transition-all shadow-sm shrink-0"
-              title={isViewAdmin ? 'Switch to Driver View' : 'Switch to Admin Hub'}
+              type="button"
+              onClick={() => onSelectAdminSubView('hub')}
+              className="flex items-center gap-1 text-[11px] sm:text-xs px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 font-semibold transition-all shadow-sm shrink-0"
+              title="Return to Staff Hub"
             >
-              {isViewAdmin ? (
-                <>
-                  <Truck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="hidden md:inline">Driver Portal</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                  <span className="hidden md:inline">Admin Hub</span>
-                </>
-              )}
+              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden xs:inline">Staff Hub</span>
             </button>
           )}
 
-          {/* Operational Status indicator (only for Admin View) */}
+          {/* Operational Status indicator (for Admin View) */}
           {isViewAdmin && (
             <button
+              type="button"
               onClick={onOpenDbInfo}
               className={`flex items-center gap-1 text-[10px] sm:text-xs px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full font-medium transition-all shrink-0 ${
                 isSupabaseConfigured
@@ -131,8 +147,9 @@ export default function Navbar({
           )}
 
           {/* DRIVER VIEW: Log Out Button */}
-          {!isViewAdmin && currentDriver && (
+          {!isViewAdmin && !isStaffView && currentDriver && (
             <button
+              type="button"
               id="driver-navbar-logout-btn"
               onClick={onDriverLogout}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-200 text-xs font-semibold transition-all shadow-sm"
@@ -143,11 +160,31 @@ export default function Navbar({
             </button>
           )}
 
+          {/* STAFF VIEW (/staff): Staff Logout Button */}
+          {isStaffView && staffSession && (
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
+              <span className="hidden sm:inline text-xs text-slate-400 truncate max-w-[120px]">
+                {staffSession.name}
+              </span>
+              <button
+                type="button"
+                id="staff-navbar-logout-btn"
+                onClick={onStaffLogout}
+                className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 transition-all active:scale-95 shrink-0"
+                title="Logout from Staff Portal"
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          )}
+
           {/* ADMIN VIEW (/admin): Admin Logout Button */}
           {isViewAdmin && (
             isAdminLoggedIn ? (
               <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-slate-800 shrink-0">
                 <button
+                  type="button"
                   id="admin-navbar-logout-btn"
                   onClick={onAdminLogout}
                   className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-md shadow-red-600/30 hover:shadow-red-600/50 active:scale-95 transition-all shrink-0"

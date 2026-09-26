@@ -2629,3 +2629,185 @@ export async function updateDriverHeartbeat(driverId, isOnline = true, coords = 
     }
   } catch (e) {}
 }
+
+// ==========================================
+// STAFF & USERS SCHEMA OPERATIONS
+// ==========================================
+export const STORAGE_STAFF_KEY = 'jal_jivan_staff_session';
+export const STORAGE_STAFF_MEMBERS = 'jal_jivan_staff_members';
+
+export const initialStaffMembers = [
+  {
+    id: 'staff-demo-multi',
+    name: 'Rajesh Sharma',
+    mobile: '9876543210',
+    phone: '9876543210',
+    pin: '1234',
+    allowed_modules: ['delivery', 'damage', 'sales'],
+    role: 'Operations Lead'
+  },
+  {
+    id: 'staff-demo-delivery',
+    name: 'Amit Kumar',
+    mobile: '9812345678',
+    phone: '9812345678',
+    pin: '4321',
+    allowed_modules: ['delivery'],
+    role: 'Dispatch Associate'
+  },
+  {
+    id: 'staff-demo-damage',
+    name: 'Suresh Verma',
+    mobile: '9899887766',
+    phone: '9899887766',
+    pin: '9988',
+    allowed_modules: ['damage'],
+    role: 'Quality Auditor'
+  }
+];
+
+export async function staffLogin(mobile, pin) {
+  const cleanMobile = (mobile || '').trim().replace(/\D/g, '');
+  const cleanPin = (pin || '').trim();
+
+  if (!cleanMobile || !cleanPin) {
+    throw new Error('Please enter both mobile number and 4-digit PIN');
+  }
+
+  // 1. Try Supabase 'staff' table
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('*')
+        .or(`mobile.eq.${cleanMobile},phone.eq.${cleanMobile}`)
+        .eq('pin', cleanPin)
+        .maybeSingle();
+
+      if (!error && data) {
+        let allowed = data.allowed_modules;
+        if (typeof allowed === 'string') {
+          try { allowed = JSON.parse(allowed); } catch { allowed = [allowed]; }
+        }
+        if (!Array.isArray(allowed)) {
+          allowed = ['delivery'];
+        }
+        return {
+          id: data.id,
+          name: data.name || 'Staff Member',
+          mobile: data.mobile || data.phone || cleanMobile,
+          phone: data.phone || data.mobile || cleanMobile,
+          role: data.role || 'staff',
+          allowed_modules: allowed
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase staff query notice:', err.message);
+    }
+
+    // 2. Try Supabase 'users' table
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .or(`mobile.eq.${cleanMobile},phone.eq.${cleanMobile}`)
+        .eq('pin', cleanPin)
+        .maybeSingle();
+
+      if (!error && data) {
+        let allowed = data.allowed_modules;
+        if (typeof allowed === 'string') {
+          try { allowed = JSON.parse(allowed); } catch { allowed = [allowed]; }
+        }
+        if (!Array.isArray(allowed)) {
+          allowed = ['delivery'];
+        }
+        return {
+          id: data.id,
+          name: data.name || 'Staff Member',
+          mobile: data.mobile || data.phone || cleanMobile,
+          phone: data.phone || data.mobile || cleanMobile,
+          role: data.role || 'staff',
+          allowed_modules: allowed
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase users query notice:', err.message);
+    }
+
+    // 3. Fallback to 'delivery_boys' table for driver/field staff
+    try {
+      const { data, error } = await supabase
+        .from('delivery_boys')
+        .select('*')
+        .eq('phone', cleanMobile)
+        .eq('pin', cleanPin)
+        .maybeSingle();
+
+      if (!error && data) {
+        return {
+          id: data.id,
+          name: data.name || 'Delivery Staff',
+          mobile: data.phone || cleanMobile,
+          phone: data.phone || cleanMobile,
+          role: 'delivery_rider',
+          allowed_modules: ['delivery']
+        };
+      }
+    } catch (err) {
+      console.warn('Supabase delivery_boys query in staffLogin notice:', err.message);
+    }
+  }
+
+  // 4. Check local demo staff storage
+  let staffList = [];
+  try {
+    const saved = localStorage.getItem(STORAGE_STAFF_MEMBERS);
+    staffList = saved ? JSON.parse(saved) : initialStaffMembers;
+  } catch {
+    staffList = initialStaffMembers;
+  }
+
+  const foundStaff = staffList.find(
+    (s) =>
+      (s.mobile || s.phone || '').replace(/\D/g, '') === cleanMobile &&
+      String(s.pin).trim() === cleanPin
+  );
+
+  if (foundStaff) {
+    let allowed = foundStaff.allowed_modules;
+    if (typeof allowed === 'string') {
+      try { allowed = JSON.parse(allowed); } catch { allowed = [allowed]; }
+    }
+    if (!Array.isArray(allowed)) {
+      allowed = ['delivery'];
+    }
+    return {
+      id: foundStaff.id,
+      name: foundStaff.name,
+      mobile: foundStaff.mobile || foundStaff.phone || cleanMobile,
+      phone: foundStaff.phone || foundStaff.mobile || cleanMobile,
+      role: foundStaff.role || 'staff',
+      allowed_modules: allowed
+    };
+  }
+
+  // 5. Check local drivers
+  const localDrivers = getLocalDrivers();
+  const foundDriver = localDrivers.find(
+    (d) => (d.phone || '').replace(/\D/g, '') === cleanMobile && String(d.pin).trim() === cleanPin
+  );
+  if (foundDriver) {
+    return {
+      id: foundDriver.id,
+      name: foundDriver.name,
+      mobile: foundDriver.phone,
+      phone: foundDriver.phone,
+      role: 'delivery_rider',
+      allowed_modules: ['delivery']
+    };
+  }
+
+  return null;
+}
+

@@ -5,6 +5,7 @@ import DamageReturnHub from './components/damage/DamageReturnHub';
 import DamageManagement from './components/DamageManagement';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
+import StaffPortal from './components/StaffPortal';
 import DriverPortal from './components/DriverPortal';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
@@ -33,79 +34,85 @@ import {
   deleteSavedAddress,
   fetchProductDamages,
   supabase,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  STORAGE_STAFF_KEY
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
-// Robust helper to determine if current URL path, hash, or query points to admin or dispatch
-function checkIsAdminUrl() {
-  if (typeof window === 'undefined') return false;
+// Robust helper to parse URL into application route state
+function parseUrlRoute() {
+  if (typeof window === 'undefined') {
+    return { isStaff: false, isAdminLogin: false, isAdmin: false, module: 'hub' };
+  }
   try {
     const pathname = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
     const hash = (window.location.hash || '').toLowerCase().replace(/\/+$/, '');
-    const search = (window.location.search || '').toLowerCase();
+    const search = new URLSearchParams(window.location.search);
+    const moduleParam = search.get('module');
 
-    // 1. Path check: /admin, /delivery, /dispatch, /orders, ending in "admin"
-    const isPathAdmin =
+    // 1. Common Staff Path (/staff)
+    const isStaff =
+      pathname === '/staff' ||
+      pathname.endsWith('/staff') ||
+      pathname.split('/').includes('staff') ||
+      hash === '#/staff' ||
+      hash === '#staff' ||
+      hash.includes('staff');
+
+    // 2. Dedicated Admin Sign-In Path (/admin/login)
+    const isAdminLogin =
+      pathname === '/admin/login' ||
+      pathname.endsWith('/admin/login') ||
+      hash === '#/admin/login' ||
+      hash === '#admin/login' ||
+      hash.includes('admin/login');
+
+    // 3. General Admin / Hub / Module path
+    const isAdmin = !isStaff && (
+      isAdminLogin ||
       pathname === '/admin' ||
-      pathname.endsWith('/admin') ||
-      pathname.endsWith('admin') ||
-      pathname.split('/').includes('admin') ||
+      pathname.startsWith('/admin') ||
+      pathname === '/hub' ||
       pathname.includes('delivery') ||
       pathname.includes('dispatch') ||
-      pathname.includes('orders');
-
-    // 2. Hash check (supports hash routing e.g. #/admin, #admin, #delivery, #dispatch)
-    const isHashAdmin =
-      hash === '#/admin' ||
-      hash === '#admin' ||
-      hash.endsWith('/admin') ||
-      hash.endsWith('admin') ||
+      pathname.includes('damage') ||
       hash.includes('admin') ||
+      hash.includes('hub') ||
       hash.includes('delivery') ||
-      hash.includes('dispatch');
+      hash.includes('dispatch') ||
+      Boolean(moduleParam)
+    );
 
-    // 3. Search query check (e.g. ?admin, ?module=delivery, ?tab=deliveries, etc.)
-    const isSearchAdmin =
-      search === '?admin' ||
-      search.includes('admin') ||
-      search.includes('module=delivery') ||
-      search.includes('tab=');
+    let module = moduleParam || 'hub';
+    if (!moduleParam) {
+      if (pathname.includes('delivery') || hash.includes('delivery')) module = 'delivery';
+      else if (pathname.includes('damage') || hash.includes('damage')) module = 'damage';
+    }
 
-    return Boolean(isPathAdmin || isHashAdmin || isSearchAdmin);
+    return { isStaff, isAdminLogin, isAdmin, module };
   } catch {
-    return false;
+    return { isStaff: false, isAdminLogin: false, isAdmin: false, module: 'hub' };
   }
 }
 
 export default function App() {
-  // Admin View State: true when visiting /admin or any URL ending in "admin"
-  const [isAdminView, setIsAdminView] = useState(() => checkIsAdminUrl());
-  // Alias for backward compatibility
-  const isAdminRoute = isAdminView;
+  // Routing States
+  const [isStaffRoute, setIsStaffRoute] = useState(() => parseUrlRoute().isStaff);
+  const [isAdminRoute, setIsAdminRoute] = useState(() => parseUrlRoute().isAdmin);
+  const [isAdminLoginRoute, setIsAdminLoginRoute] = useState(() => parseUrlRoute().isAdminLogin);
+  const [currentModule, setCurrentModule] = useState(() => parseUrlRoute().module);
 
-  // Listen to popstate, hashchange, and custom navigation events so refreshes & navigation persist
+  // Synchronize route states on browser navigation (Back, Forward, PushState, Hash)
   useEffect(() => {
     const handleUrlChange = () => {
-      const isAdmin = checkIsAdminUrl();
-      setIsAdminView(isAdmin);
-      const pathname = (window.location.pathname || '').toLowerCase();
-      const hash = (window.location.hash || '').toLowerCase();
-      const search = new URLSearchParams(window.location.search);
-      const urlParam = search.get('module');
-      if (urlParam) {
-        setCurrentModule(urlParam);
-      } else if (
-        search.get('tab') ||
-        pathname.includes('delivery') ||
-        pathname.includes('dispatch') ||
-        pathname.includes('orders') ||
-        hash.includes('delivery') ||
-        hash.includes('dispatch')
-      ) {
-        setCurrentModule('delivery');
+      const parsed = parseUrlRoute();
+      setIsStaffRoute(parsed.isStaff);
+      setIsAdminRoute(parsed.isAdmin);
+      setIsAdminLoginRoute(parsed.isAdminLogin);
+      if (parsed.module) {
+        setCurrentModule(parsed.module);
       }
     };
 
@@ -118,7 +125,7 @@ export default function App() {
     };
   }, []);
 
-  // Admin Authentication State (persists across refreshes on /admin)
+  // Admin Authentication State (persists across page reloads via session token)
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     try {
       const session = localStorage.getItem(ADMIN_SESSION_KEY);
@@ -128,56 +135,17 @@ export default function App() {
     }
   });
 
-  // Data State
-  const [drivers, setDrivers] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [damages, setDamages] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
-  const [currentModule, setCurrentModule] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const pathname = (window.location.pathname || '').toLowerCase();
-      const hash = (window.location.hash || '').toLowerCase();
-      const search = new URLSearchParams(window.location.search);
-      const urlParam = search.get('module');
-      if (urlParam) return urlParam;
-      if (
-        search.get('tab') ||
-        pathname.includes('delivery') ||
-        pathname.includes('dispatch') ||
-        pathname.includes('orders') ||
-        hash.includes('delivery') ||
-        hash.includes('dispatch')
-      ) {
-        return 'delivery';
-      }
-      const saved = localStorage.getItem('active_module');
-      if (saved) return saved;
+  // Common Staff Session State (persists across page reloads via session token)
+  const [staffSession, setStaffSession] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_STAFF_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
     }
-    return 'hub';
   });
 
-  // Sync currentModule with localStorage and URL query string to preserve screen on page refresh
-  useEffect(() => {
-    if (typeof window !== 'undefined' && isAdminView) {
-      try {
-        localStorage.setItem('active_module', currentModule);
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('module') !== currentModule) {
-          url.searchParams.set('module', currentModule);
-          window.history.replaceState(null, '', url.toString());
-        }
-      } catch (e) {}
-    }
-  }, [currentModule, isAdminView]);
-
-  // Alias for backward compatibility across modules
-  const adminSubView = currentModule;
-  const setAdminSubView = setCurrentModule;
-
-  // Authenticated Driver State
+  // Authenticated Driver State (persists in localStorage)
   const [currentDriver, setCurrentDriver] = useState(() => {
     try {
       const saved = localStorage.getItem(LOGGED_IN_DRIVER_KEY);
@@ -186,6 +154,37 @@ export default function App() {
       return null;
     }
   });
+
+  // Sync active module with browser URL query string for instant bookmarking & reload safety
+  useEffect(() => {
+    if (typeof window !== 'undefined' && isAdminRoute && !isAdminLoginRoute) {
+      try {
+        const url = new URL(window.location.href);
+        if (currentModule === 'hub') {
+          if (url.searchParams.has('module')) {
+            url.searchParams.delete('module');
+            window.history.replaceState(null, '', url.pathname + (url.search ? url.search : ''));
+          }
+        } else {
+          if (url.searchParams.get('module') !== currentModule) {
+            url.searchParams.set('module', currentModule);
+            window.history.replaceState(null, '', url.toString());
+          }
+        }
+      } catch (e) {}
+    }
+  }, [currentModule, isAdminRoute, isAdminLoginRoute]);
+
+  // Aliases for submodules
+  const adminSubView = currentModule;
+  const setAdminSubView = setCurrentModule;
+
+  // Data States
+  const [drivers, setDrivers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [damages, setDamages] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Modals
   const [isAddDriverOpen, setIsAddDriverOpen] = useState(false);
@@ -261,15 +260,12 @@ export default function App() {
 
   // Robust Multi-Device Real-Time Synchronization
   useEffect(() => {
-    // 1. Initial orders sync
     fetchOrders();
 
-    // 2. High-frequency 5-second polling fallback so multiple phones always stay synchronized
     const syncInterval = setInterval(() => {
       syncAllData();
     }, 5000);
 
-    // 3. Immediately sync whenever admin wakes phone, unlocks screen, or switches to this tab
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         syncAllData();
@@ -282,7 +278,6 @@ export default function App() {
     window.addEventListener('focus', handleFocus);
     window.addEventListener('online', handleOnline);
 
-    // 4. Supabase Realtime multi-table listener for instant sub-second sync across phones
     let realtimeChannel = null;
     if (isSupabaseConfigured) {
       try {
@@ -291,29 +286,16 @@ export default function App() {
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'orders' },
-            (payload) => {
-              console.log('Realtime orders change detected:', payload);
-              syncAllData();
-            }
+            () => syncAllData()
           )
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'delivery_boys' },
-            (payload) => {
-              console.log('Realtime delivery_boys change detected:', payload);
-              syncAllData();
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'driver_locations' },
-            () => {
-              syncAllData();
-            }
+            () => syncAllData()
           )
           .subscribe();
-      } catch (e) {
-        console.warn('Realtime channel subscription error:', e);
+      } catch (err) {
+        console.warn('Supabase Realtime subscription notice:', err.message);
       }
     }
 
@@ -328,175 +310,269 @@ export default function App() {
     };
   }, [fetchOrders, syncAllData]);
 
-  // Admin Login & Logout handlers
+  // ==========================================
+  // AUTHENTICATION & PORTAL NAVIGATION HANDLERS
+  // ==========================================
+
+  // 1. Admin Sign-In Success Handler
   const handleAdminLoginSuccess = () => {
     setIsAdminLoggedIn(true);
-    showToast('Welcome back, Admin Mittal!', 'success');
+    setIsAdminLoginRoute(false);
+    setIsAdminRoute(true);
+    setIsStaffRoute(false);
+    setCurrentModule('hub');
+    try {
+      window.history.pushState({}, '', '/admin');
+    } catch (e) {}
+    showToast('Admin authenticated successfully! Welcome to Master Hub.', 'success');
   };
 
+  // 2. Admin Logout Handler
   const handleAdminLogout = () => {
     setIsAdminLoggedIn(false);
     try {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
-    } catch (e) {
-      console.error('Failed to clear admin session', e);
-    }
-    showToast('Logged out of Admin Panel', 'info');
-  };
-
-  // Add Delivery Boy (Admin)
-  const handleAddDriver = async (driverInput) => {
+    } catch (e) {}
+    setIsAdminRoute(true);
+    setIsAdminLoginRoute(true);
+    setIsStaffRoute(false);
+    setCurrentModule('hub');
     try {
-      let created = driverInput;
-      if (!driverInput || !driverInput.id) {
-        created = await addDriver(driverInput);
-      }
-      if (!created) return;
-      // Optimistically append new delivery boy to admin drivers state
-      setDrivers((prev) => [created, ...prev.filter((d) => d.id !== created.id)]);
-      // Re-fetch to ensure fresh database synchronization across all dropdowns
-      loadInitialData();
-      showToast(`Driver ${created.name} registered successfully!`, 'success');
-      return created;
-    } catch (err) {
-      showToast(err.message || 'Error registering driver', 'error');
-      throw err;
+      window.history.pushState({}, '', '/admin/login');
+    } catch (e) {}
+    showToast('Logged out of Admin Portal', 'info');
+  };
+
+  // 3. Staff Sign-In Success Handler
+  const handleStaffLoginSuccess = (staff) => {
+    setStaffSession(staff);
+    try {
+      localStorage.setItem(STORAGE_STAFF_KEY, JSON.stringify(staff));
+    } catch (e) {}
+
+    // Redirection Logic upon verification:
+    // If allowed_modules contains only ONE item (e.g. delivery), route immediately to /admin?module=delivery without ever showing the Master Hub.
+    if (Array.isArray(staff.allowed_modules) && staff.allowed_modules.length === 1) {
+      const singleMod = staff.allowed_modules[0];
+      setCurrentModule(singleMod);
+      setIsStaffRoute(false);
+      setIsAdminRoute(true);
+      setIsAdminLoginRoute(false);
+      try {
+        window.history.pushState({}, '', `/admin?module=${singleMod}`);
+      } catch (e) {}
+      showToast(`Welcome, ${staff.name}! Authorized for ${singleMod} operations.`, 'success');
+    } else {
+      // If allowed_modules contains multiple items, display streamlined restricted staff hub
+      setCurrentModule('hub');
+      setIsStaffRoute(true);
+      setIsAdminRoute(false);
+      setIsAdminLoginRoute(false);
+      try {
+        window.history.pushState({}, '', '/staff');
+      } catch (e) {}
+      showToast(`Welcome back, ${staff.name}!`, 'success');
     }
   };
 
-  // Create Delivery (Admin)
+  // 4. Staff Logout Handler
+  const handleStaffLogout = () => {
+    setStaffSession(null);
+    try {
+      localStorage.removeItem(STORAGE_STAFF_KEY);
+    } catch (e) {}
+    setIsStaffRoute(true);
+    setIsAdminRoute(false);
+    setIsAdminLoginRoute(false);
+    setCurrentModule('hub');
+    try {
+      window.history.pushState({}, '', '/staff');
+    } catch (e) {}
+    showToast('Logged out of Staff Portal', 'info');
+  };
+
+  // 5. Switch to Staff Portal
+  const handleNavigateToStaff = () => {
+    setIsStaffRoute(true);
+    setIsAdminRoute(false);
+    setIsAdminLoginRoute(false);
+    try {
+      window.history.pushState({}, '', '/staff');
+    } catch (e) {}
+  };
+
+  // 6. Switch to Admin Login
+  const handleNavigateToAdminLogin = () => {
+    setIsStaffRoute(false);
+    setIsAdminRoute(true);
+    setIsAdminLoginRoute(true);
+    try {
+      window.history.pushState({}, '', '/admin/login');
+    } catch (e) {}
+  };
+
+  // 7. Back to Hub Navigation (from submodules e.g. delivery or damage)
+  const handleBackToHub = () => {
+    setCurrentModule('hub');
+    if (isStaffRoute || (staffSession && !isAdminLoggedIn)) {
+      setIsStaffRoute(true);
+      setIsAdminRoute(false);
+      setIsAdminLoginRoute(false);
+      try {
+        window.history.pushState({}, '', '/staff');
+      } catch (e) {}
+    } else {
+      setIsAdminRoute(true);
+      setIsStaffRoute(false);
+      setIsAdminLoginRoute(false);
+      try {
+        window.history.pushState({}, '', '/admin');
+      } catch (e) {}
+    }
+  };
+
+  // 8. Toggle Admin / Driver View from Navbar
+  const handleToggleAdminView = () => {
+    if (isAdminRoute || isStaffRoute) {
+      setIsAdminRoute(false);
+      setIsStaffRoute(false);
+      setIsAdminLoginRoute(false);
+      try {
+        window.history.pushState({}, '', '/');
+      } catch (e) {}
+    } else {
+      setIsAdminRoute(true);
+      setIsStaffRoute(false);
+      if (!isAdminLoggedIn) {
+        setIsAdminLoginRoute(true);
+        try {
+          window.history.pushState({}, '', '/admin/login');
+        } catch (e) {}
+      } else {
+        setIsAdminLoginRoute(false);
+        try {
+          window.history.pushState({}, '', '/admin');
+        } catch (e) {}
+      }
+    }
+  };
+
+  // ==========================================
+  // OPERATIONAL DATA ACTIONS (DELIVERY, ORDERS, DRIVERS)
+  // ==========================================
+
+  const handleAddDriver = async (driverData) => {
+    try {
+      const newDriver = await addDriver(driverData);
+      setDrivers((prev) => [...prev, newDriver]);
+      showToast(`Driver ${newDriver.name} added successfully!`, 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to add driver', 'error');
+    }
+  };
+
   const handleCreateTask = async (taskData) => {
     try {
-      const created = await createOrder(taskData);
-      setOrders((prev) => [created, ...prev]);
-      showToast(`Delivery #${created.order_number} dispatched successfully!`, 'success');
-      return created;
+      const newOrder = await createOrder(taskData);
+      setOrders((prev) => [newOrder, ...prev]);
+      showToast('Delivery task created successfully!', 'success');
     } catch (err) {
-      showToast(err.message || 'Error creating delivery', 'error');
-      throw err;
+      showToast(err.message || 'Failed to create task', 'error');
     }
   };
 
-  // Add Product (Admin)
   const handleAddProduct = async (productData) => {
     try {
-      const created = await addProduct(productData);
-      setProducts((prev) => [created, ...prev]);
-      showToast(`Product "${created.name}" added to catalog!`, 'success');
-      return created;
+      const newProduct = await addProduct(productData);
+      setProducts((prev) => [...prev, newProduct]);
+      showToast(`Product "${newProduct.name}" added successfully!`, 'success');
     } catch (err) {
-      showToast(err.message || 'Error adding product', 'error');
+      showToast(err.message || 'Failed to add product', 'error');
       throw err;
     }
   };
 
-  // Delete Product (Admin)
-  const handleDeleteProduct = async (productId) => {
+  const handleUpdateProduct = async (id, updates) => {
     try {
-      await deleteProduct(productId);
-      setProducts((prev) => prev.filter((p) => p.id !== productId));
-      showToast('Product deleted from catalog', 'info');
+      const updated = await updateProduct(id, updates);
+      setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
+      showToast('Product updated successfully!', 'success');
     } catch (err) {
-      showToast(err.message || 'Error deleting product', 'error');
+      showToast(err.message || 'Failed to update product', 'error');
       throw err;
     }
   };
 
-  // Update Product (Admin)
-  const handleUpdateProduct = async (productData) => {
+  const handleDeleteProduct = async (id) => {
     try {
-      const updated = await updateProduct(productData);
-      setProducts((prev) =>
-        prev.map((p) => (p.id === productData.id ? { ...p, ...updated } : p))
-      );
-      showToast(`Product "${updated.name}" updated!`, 'success');
-      return updated;
+      await deleteProduct(id);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+      showToast('Product deleted from inventory', 'info');
     } catch (err) {
-      showToast(err.message || 'Error updating product', 'error');
+      showToast(err.message || 'Failed to delete product', 'error');
       throw err;
     }
   };
 
-  // Update Order (Admin)
-  const handleUpdateOrder = async (orderId, orderUpdates) => {
+  const handleUpdateOrder = async (orderId, updates) => {
     try {
-      const updated = await updateOrder(orderId, orderUpdates);
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o))
-      );
-      showToast(`Task details updated!`, 'success');
-      return updated;
+      const updated = await updateOrder(orderId, updates);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, ...updated } : o)));
+      showToast('Order details updated!', 'success');
     } catch (err) {
       showToast(err.message || 'Failed to update order', 'error');
       throw err;
     }
   };
 
-  // Delete Order (Admin)
   const handleDeleteOrder = async (orderId) => {
     try {
       await deleteOrder(orderId);
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
-      showToast('Delivery task cancelled and deleted', 'info');
+      showToast('Order deleted successfully', 'info');
     } catch (err) {
       showToast(err.message || 'Failed to delete order', 'error');
       throw err;
     }
   };
 
-  // Update Delivery Boy (Admin)
-  const handleUpdateDriver = async (driverData) => {
+  const handleUpdateDriver = async (driverId, updates) => {
     try {
-      const updated = await updateDeliveryBoy(driverData.id, driverData);
-      setDrivers((prev) =>
-        prev.map((d) => (d.id === driverData.id ? { ...d, ...updated } : d))
-      );
-      showToast(`Delivery boy profile updated!`, 'success');
-      return updated;
+      const updated = await updateDeliveryBoy(driverId, updates);
+      setDrivers((prev) => prev.map((d) => (d.id === driverId ? { ...d, ...updated } : d)));
+      showToast('Driver details updated!', 'success');
     } catch (err) {
       showToast(err.message || 'Failed to update driver', 'error');
       throw err;
     }
   };
 
-  // Delete Delivery Boy (Admin)
   const handleDeleteDriver = async (driverId) => {
     try {
       await deleteDeliveryBoy(driverId);
       setDrivers((prev) => prev.filter((d) => d.id !== driverId));
-      setOrders((prev) =>
-        prev.map((o) =>
-          o.assigned_driver_id === driverId
-            ? {
-                ...o,
-                assigned_driver_id: null,
-                driver_name: 'Unassigned',
-                status: o.status === 'Delivered' ? 'Delivered' : 'Pending'
-              }
-            : o
-        )
-      );
-      showToast('Delivery boy removed from fleet', 'info');
+      showToast('Driver removed from active fleet', 'info');
     } catch (err) {
-      showToast(err.message || 'Failed to remove driver', 'error');
+      showToast(err.message || 'Failed to delete driver', 'error');
       throw err;
     }
   };
 
-  // Update Address (Admin)
-  const handleUpdateAddress = async (oldAddress, newAddressData) => {
+  const handleUpdateAddress = async (oldAddressStr, newAddressData) => {
     try {
-      await updateSavedAddress(oldAddress, newAddressData);
+      await updateSavedAddress(oldAddressStr, newAddressData);
       setOrders((prev) =>
         prev.map((o) =>
-          (o.address || '').trim().toLowerCase() === (oldAddress || '').trim().toLowerCase()
+          (o.address || '').trim().toLowerCase() === (oldAddressStr || '').trim().toLowerCase()
             ? {
                 ...o,
-                address: newAddressData.address,
-                landmark: newAddressData.landmark,
-                latitude: newAddressData.latitude,
-                longitude: newAddressData.longitude
+                address: newAddressData.address || o.address,
+                landmark: newAddressData.landmark !== undefined ? newAddressData.landmark : o.landmark,
+                phone: newAddressData.phone || o.phone,
+                customer_name: newAddressData.customer_name || o.customer_name,
+                latitude: newAddressData.latitude !== undefined ? newAddressData.latitude : o.latitude,
+                longitude: newAddressData.longitude !== undefined ? newAddressData.longitude : o.longitude
               }
             : o
         )
@@ -508,7 +584,6 @@ export default function App() {
     }
   };
 
-  // Delete Address (Admin)
   const handleDeleteAddress = async (addressStr, opts) => {
     try {
       await deleteSavedAddress(addressStr, opts);
@@ -528,7 +603,6 @@ export default function App() {
     }
   };
 
-  // Update Status (Admin)
   const handleUpdateStatus = async (orderId, newStatus) => {
     try {
       await updateOrderStatus(orderId, newStatus);
@@ -541,7 +615,6 @@ export default function App() {
     }
   };
 
-  // Assign Driver (Admin)
   const handleAssignDriver = async (orderId, driverId, driverName) => {
     try {
       const newStatus = driverId ? 'Out for Delivery' : 'Pending';
@@ -581,14 +654,12 @@ export default function App() {
     return driver;
   };
 
-  // Driver Logout (Driver Portal)
   const handleDriverLogout = () => {
     setCurrentDriver(null);
     localStorage.removeItem(LOGGED_IN_DRIVER_KEY);
     showToast('Logged out of driver portal', 'info');
   };
 
-  // Pin Current Location (GPS)
   const handlePinLocation = async (orderId, latitude, longitude) => {
     try {
       await updateOrderLocation(orderId, latitude, longitude);
@@ -601,7 +672,6 @@ export default function App() {
     }
   };
 
-  // Complete Delivery with POD (Driver Portal)
   const handleCompleteDelivery = async (orderId, podData) => {
     try {
       const updated = await completeDelivery(orderId, podData);
@@ -615,7 +685,6 @@ export default function App() {
     }
   };
 
-  // Accept Open Pool Order (Driver Portal)
   const handleAcceptOrder = async (orderId, estimatedMinutes) => {
     try {
       if (!currentDriver) {
@@ -644,71 +713,90 @@ export default function App() {
     }
   };
 
-  const handleToggleAdminView = () => {
-    setIsAdminView((prev) => {
-      const next = !prev;
-      try {
-        if (next) {
-          window.history.pushState({}, '', '/admin');
-        } else {
-          window.history.pushState({}, '', '/');
-        }
-      } catch (e) {}
-      return next;
-    });
-  };
-
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
-        isAdminView={isAdminView}
-        isAdminRoute={isAdminView}
-        adminSubView={adminSubView}
-        onSelectAdminSubView={setAdminSubView}
+        isAdminView={isAdminRoute && !isAdminLoginRoute}
+        isAdminRoute={isAdminRoute}
+        adminSubView={currentModule}
+        onSelectAdminSubView={(mod) => setCurrentModule(mod)}
         onToggleAdminView={handleToggleAdminView}
         currentDriver={currentDriver}
         onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
+        isStaffView={isStaffRoute}
+        staffSession={staffSession}
+        onStaffLogout={handleStaffLogout}
+        onNavigateToStaff={handleNavigateToStaff}
+        onNavigateToAdmin={handleNavigateToAdminLogin}
       />
 
       {/* Main Container: Distinct Routes */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
-        {isAdminView ? (
-          /* ROUTE /admin OR ENDING IN "admin": ADMIN HUB & SUB-MODULES */
-          isAdminLoggedIn ? (
+        {isStaffRoute ? (
+          /* ======================================================== */
+          /* ROUTE /staff: COMMON STAFF PORTAL (LOGIN & RESTRICTED HUB) */
+          /* ======================================================== */
+          <StaffPortal
+            staffSession={staffSession}
+            onStaffLoginSuccess={handleStaffLoginSuccess}
+            onStaffLogout={handleStaffLogout}
+            onSelectModule={(mod) => {
+              setCurrentModule(mod);
+              setIsAdminRoute(true);
+              setIsStaffRoute(false);
+              try {
+                window.history.pushState({}, '', `/admin?module=${mod}`);
+              } catch (e) {}
+            }}
+            onNavigateToAdminLogin={handleNavigateToAdminLogin}
+          />
+        ) : isAdminRoute ? (
+          /* ======================================================== */
+          /* ROUTE /admin OR /admin/login: EXCLUSIVE MASTER ADMIN HUB */
+          /* ======================================================== */
+          isAdminLoginRoute || !isAdminLoggedIn ? (
+            <AdminLogin
+              onLoginSuccess={handleAdminLoginSuccess}
+              onNavigateToStaffLogin={handleNavigateToStaff}
+            />
+          ) : (
             <div>
               {/* Persistent Breadcrumb Navigation Bar when inside sub-modules */}
-              {adminSubView !== 'hub' && (
+              {currentModule !== 'hub' && (
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
                   <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
                     <button
-                      onClick={() => setAdminSubView('hub')}
+                      type="button"
+                      onClick={handleBackToHub}
                       className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition-colors shrink-0"
                     >
                       ← <span className="hidden xs:inline">Back to</span> Hub
                     </button>
                     <span className="text-slate-600 font-bold">/</span>
                     <span className="text-white font-semibold truncate max-w-[170px] sm:max-w-none">
-                      {adminSubView === 'delivery'
+                      {currentModule === 'delivery'
                         ? 'Delivery & Dispatch System'
                         : 'Damage & Returns Management'}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {adminSubView === 'delivery' ? (
+                    {currentModule === 'delivery' ? (
                       <button
-                        onClick={() => setAdminSubView('damage')}
+                        type="button"
+                        onClick={() => setCurrentModule('damage')}
                         className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
                       >
                         <span className="hidden sm:inline">Switch to </span>Damage Portal →
                       </button>
                     ) : (
                       <button
-                        onClick={() => setAdminSubView('delivery')}
+                        type="button"
+                        onClick={() => setCurrentModule('delivery')}
                         className="text-xs text-emerald-300 hover:text-white px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all font-medium"
                       >
                         <span className="hidden sm:inline">Switch to </span>Dispatch Console →
@@ -719,19 +807,20 @@ export default function App() {
               )}
 
               {/* Render Selected Admin Sub-Module */}
-              {adminSubView === 'hub' ? (
+              {currentModule === 'hub' ? (
                 <AdminHub
-                  onSelectModule={(mod) => setAdminSubView(mod)}
+                  onSelectModule={(mod) => setCurrentModule(mod)}
                   orders={orders}
                   drivers={drivers}
                   damages={damages}
                   onOpenCreateTask={() => setIsCreateTaskOpen(true)}
                   onOpenAddDriver={() => setIsAddDriverOpen(true)}
                   onRefreshAll={loadInitialData}
+                  onAdminLogout={handleAdminLogout}
                 />
-              ) : adminSubView === 'damage' ? (
+              ) : currentModule === 'damage' ? (
                 <DamageReturnHub
-                  onBackToHub={() => setAdminSubView('hub')}
+                  onBackToHub={handleBackToHub}
                   drivers={drivers}
                 />
               ) : (
@@ -760,11 +849,11 @@ export default function App() {
                 </ErrorBoundary>
               )}
             </div>
-          ) : (
-            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           )
         ) : (
+          /* ======================================================== */
           /* ROUTE /: EXCLUSIVELY DRIVER PORTAL VIEW */
+          /* ======================================================== */
           <DriverPortal
             currentDriver={currentDriver}
             drivers={drivers}
