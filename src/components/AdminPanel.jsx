@@ -423,7 +423,7 @@ export function AdminPanel({
     }
     loadAdminData();
 
-    // 10-second auto-poll interval for live radar refresh
+    // 5-second auto-poll interval for live radar & multi-phone refresh
     const pollInterval = setInterval(async () => {
       const [locs, dBoys] = await Promise.all([
         fetchDriverLocations(),
@@ -431,9 +431,9 @@ export function AdminPanel({
       ]);
       if (locs) setDriverLocations(locs);
       if (Array.isArray(dBoys)) setDeliveryBoys(filterRealRiders(dBoys));
-    }, 10000);
+    }, 5000);
 
-    // Supabase Realtime subscription on delivery_boys
+    // Supabase Realtime subscription on delivery_boys & driver_locations
     let channel = null;
     if (isSupabaseConfigured) {
       try {
@@ -445,6 +445,14 @@ export function AdminPanel({
             async () => {
               const dBoys = await fetchDeliveryBoys();
               if (Array.isArray(dBoys)) setDeliveryBoys(filterRealRiders(dBoys));
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'driver_locations' },
+            async () => {
+              const locs = await fetchDriverLocations();
+              if (locs) setDriverLocations(locs);
             }
           )
           .subscribe();
@@ -843,6 +851,21 @@ export function AdminPanel({
                           #{order.order_number}
                         </span>
                         {getStatusBadge(order.status)}
+                        {Boolean(
+                          order.is_prepaid ||
+                          order.isPrepaid ||
+                          order.payment_status === 'Prepaid' ||
+                          order.payment_method === 'Prepaid' ||
+                          (typeof order.notes === 'string' && order.notes.includes('[PREPAID'))
+                        ) ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            🟢 Prepaid
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                            💵 COD
+                          </span>
+                        )}
                         {order.slip_image_url && (
                           <button
                             type="button"
@@ -957,6 +980,16 @@ export function AdminPanel({
                               {item.quantity}x {item.name}
                             </span>
                           ))}
+                        </div>
+                      )}
+
+                      {/* Delivery Notes / Comments */}
+                      {order.notes && (
+                        <div className="mt-2 ml-5 p-2 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300">
+                          <span className="text-[10px] uppercase font-semibold text-slate-400 block mb-0.5">
+                            Notes / Delivery Remarks:
+                          </span>
+                          <p className="italic text-slate-200">{order.notes}</p>
                         </div>
                       )}
                     </div>

@@ -163,6 +163,24 @@ export default function App() {
     }, 4000);
   }, []);
 
+  // Multi-device synchronization: fetch latest orders, drivers & damages
+  const syncAllData = useCallback(async () => {
+    try {
+      const [driversData, ordersData] = await Promise.all([
+        fetchDrivers().catch(() => null),
+        fetchOrdersFromApi().catch(() => null)
+      ]);
+      if (Array.isArray(driversData) && driversData.length > 0) {
+        setDrivers(driversData);
+      }
+      if (Array.isArray(ordersData)) {
+        setOrders(ordersData);
+      }
+    } catch (err) {
+      console.warn('Background sync error:', err);
+    }
+  }, []);
+
   // Fetch orders and update state
   const fetchOrders = useCallback(async () => {
     try {
@@ -202,25 +220,74 @@ export default function App() {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Robust Multi-Device Real-Time Synchronization
   useEffect(() => {
-    fetchOrders(); // Initial load
+    // 1. Initial orders sync
+    fetchOrders();
 
-    const channel = supabase
-      .channel('orders-realtime-channel')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          console.log('Realtime change detected:', payload);
-          fetchOrders(); // Refresh the list automatically on any insert/update/delete
-        }
-      )
-      .subscribe();
+    // 2. High-frequency 5-second polling fallback so multiple phones always stay synchronized
+    const syncInterval = setInterval(() => {
+      syncAllData();
+    }, 5000);
+
+    // 3. Immediately sync whenever admin wakes phone, unlocks screen, or switches to this tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncAllData();
+      }
+    };
+    const handleFocus = () => syncAllData();
+    const handleOnline = () => syncAllData();
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
+
+    // 4. Supabase Realtime multi-table listener for instant sub-second sync across phones
+    let realtimeChannel = null;
+    if (isSupabaseConfigured) {
+      try {
+        realtimeChannel = supabase
+          .channel('app-multiphone-realtime-channel')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'orders' },
+            (payload) => {
+              console.log('Realtime orders change detected:', payload);
+              syncAllData();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'delivery_boys' },
+            (payload) => {
+              console.log('Realtime delivery_boys change detected:', payload);
+              syncAllData();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'driver_locations' },
+            () => {
+              syncAllData();
+            }
+          )
+          .subscribe();
+      } catch (e) {
+        console.warn('Realtime channel subscription error:', e);
+      }
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(syncInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+      }
     };
-  }, []);
+  }, [fetchOrders, syncAllData]);
 
   // Admin Login & Logout handlers
   const handleAdminLoginSuccess = () => {

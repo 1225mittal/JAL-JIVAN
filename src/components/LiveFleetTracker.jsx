@@ -1,4 +1,6 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   Navigation,
   Phone,
@@ -17,7 +19,10 @@ import {
   Filter,
   User,
   Activity,
-  ArrowRight
+  ArrowRight,
+  Layers,
+  Crosshair,
+  Maximize2
 } from 'lucide-react';
 import {
   calculateDistanceKm,
@@ -39,6 +44,11 @@ export default function LiveFleetTracker({
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL'); // 'ALL' | 'ONLINE' | 'ON_ROUTE' | 'IDLE' | 'OFFLINE'
+  const [viewMode, setViewMode] = useState('MAP'); // 'MAP' | 'LIST'
+
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersLayerRef = useRef(null);
 
   const storeLat = Number(storeSettings.latitude) || 28.6692;
   const storeLng = Number(storeSettings.longitude) || 77.4538;
@@ -202,6 +212,186 @@ export default function LiveFleetTracker({
     return { total, online, onRoute, idle, offline };
   }, [riderCards]);
 
+  // Leaflet In-App Map Lifecycle & Live Markers
+  useEffect(() => {
+    if (viewMode === 'LIST') return;
+    if (!mapContainerRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      const map = L.map(mapContainerRef.current, {
+        center: [storeLat, storeLng],
+        zoom: 13,
+        zoomControl: true,
+        attributionControl: false
+      });
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd'
+      }).addTo(map);
+
+      const markersGroup = L.layerGroup().addTo(map);
+      markersLayerRef.current = markersGroup;
+      mapInstanceRef.current = map;
+    }
+
+    const map = mapInstanceRef.current;
+    const markersGroup = markersLayerRef.current;
+    if (!map || !markersGroup) return;
+
+    markersGroup.clearLayers();
+
+    // 1. Store Central Hub Marker & Geofence
+    const hubIcon = L.divIcon({
+      className: 'custom-hub-marker',
+      html: `
+        <div style="background: linear-gradient(135deg, #059669, #0d9488); width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.45); border: 2.5px solid #ffffff; font-size: 19px; cursor: pointer;">
+          🏪
+        </div>
+      `,
+      iconSize: [38, 38],
+      iconAnchor: [19, 19],
+      popupAnchor: [0, -20]
+    });
+
+    const hubMarker = L.marker([storeLat, storeLng], { icon: hubIcon }).addTo(markersGroup);
+    hubMarker.bindPopup(`
+      <div style="font-family: inherit; font-size: 12px; color: #0f172a; min-width: 160px;">
+        <strong style="color: #059669; font-size: 13px;">🏪 ${storeName}</strong><br/>
+        <span style="color: #64748b;">Central Dispatch Hub</span><br/>
+        <span style="display: inline-block; margin-top: 3px; font-weight: bold; color: #10b981;">Geofence Radius: ${storeRadius}m</span>
+      </div>
+    `);
+
+    L.circle([storeLat, storeLng], {
+      radius: storeRadius,
+      color: '#10b981',
+      weight: 2,
+      dashArray: '6, 6',
+      fillColor: '#10b981',
+      fillOpacity: 0.12
+    }).addTo(markersGroup);
+
+    // 2. Rider Markers
+    riderCards.forEach((rider) => {
+      if (rider.lat !== null && rider.lng !== null && !isNaN(rider.lat) && !isNaN(rider.lng)) {
+        const initials = rider.name ? rider.name.charAt(0).toUpperCase() : 'R';
+        const isOnline = rider.isOnline;
+
+        const riderIcon = L.divIcon({
+          className: 'custom-rider-div-icon',
+          html: isOnline ? `
+            <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer;">
+              <div style="position: absolute; width: 44px; height: 44px; background: rgba(16, 185, 129, 0.35); border-radius: 50%; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite; top: -4px;"></div>
+              <div style="background: linear-gradient(135deg, #10b981, #059669); width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2.5px solid #ffffff; box-shadow: 0 4px 10px rgba(0,0,0,0.5); color: #ffffff; font-weight: 800; font-size: 13px; z-index: 2;">
+                ${initials}
+              </div>
+              <div style="margin-top: 2px; background: #0f172a; border: 1px solid #10b981; padding: 1px 6px; border-radius: 9999px; font-size: 10px; font-weight: 700; color: #6ee7b7; white-space: nowrap; box-shadow: 0 2px 5px rgba(0,0,0,0.4); z-index: 2;">
+                🛵 ${rider.name.split(' ')[0]}
+              </div>
+            </div>
+          ` : `
+            <div style="display: flex; flex-direction: column; align-items: center; opacity: 0.75; cursor: pointer;">
+              <div style="background: #334155; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #64748b; color: #cbd5e1; font-weight: 700; font-size: 11px;">
+                ${initials}
+              </div>
+              <div style="margin-top: 2px; background: #0f172a; border: 1px solid #475569; padding: 1px 5px; border-radius: 9999px; font-size: 9px; font-weight: 600; color: #94a3b8; white-space: nowrap;">
+                ${rider.name.split(' ')[0]}
+              </div>
+            </div>
+          `,
+          iconSize: [70, 54],
+          iconAnchor: [35, 22],
+          popupAnchor: [0, -24]
+        });
+
+        const m = L.marker([rider.lat, rider.lng], { icon: riderIcon }).addTo(markersGroup);
+        m.bindPopup(`
+          <div style="font-family: inherit; font-size: 12px; color: #0f172a; min-width: 170px;">
+            <strong style="color: #059669; font-size: 14px;">🛵 ${rider.name}</strong><br/>
+            <span style="color: #64748b; font-size: 11px;">${rider.phone || 'Active Rider'}</span><br/>
+            <div style="margin-top: 4px;">
+              <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; background: ${isOnline ? '#dcfce7' : '#f1f5f9'}; color: ${isOnline ? '#15803d' : '#475569'}; font-size: 10px; font-weight: bold;">
+                ${isOnline ? '🟢 Live Online' : '⚪ Offline'} • ${rider.lastSeenText}
+              </span>
+            </div>
+            ${rider.activeOrder ? `
+              <div style="margin-top: 6px; padding: 6px; background: #f8fafc; border-radius: 6px; border-left: 3px solid #0284c7;">
+                <strong style="color: #0369a1;">Order #${rider.activeOrder.order_number}</strong><br/>
+                <span style="color: #475569; font-size: 11px;">${rider.activeOrder.address}</span><br/>
+                <span style="color: #0284c7; font-weight: bold; font-size: 11px;">ETA: ~${rider.deliveryEtaMins || 10} mins</span>
+              </div>
+            ` : '<div style="margin-top: 4px; font-size: 11px; color: #64748b;">Idle / Available</div>'}
+          </div>
+        `);
+      }
+    });
+
+    // 3. Active Delivery Dropoff Pins
+    orders
+      .filter((o) => o.status === 'Out for Delivery' && o.latitude && o.longitude)
+      .forEach((ord) => {
+        const dropIcon = L.divIcon({
+          className: 'custom-dropoff-icon',
+          html: `
+            <div style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
+              <div style="background: linear-gradient(135deg, #0284c7, #0369a1); width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid #ffffff; box-shadow: 0 4px 8px rgba(0,0,0,0.3); font-size: 12px;">
+                📦
+              </div>
+              <div style="margin-top: 1px; background: #0f172a; border: 1px solid #0284c7; padding: 1px 5px; border-radius: 4px; font-size: 9px; font-weight: 700; color: #7dd3fc; white-space: nowrap;">
+                #${ord.order_number}
+              </div>
+            </div>
+          `,
+          iconSize: [50, 44],
+          iconAnchor: [25, 18],
+          popupAnchor: [0, -20]
+        });
+
+        const dm = L.marker([Number(ord.latitude), Number(ord.longitude)], { icon: dropIcon }).addTo(markersGroup);
+        dm.bindPopup(`
+          <div style="font-family: inherit; font-size: 12px; color: #0f172a; min-width: 160px;">
+            <strong style="color: #0284c7;">📦 Order #${ord.order_number}</strong><br/>
+            <span style="color: #334155;">${ord.address}</span><br/>
+            <span style="color: #059669; font-weight: bold;">₹${ord.amount}</span>
+          </div>
+        `);
+      });
+
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+  }, [riderCards, orders, storeLat, storeLng, storeName, storeRadius, viewMode]);
+
+  // Clean up map on unmount
+  useEffect(() => {
+    return () => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleFitAllMap = () => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+    const points = [[storeLat, storeLng]];
+    riderCards.forEach((r) => {
+      if (r.lat && r.lng && !isNaN(r.lat) && !isNaN(r.lng)) points.push([r.lat, r.lng]);
+    });
+    if (points.length === 1) {
+      map.flyTo([storeLat, storeLng], 14);
+    } else {
+      map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 16 });
+    }
+  };
+
+  const handleCenterHubMap = () => {
+    if (!mapInstanceRef.current) return;
+    mapInstanceRef.current.flyTo([storeLat, storeLng], 15);
+  };
+
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Top Banner & Hub Status Bar */}
@@ -307,6 +497,84 @@ export default function LiveFleetTracker({
           <p className="text-xl font-black text-slate-400 mt-0.5">{metrics.offline}</p>
           <span className="text-[10px] text-slate-600">Off duty / no signal</span>
         </div>
+      </div>
+
+      {/* LIVE IN-APP FLEET MAP */}
+      <div className="glass-card rounded-2xl border border-slate-800 p-4 shadow-xl space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div>
+              <h3 className="font-extrabold text-white text-sm sm:text-base">
+                Live In-App Fleet GPS Radar
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Track riders live on map, store hub radius, and customer dropoff pins
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              onClick={() => setViewMode((prev) => (prev === 'MAP' ? 'LIST' : 'MAP'))}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition flex items-center gap-1"
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{viewMode === 'MAP' ? 'Hide Map' : 'Show Map'}</span>
+            </button>
+            {viewMode === 'MAP' && (
+              <>
+                <button
+                  onClick={handleFitAllMap}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 text-xs font-semibold border border-emerald-500/30 transition flex items-center gap-1 shadow-sm"
+                  title="Fit All Active Riders & Store on Map"
+                >
+                  <Crosshair className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Fit All Riders</span>
+                </button>
+                <button
+                  onClick={handleCenterHubMap}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold border border-slate-700 transition flex items-center gap-1"
+                  title="Center View on Store Central Hub"
+                >
+                  <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Store Hub</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {viewMode === 'MAP' && (
+          <div className="space-y-2 animate-fade-in">
+            <div
+              ref={mapContainerRef}
+              className="w-full h-80 sm:h-96 rounded-xl overflow-hidden border border-slate-800 shadow-inner relative z-0"
+            />
+            {/* Map Legend */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <span>🏪</span>
+                  <strong className="text-emerald-400">{storeName}</strong> ({storeRadius}m geofence)
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                  <strong className="text-emerald-300">Live Online Rider</strong>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-slate-500 inline-block" />
+                  <span>Offline</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <span>📦</span>
+                  <span className="text-sky-300">Customer Dropoff</span>
+                </span>
+              </div>
+              <span className="text-slate-500 italic">Click any marker to view live ETA & details</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filter and Search Bar */}

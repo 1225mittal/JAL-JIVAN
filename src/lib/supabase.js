@@ -515,6 +515,43 @@ export async function driverLogin(phone, pin) {
 // ORDER OPERATIONS
 // ==========================================
 
+export function normalizeOrder(order) {
+  if (!order) return order;
+  let items = order.items;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+    }
+  }
+  if ((!items || !Array.isArray(items) || items.length === 0) && order.notes) {
+    const match = String(order.notes).match(/\[Items:\s*([^\]]+)\]/);
+    if (match && match[1]) {
+      items = match[1].split(',').map((it, idx) => {
+        const trimmed = it.trim();
+        const qMatch = trimmed.match(/^(\d+)x\s*(.*)$/);
+        if (qMatch) {
+          return { id: `item-${idx}`, quantity: parseInt(qMatch[1], 10), name: qMatch[2] };
+        }
+        return { id: `item-${idx}`, quantity: 1, name: trimmed };
+      });
+    }
+  }
+
+  const isPrepaid = order.payment_status === 'Prepaid' ||
+    order.payment_method === 'Prepaid' ||
+    order.is_prepaid === true ||
+    (typeof order.notes === 'string' && order.notes.includes('[PREPAID'));
+
+  return {
+    ...order,
+    items: Array.isArray(items) ? items : [],
+    is_prepaid: isPrepaid,
+    isPrepaid: isPrepaid
+  };
+}
+
 export async function fetchOrders() {
   if (isSupabaseConfigured) {
     try {
@@ -523,12 +560,12 @@ export async function fetchOrders() {
         .select('*')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return (data || []).map(normalizeOrder);
     } catch (err) {
       console.warn('Supabase fetchOrders failed, falling back to local store:', err.message);
     }
   }
-  return getLocalOrders();
+  return (getLocalOrders() || []).map(normalizeOrder);
 }
 
 export async function createOrder({
@@ -547,10 +584,29 @@ export async function createOrder({
   audioUrl,
   audio_url,
   slipImageUrl,
-  slip_image_url
+  slip_image_url,
+  isPrepaid = false,
+  paymentStatus = 'Pending',
+  paymentMethod = null
 }) {
   const finalSlipUrl = slipImageUrl || slip_image_url || null;
   const finalAudioUrl = audio_url || audioUrl || null;
+  const isOrderPrepaid = isPrepaid || paymentStatus === 'Prepaid' || paymentMethod === 'Prepaid';
+
+  // Construct notes including items summary and prepaid tag as safe backup across all databases
+  const notesParts = [];
+  if (isOrderPrepaid) {
+    notesParts.push('[PREPAID - DO NOT COLLECT CASH]');
+  }
+  if (Array.isArray(items) && items.length > 0) {
+    const itemsText = items.map((i) => `${i.quantity || 1}x ${i.name}`).join(', ');
+    notesParts.push(`[Items: ${itemsText}]`);
+  }
+  if (notes && notes.trim()) {
+    notesParts.push(notes.trim());
+  }
+  const finalNotes = notesParts.join(' ');
+
   const newOrder = {
     id: 'ord-' + Date.now(),
     order_number: orderNumber || `JJ-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -567,11 +623,14 @@ export async function createOrder({
     items: Array.isArray(items) ? items : [],
     slip_image_url: finalSlipUrl,
     audio_url: finalAudioUrl,
-    payment_method: null,
+    payment_method: isOrderPrepaid ? 'Prepaid' : null,
+    payment_status: isOrderPrepaid ? 'Prepaid' : 'Pending',
+    is_prepaid: isOrderPrepaid,
+    isPrepaid: isOrderPrepaid,
     payment_proof_url: null,
     delivery_proof_url: null,
     delivered_at: null,
-    notes: notes || '',
+    notes: finalNotes,
     created_at: new Date().toISOString()
   };
 
@@ -592,7 +651,8 @@ export async function createOrder({
         items: newOrder.items,
         notes: newOrder.notes,
         audio_url: newOrder.audio_url,
-        slip_image_url: newOrder.slip_image_url
+        slip_image_url: newOrder.slip_image_url,
+        payment_method: newOrder.payment_method
       };
 
       let { data, error } = await supabase
@@ -602,11 +662,12 @@ export async function createOrder({
         .single();
 
       // Graceful retry without items/customer_name/slip_image_url/audio_url if columns are not yet in remote schema
-      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.message?.includes('slip_image_url') || error.message?.includes('audio_url') || error.code === 'PGRST204')) {
+      if (error && (error.message?.includes('items') || error.message?.includes('customer_name') || error.message?.includes('slip_image_url') || error.message?.includes('audio_url') || error.message?.includes('payment_method') || error.code === 'PGRST204')) {
         delete insertPayload.items;
         delete insertPayload.customer_name;
         delete insertPayload.slip_image_url;
         delete insertPayload.audio_url;
+        delete insertPayload.payment_method;
         const res = await supabase.from('orders').insert([insertPayload]).select().single();
         data = res.data;
         error = res.error;
@@ -623,7 +684,7 @@ export async function createOrder({
           latitude: newOrder.latitude,
           longitude: newOrder.longitude
         }).catch(() => {});
-        return { ...newOrder, ...data };
+        return normalizeOrder({ ...newOrder, ...data });
       }
     } catch (err) {
       console.warn('Supabase createOrder failed, saving locally:', err.message);
@@ -644,7 +705,7 @@ export async function createOrder({
     longitude: newOrder.longitude
   }).catch(() => {});
 
-  return newOrder;
+  return normalizeOrder(newOrder);
 }
 
 export async function updateOrderStatus(orderId, newStatus) {
@@ -754,14 +815,31 @@ export async function deleteOrder(orderId) {
   return true;
 }
 
-export async function completeDelivery(orderId, { paymentMethod, paymentProofUrl, deliveryProofUrl, notes }) {
+export async function completeDelivery(orderId, {
+  paymentMethod,
+  paymentProofUrl,
+  deliveryProofUrl,
+  notes,
+  actualAmount,
+  deliveryComment,
+  deliveryNotes
+}) {
+  const commentText = deliveryComment || deliveryNotes || '';
+  const noteParts = [];
+  if (notes && notes.trim()) noteParts.push(notes.trim());
+  if (commentText && commentText.trim()) noteParts.push(`[Delivery Note: ${commentText.trim()}]`);
+  if (actualAmount !== undefined && actualAmount !== null && String(actualAmount).trim() !== '') {
+    noteParts.push(`[Collected: ₹${actualAmount}]`);
+  }
+  const combinedNotes = noteParts.join(' • ');
+
   const updates = {
     status: 'Delivered',
     payment_method: paymentMethod,
     payment_proof_url: paymentProofUrl || null,
     delivery_proof_url: deliveryProofUrl || null,
     delivered_at: new Date().toISOString(),
-    notes: notes || null
+    notes: combinedNotes || null
   };
 
   if (isSupabaseConfigured) {
@@ -773,7 +851,7 @@ export async function completeDelivery(orderId, { paymentMethod, paymentProofUrl
         .select()
         .single();
       if (error) throw error;
-      return data;
+      return normalizeOrder(data);
     } catch (err) {
       console.warn('Supabase completeDelivery failed, updating locally:', err.message);
     }
@@ -784,7 +862,7 @@ export async function completeDelivery(orderId, { paymentMethod, paymentProofUrl
     o.id === orderId ? { ...o, ...updates } : o
   );
   saveLocalOrders(updated);
-  return updated.find((o) => o.id === orderId);
+  return normalizeOrder(updated.find((o) => o.id === orderId));
 }
 
 // ==========================================

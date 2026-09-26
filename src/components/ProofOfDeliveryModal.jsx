@@ -20,13 +20,38 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
 
-  const [paymentMethod, setPaymentMethod] = useState('Cash'); // 'Cash' | 'UPI' | 'Credit'
+  const isOrderPrepaid = Boolean(
+    order?.is_prepaid ||
+    order?.isPrepaid ||
+    order?.payment_status === 'Prepaid' ||
+    order?.payment_method === 'Prepaid' ||
+    (typeof order?.notes === 'string' && order.notes.includes('[PREPAID'))
+  );
+
+  const [paymentMethod, setPaymentMethod] = useState(() => (isOrderPrepaid ? 'Prepaid' : 'Cash'));
+  const [actualAmountReceived, setActualAmountReceived] = useState(() => (isOrderPrepaid ? '0' : String(order?.amount || '')));
+  const [deliveryComment, setDeliveryComment] = useState('');
   const [upiScreenshotFile, setUpiScreenshotFile] = useState(null);
   const [upiPreview, setUpiPreview] = useState(null);
 
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (order) {
+      const prepaid = Boolean(
+        order?.is_prepaid ||
+        order?.isPrepaid ||
+        order?.payment_status === 'Prepaid' ||
+        order?.payment_method === 'Prepaid' ||
+        (typeof order?.notes === 'string' && order.notes.includes('[PREPAID'))
+      );
+      setPaymentMethod(prepaid ? 'Prepaid' : 'Cash');
+      setActualAmountReceived(prepaid ? '0' : String(order.amount || ''));
+      setDeliveryComment('');
+    }
+  }, [order]);
 
   // In-app live camera state
   const [liveCameraTarget, setLiveCameraTarget] = useState(null); // 'photo' | 'upi' | null
@@ -181,10 +206,13 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
       }
 
       await onCompleteDelivery(order.id, {
-        paymentMethod,
+        paymentMethod: isOrderPrepaid ? 'Prepaid' : paymentMethod,
         paymentProofUrl,
         deliveryProofUrl,
-        notes: notes.trim()
+        notes: notes.trim(),
+        actualAmount: isOrderPrepaid ? 0 : (actualAmountReceived !== '' ? Number(actualAmountReceived) : order.amount),
+        deliveryComment: deliveryComment.trim(),
+        deliveryNotes: deliveryComment.trim()
       });
 
       stopLiveCamera();
@@ -427,67 +455,85 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
             </div>
 
             {/* 2. Payment Method Selector */}
-            <div>
-              <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2">
-                2. Payment Collection Method <span className="text-rose-400">*</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2.5">
-                {/* Cash */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('Cash')}
-                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                    paymentMethod === 'Cash'
-                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500'
-                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <Banknote className="w-5 h-5 mb-1.5" />
-                  <span className="text-xs font-semibold">Cash</span>
-                  <span className="text-[10px] opacity-75">₹{order.amount}</span>
-                </button>
-
-                {/* UPI */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('UPI')}
-                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                    paymentMethod === 'UPI'
-                      ? 'bg-teal-600/20 border-teal-500 text-teal-300 shadow-md shadow-teal-500/10 ring-1 ring-teal-500'
-                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <QrCode className="w-5 h-5 mb-1.5" />
-                  <span className="text-xs font-semibold">UPI Online</span>
-                  <span className="text-[10px] opacity-75">QR / App</span>
-                </button>
-
-                {/* Credit */}
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('Credit')}
-                  className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
-                    paymentMethod === 'Credit'
-                      ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10 ring-1 ring-amber-500'
-                      : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <FileText className="w-5 h-5 mb-1.5" />
-                  <span className="text-xs font-semibold">Credit</span>
-                  <span className="text-[10px] opacity-75">Khata/Postpaid</span>
-                </button>
+            {/* 2. Payment Method Selector */}
+            {isOrderPrepaid ? (
+              <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-xs space-y-1">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 uppercase text-[10px]">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Prepaid Order • Paid Online
+                </span>
+                <p className="text-white font-semibold">
+                  Payment is already completed (₹0 to collect from customer).
+                </p>
+                <p className="text-slate-400 text-[11px]">
+                  Capture the package delivery photo above and submit to finish.
+                </p>
               </div>
-            </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-2">
+                  2. Payment Collection Method <span className="text-rose-400">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2.5">
+                  {/* Cash */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('Cash')}
+                    className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                      paymentMethod === 'Cash'
+                        ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <Banknote className="w-5 h-5 mb-1.5" />
+                    <span className="text-xs font-semibold">Cash</span>
+                    <span className="text-[10px] opacity-75">₹{order.amount}</span>
+                  </button>
 
-            {/* If UPI is selected: Camera & Screenshot options */}
-            {paymentMethod === 'UPI' && (
+                  {/* UPI */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('UPI')}
+                    className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                      paymentMethod === 'UPI'
+                        ? 'bg-teal-600/20 border-teal-500 text-teal-300 shadow-md shadow-teal-500/10 ring-1 ring-teal-500'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <QrCode className="w-5 h-5 mb-1.5" />
+                    <span className="text-xs font-semibold">UPI Online</span>
+                    <span className="text-[10px] opacity-75">QR / App</span>
+                  </button>
+
+                  {/* Credit */}
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('Credit')}
+                    className={`flex flex-col items-center justify-center py-3 px-2 rounded-xl border transition-all ${
+                      paymentMethod === 'Credit'
+                        ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10 ring-1 ring-amber-500'
+                        : 'bg-slate-800/60 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    <FileText className="w-5 h-5 mb-1.5" />
+                    <span className="text-xs font-semibold">Credit</span>
+                    <span className="text-[10px] opacity-75">Khata/Postpaid</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* If UPI is selected: Camera Only (No Gallery upload as requested) */}
+            {paymentMethod === 'UPI' && !isOrderPrepaid && (
               <div className="p-4 rounded-2xl bg-teal-950/30 border border-teal-800/50 space-y-3 animate-fade-in">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-teal-300 uppercase tracking-wider flex items-center gap-1.5">
                     <QrCode className="w-4 h-4" />
                     <span>UPI Payment Proof <span className="text-rose-400">*</span></span>
                   </label>
-                  <span className="text-[10px] text-teal-400/80">Camera or Gallery</span>
+                  <span className="text-[10px] text-teal-300 font-semibold bg-teal-900/50 px-2 py-0.5 rounded border border-teal-700/50">
+                    Live Camera Only
+                  </span>
                 </div>
 
                 {upiPreview ? (
@@ -499,28 +545,17 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
                     />
                     <div className="p-2.5 bg-slate-900/90 border-t border-slate-800 flex justify-between items-center text-xs">
                       <span className="text-teal-300 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" /> Proof Attached
+                        <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" /> Photo Attached
                       </span>
                       <div className="flex items-center gap-2">
-                        {/* Direct Camera Retake */}
+                        {/* Direct Camera Retake (Strictly Camera Only) */}
                         <label className="cursor-pointer text-xs bg-slate-800 text-teal-300 hover:text-white px-2.5 py-1 rounded-lg border border-teal-700/60 flex items-center gap-1 shadow-sm">
                           <Camera className="w-3 h-3 text-teal-400" />
-                          <span>Camera</span>
+                          <span>Retake Photo</span>
                           <input
                             type="file"
                             accept="image/*"
                             capture="environment"
-                            onChange={handleUpiScreenshotSelect}
-                            className="hidden"
-                          />
-                        </label>
-                        {/* Gallery Retake */}
-                        <label className="cursor-pointer text-xs bg-slate-800 text-slate-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-700 flex items-center gap-1 shadow-sm">
-                          <ImageIcon className="w-3 h-3 text-slate-400" />
-                          <span>Gallery</span>
-                          <input
-                            type="file"
-                            accept="image/*"
                             onChange={handleUpiScreenshotSelect}
                             className="hidden"
                           />
@@ -541,14 +576,14 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
                     </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                    {/* Primary Camera Button: Directly opens native device camera (NO redirect to gallery) */}
-                    <label className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-teal-500/50 hover:border-teal-400 rounded-2xl cursor-pointer bg-teal-950/40 hover:bg-teal-900/40 transition-all text-center group shadow-sm">
-                      <div className="w-10 h-10 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
-                        <Camera className="w-5 h-5 text-teal-400" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {/* Primary Camera Button: Strictly opens native device camera */}
+                    <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-teal-500/60 hover:border-teal-400 rounded-2xl cursor-pointer bg-teal-950/40 hover:bg-teal-900/40 transition-all text-center group shadow-sm">
+                      <div className="w-11 h-11 rounded-full bg-teal-500/20 text-teal-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <Camera className="w-6 h-6 text-teal-400" />
                       </div>
-                      <p className="text-xs font-bold text-teal-200">Take Photo</p>
-                      <p className="text-[10px] text-teal-400/80 mt-0.5">Mobile Camera</p>
+                      <p className="text-xs font-bold text-teal-200">Take Live Photo of UPI Screen</p>
+                      <p className="text-[10px] text-teal-400/80 mt-0.5">Mobile Camera (No Gallery)</p>
                       <input
                         type="file"
                         accept="image/*"
@@ -562,46 +597,102 @@ export default function ProofOfDeliveryModal({ isOpen, onClose, order, onComplet
                     <button
                       type="button"
                       onClick={() => startLiveCamera('upi', 'environment')}
-                      className="flex flex-col items-center justify-center p-3.5 border border-dashed border-cyan-600/40 hover:border-cyan-400 rounded-2xl bg-cyan-950/20 hover:bg-cyan-950/30 transition-all text-center group"
+                      className="flex flex-col items-center justify-center p-4 border border-dashed border-cyan-600/40 hover:border-cyan-400 rounded-2xl bg-cyan-950/20 hover:bg-cyan-950/30 transition-all text-center group"
                     >
-                      <div className="w-10 h-10 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
-                        <Video className="w-5 h-5" />
+                      <div className="w-11 h-11 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <Video className="w-6 h-6" />
                       </div>
                       <p className="text-xs font-bold text-cyan-300">Live Viewfinder</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">In-App Screen</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">In-App Screen View</p>
                     </button>
-
-                    {/* Gallery / Screenshot Upload Button */}
-                    <label className="col-span-2 sm:col-span-1 flex flex-col items-center justify-center p-3.5 border border-dashed border-slate-700 hover:border-slate-500 rounded-2xl cursor-pointer bg-slate-900/50 hover:bg-slate-900 transition-all text-center group">
-                      <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-300 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
-                        <ImageIcon className="w-5 h-5 text-slate-400" />
-                      </div>
-                      <p className="text-xs font-bold text-slate-200">From Gallery</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">UPI Screenshot</p>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleUpiScreenshotSelect}
-                        className="hidden"
-                      />
-                    </label>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Delivery Remarks */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                Delivery Remarks / Handover Notes (Optional)
+            {/* 3. Delivery Comments & Discrepancies (Returns / Changed Amount) */}
+            <div className="space-y-3 p-3.5 rounded-2xl bg-slate-800/40 border border-slate-700/70">
+              <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center justify-between">
+                <span>3. Delivery Comments & Amount Handover</span>
+                <span className="text-[10px] text-slate-400 font-normal">Returns / Changes</span>
               </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="e.g. Handed to customer, placed at door, paid in cash"
-                className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-              />
+
+              {/* Amount Received Input if not prepaid */}
+              {!isOrderPrepaid && (
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-slate-300 font-medium">Actual Amount Received (₹):</span>
+                    <span className="text-slate-400">Expected: ₹{order.amount}</span>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 text-xs">₹</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={actualAmountReceived}
+                      onChange={(e) => setActualAmountReceived(e.target.value)}
+                      placeholder={String(order.amount)}
+                      className="w-full pl-7 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-sm font-bold text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Discrepancy indicator */}
+                  {actualAmountReceived !== '' && Number(actualAmountReceived) < Number(order.amount) && (
+                    <p className="text-[11px] text-amber-300 mt-1 flex items-center gap-1 font-semibold">
+                      <span>⚠️ Short by ₹{(Number(order.amount) - Number(actualAmountReceived)).toFixed(2)} (Please mention reason in comment below)</span>
+                    </p>
+                  )}
+                  {actualAmountReceived !== '' && Number(actualAmountReceived) > Number(order.amount) && (
+                    <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-semibold">
+                      <span>ℹ️ Extra ₹{(Number(actualAmountReceived) - Number(order.amount)).toFixed(2)} collected</span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Tags for Delivery Comment */}
+              <div>
+                <span className="text-[10px] text-slate-400 uppercase font-semibold block mb-1.5">
+                  Quick Select Reason / Tag:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    '🔄 Item Returned / Cancelled',
+                    '💵 Amount Discrepancy',
+                    '🚪 Left at Doorstep',
+                    '🤝 Handed to Security/Guard',
+                    '📦 Damaged / Leaking Item',
+                    '✅ Delivered in person'
+                  ].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        setDeliveryComment((prev) => {
+                          const cleanTag = tag.replace(/^[^\w\s]+\s*/, '');
+                          if (prev.includes(cleanTag)) return prev;
+                          return prev ? `${prev}, ${cleanTag}` : cleanTag;
+                        });
+                      }}
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-semibold border border-slate-700 transition active:scale-95"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Multi-line Comment Textarea */}
+              <div>
+                <textarea
+                  rows={2}
+                  value={deliveryComment}
+                  onChange={(e) => setDeliveryComment(e.target.value)}
+                  placeholder="e.g. 1 can returned due to broken seal, collected ₹80 instead of ₹160, handed to customer directly..."
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 leading-relaxed"
+                />
+              </div>
             </div>
 
             {/* Action Buttons */}

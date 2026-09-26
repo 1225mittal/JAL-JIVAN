@@ -30,7 +30,9 @@ import {
   Calendar,
   UserCheck,
   ShieldCheck,
-  Flame
+  Flame,
+  Package,
+  Banknote
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
@@ -52,6 +54,45 @@ import {
   calculateDistanceMeters,
   calculateEtaMinutes
 } from '../lib/geoUtils';
+
+// Helper to reliably extract items from order.items (array or JSON string) or fallback to order.notes
+const extractOrderItems = (order) => {
+  if (!order) return [];
+  let items = order.items;
+  if (typeof items === 'string') {
+    try {
+      items = JSON.parse(items);
+    } catch {
+      items = [];
+    }
+  }
+  if ((!items || !Array.isArray(items) || items.length === 0) && order.notes) {
+    const match = String(order.notes).match(/\[Items:\s*([^\]]+)\]/);
+    if (match && match[1]) {
+      items = match[1].split(',').map((it, idx) => {
+        const trimmed = it.trim();
+        const qMatch = trimmed.match(/^(\d+)x\s*(.*)$/);
+        if (qMatch) {
+          return { id: `item-${idx}`, quantity: parseInt(qMatch[1], 10), name: qMatch[2] };
+        }
+        return { id: `item-${idx}`, quantity: 1, name: trimmed };
+      });
+    }
+  }
+  return Array.isArray(items) ? items : [];
+};
+
+// Helper to check if order is prepaid
+const isOrderPrepaid = (order) => {
+  if (!order) return false;
+  return Boolean(
+    order.is_prepaid ||
+    order.isPrepaid ||
+    order.payment_status === 'Prepaid' ||
+    order.payment_method === 'Prepaid' ||
+    (typeof order.notes === 'string' && order.notes.includes('[PREPAID'))
+  );
+};
 import {
   playNewOrderSound,
   playOrderCompletedSound,
@@ -1398,10 +1439,29 @@ export default function DriverPortal({
                           )}
                         </div>
 
-                        <div className="text-emerald-400 font-black text-base">
-                          <span>₹{order.amount}</span>
+                        <div className="text-right shrink-0">
+                          {isOrderPrepaid(order) ? (
+                            <div>
+                              <span className="text-xs text-slate-400 line-through mr-1">₹{order.amount}</span>
+                              <span className="text-emerald-400 font-black text-base">₹0</span>
+                              <span className="block text-[10px] text-emerald-400 font-extrabold uppercase">Prepaid ✅</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="text-emerald-400 font-black text-base">₹{order.amount}</span>
+                              <span className="block text-[10px] text-amber-400 font-bold uppercase">Cash on Delivery</span>
+                            </div>
+                          )}
                         </div>
                       </div>
+
+                      {/* Prepaid Order Banner for Pool */}
+                      {isOrderPrepaid(order) && (
+                        <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-500/40 flex items-center gap-1.5 text-xs font-bold text-emerald-300">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>🟢 PREPAID ORDER • DO NOT COLLECT MONEY (₹0)</span>
+                        </div>
+                      )}
 
                       {/* Address & Customer Details */}
                       <div className="space-y-1.5 text-xs text-slate-200">
@@ -1428,18 +1488,33 @@ export default function DriverPortal({
                             </audio>
                           </div>
                         )}
-                        {Array.isArray(order.items) && order.items.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1.5 pt-1 pl-5">
-                            {order.items.map((item, idx) => (
-                              <span
-                                key={idx}
-                                className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-semibold text-emerald-300"
-                              >
-                                {item.quantity}x {item.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+
+                        {/* Items to Deliver (Prominent Box for Delivery Boy) */}
+                        {(() => {
+                          const orderItems = extractOrderItems(order);
+                          if (orderItems.length === 0) return null;
+                          return (
+                            <div className="mt-2 p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 space-y-1.5">
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400">
+                                <Package className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Items to Deliver ({orderItems.length}):</span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {orderItems.map((item, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-bold text-emerald-300 flex items-center gap-1"
+                                  >
+                                    <span className="w-4 h-4 rounded-full bg-emerald-500/30 text-emerald-300 text-[10px] flex items-center justify-center font-black">
+                                      {item.quantity || 1}
+                                    </span>
+                                    <span>{item.name}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Action Button: Accept Delivery */}
@@ -1518,10 +1593,32 @@ export default function DriverPortal({
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1 text-emerald-400 font-black text-base">
-                          <span>₹{order.amount}</span>
+                        <div className="text-right shrink-0">
+                          {isOrderPrepaid(order) ? (
+                            <div>
+                              <span className="text-xs text-slate-400 line-through mr-1">₹{order.amount}</span>
+                              <span className="text-emerald-400 font-black text-base">₹0</span>
+                              <span className="block text-[10px] text-emerald-400 font-extrabold uppercase">Prepaid ✅</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <span className="text-emerald-400 font-black text-base">₹{order.amount}</span>
+                              <span className="block text-[10px] text-amber-400 font-bold uppercase">Collect Cash</span>
+                            </div>
+                          )}
                         </div>
                       </div>
+
+                      {/* Prepaid Alert for Active Delivery */}
+                      {isOrderPrepaid(order) && (
+                        <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/60 flex items-center gap-2.5 text-xs font-bold text-emerald-300 shadow-md">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                          <div>
+                            <p className="font-extrabold text-white text-sm">🟢 PREPAID ORDER • DO NOT COLLECT MONEY</p>
+                            <p className="text-[11px] text-emerald-300/90 font-normal">Customer has already paid online. Amount to collect: ₹0.</p>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Privacy Compliant Address Details */}
                       <div className="space-y-2 py-1">
@@ -1548,30 +1645,38 @@ export default function DriverPortal({
                           </div>
                         )}
 
-                        {/* Privacy Note Badge */}
-                        <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                          <ShieldAlert className="w-3 h-3 text-slate-500" />
-                          <span>Customer privacy protected. Contact dispatch for special instructions.</span>
-                        </div>
-
                         {order.notes && (
                           <p className="text-[11px] text-slate-300 italic pl-6">
                             Note: &ldquo;{order.notes}&rdquo;
                           </p>
                         )}
 
-                        {Array.isArray(order.items) && order.items.length > 0 && (
-                          <div className="flex flex-wrap items-center gap-1.5 pt-1 pl-6">
-                            {order.items.map((item, idx) => (
-                              <span
-                                key={idx}
-                                className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-[11px] font-bold text-emerald-300"
-                              >
-                                {item.quantity}x {item.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                        {/* Items to Deliver in Active Card */}
+                        {(() => {
+                          const orderItems = extractOrderItems(order);
+                          if (orderItems.length === 0) return null;
+                          return (
+                            <div className="mt-2 p-2.5 rounded-xl bg-slate-900/90 border border-emerald-500/30 space-y-1.5">
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-400">
+                                <Package className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Items to Deliver ({orderItems.length}):</span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {orderItems.map((item, idx) => (
+                                  <span
+                                    key={idx}
+                                    className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-xs font-bold text-emerald-300 flex items-center gap-1"
+                                  >
+                                    <span className="w-4 h-4 rounded-full bg-emerald-500/30 text-emerald-300 text-[10px] flex items-center justify-center font-black">
+                                      {item.quantity || 1}
+                                    </span>
+                                    <span>{item.name}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Location Action Buttons */}
@@ -1617,7 +1722,11 @@ export default function DriverPortal({
                           className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
                         >
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Take POD Photo & Deliver (₹{order.amount})</span>
+                          <span>
+                            {isOrderPrepaid(order)
+                              ? 'Take POD Photo & Deliver (Prepaid - ₹0 to collect)'
+                              : `Take POD Photo & Deliver (₹${order.amount})`}
+                          </span>
                         </button>
                       </div>
                     </div>
@@ -1668,6 +1777,31 @@ export default function DriverPortal({
                       <p className="line-clamp-1">{order.address}</p>
                       {order.landmark && <p className="text-slate-400 italic">Landmark: {order.landmark}</p>}
                     </div>
+
+                    {/* Delivered items */}
+                    {(() => {
+                      const orderItems = extractOrderItems(order);
+                      if (orderItems.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                          {orderItems.map((item, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 rounded-md bg-slate-800 text-[10px] font-semibold text-emerald-300 border border-slate-700"
+                            >
+                              {item.quantity || 1}x {item.name}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {order.notes && (
+                      <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800 text-[11px] text-slate-300">
+                        <span className="text-slate-400 font-semibold block text-[10px]">Notes & Delivery Comments:</span>
+                        <p className="italic">{order.notes}</p>
+                      </div>
+                    )}
 
                     {/* Voice Note Audio Player */}
                     {(order.audio_url || order.audioUrl) && (
@@ -2011,7 +2145,11 @@ export default function DriverPortal({
                       payment_method: podData?.paymentMethod || o.payment_method || 'Cash',
                       delivery_proof_url: podData?.deliveryProofUrl || o.delivery_proof_url,
                       payment_proof_url: podData?.paymentProofUrl || o.payment_proof_url,
-                      notes: podData?.notes !== undefined ? podData.notes : o.notes
+                      notes: [
+                        o.notes,
+                        podData?.deliveryComment ? `[Delivery Note: ${podData.deliveryComment}]` : '',
+                        podData?.actualAmount !== undefined && podData?.actualAmount !== null ? `[Collected: ₹${podData.actualAmount}]` : ''
+                      ].filter(Boolean).join(' • ') || o.notes
                     }
                   : o
               )

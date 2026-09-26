@@ -22,7 +22,8 @@ import {
   Camera,
   Upload,
   Mic,
-  MicOff
+  MicOff,
+  Banknote
 } from 'lucide-react';
 import { fetchSavedAddresses, supabase, isSupabaseConfigured, uploadOrderSlip } from '../lib/supabase';
 import { extractOrderFromSlip } from '../lib/geminiOcr';
@@ -112,6 +113,7 @@ export default function CreateTaskModal({
   const [selectedDriverId, setSelectedDriverId] = useState('');
   const [pinnedLat, setPinnedLat] = useState(null);
   const [pinnedLng, setPinnedLng] = useState(null);
+  const [isPrepaid, setIsPrepaid] = useState(false);
 
   // Address Autocomplete State
   const [savedAddresses, setSavedAddresses] = useState([]);
@@ -273,6 +275,7 @@ export default function CreateTaskModal({
     setSelectedDriverId('');
     setPinnedLat(null);
     setPinnedLng(null);
+    setIsPrepaid(false);
     setIsAddressDropdownOpen(false);
 
     // 2. Reset products and custom items
@@ -823,7 +826,10 @@ export default function CreateTaskModal({
         audio_url: voiceAudioUrl || null,
         audioUrl: voiceAudioUrl || null,
         slipImageUrl: uploadedSlipUrl,
-        slip_image_url: uploadedSlipUrl
+        slip_image_url: uploadedSlipUrl,
+        isPrepaid,
+        paymentStatus: isPrepaid ? 'Prepaid' : 'Pending',
+        paymentMethod: isPrepaid ? 'Prepaid' : null
       });
 
       // Reset & close
@@ -1240,6 +1246,45 @@ export default function CreateTaskModal({
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all"
                 />
               </div>
+            </div>
+
+            {/* Payment Mode: COD vs Prepaid */}
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                Payment Collection Mode *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPrepaid(false)}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
+                    !isPrepaid
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
+                      : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Banknote className="w-4 h-4" />
+                  <span>Cash on Delivery (COD)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPrepaid(true)}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
+                    isPrepaid
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm ring-1 ring-emerald-500'
+                      : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Prepaid (Paid Online)</span>
+                </button>
+              </div>
+              {isPrepaid && (
+                <p className="text-[11px] text-emerald-400 mt-1.5 flex items-center gap-1 font-medium bg-emerald-950/30 p-2 rounded-lg border border-emerald-500/30">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Marked as PREPAID: Delivery boy will be shown &ldquo;Already Paid - Do NOT collect cash&rdquo;.</span>
+                </p>
+              )}
             </div>
           </div>
 
