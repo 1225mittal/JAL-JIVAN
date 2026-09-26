@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from './components/Navbar';
 import AdminHub from './components/AdminHub';
 import DamageReturnHub from './components/damage/DamageReturnHub';
-import DamageManagement from './components/DamageManagement';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import StaffPortal from './components/StaffPortal';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
+import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
 import Toast from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
+import { ArrowLeft } from 'lucide-react';
 import {
   fetchDrivers,
   addDriver,
@@ -42,94 +43,91 @@ import {
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
-// Robust helper to parse URL into application route state
-function parseUrlRoute() {
+// ==========================================
+// 1. CLEAN URL ROUTE PARSER (NO MESSY QUERY PARAMS)
+// ==========================================
+export function parseRoute() {
   if (typeof window === 'undefined') {
-    return { isStaff: false, isAdminLogin: false, isAdmin: false, module: 'hub' };
+    return { type: 'driver', module: null, pathname: '/' };
   }
-  try {
-    const pathname = (window.location.pathname || '').toLowerCase().replace(/\/+$/, '');
-    const hash = (window.location.hash || '').toLowerCase().replace(/\/+$/, '');
-    const search = new URLSearchParams(window.location.search);
-    const moduleParam = search.get('module');
 
-    // 1. Common Staff Path (/staff)
-    const isStaff =
-      pathname === '/staff' ||
-      pathname.endsWith('/staff') ||
-      pathname.split('/').includes('staff') ||
-      hash === '#/staff' ||
-      hash === '#staff' ||
-      hash.includes('staff');
+  let pathname = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+  const hash = (window.location.hash || '').toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
+  const search = new URLSearchParams(window.location.search);
+  const legacyModule = search.get('module');
 
-    // 2. Dedicated Admin Sign-In Path (/admin/login)
-    const isAdminLogin =
-      pathname === '/admin/login' ||
-      pathname.endsWith('/admin/login') ||
-      hash === '#/admin/login' ||
-      hash === '#admin/login' ||
-      hash.includes('admin/login');
+  // Support SPA deep link fallback via hash
+  if (pathname === '/' && hash) {
+    pathname = '/' + hash;
+  }
 
-    // 3. General Admin / Hub / Module path
-    const isAdmin = !isStaff && (
-      isAdminLogin ||
-      pathname === '/admin' ||
-      pathname.startsWith('/admin') ||
-      pathname === '/hub' ||
-      pathname.includes('purchase') ||
-      pathname.includes('delivery') ||
-      pathname.includes('dispatch') ||
-      pathname.includes('damage') ||
-      hash.includes('admin') ||
-      hash.includes('hub') ||
-      hash.includes('purchase') ||
-      hash.includes('delivery') ||
-      hash.includes('dispatch') ||
-      Boolean(moduleParam)
-    );
-
-    let module = moduleParam || 'hub';
-    if (!moduleParam) {
-      if (pathname.includes('purchase') || hash.includes('purchase')) module = 'purchase';
-      else if (pathname.includes('delivery') || hash.includes('delivery')) module = 'delivery';
-      else if (pathname.includes('damage') || hash.includes('damage')) module = 'damage';
+  // Handle legacy query params (?module=...)
+  if (legacyModule) {
+    const mod = legacyModule === 'hub' ? 'hub' : legacyModule;
+    if (mod === 'hub') {
+      return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
     }
+    return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
+  }
 
-    return { isStaff, isAdminLogin, isAdmin, module };
-  } catch {
-    return { isStaff: false, isAdminLogin: false, isAdmin: false, module: 'hub' };
+  // Route 1: Staff Portal (/staff or /staff/login)
+  if (pathname === '/staff' || pathname === '/staff/login') {
+    return { type: 'staff', module: null, pathname: '/staff' };
+  }
+
+  // Route 2: Dedicated Admin Login (/admin/login)
+  if (pathname === '/admin/login') {
+    return { type: 'admin-login', module: null, pathname: '/admin/login' };
+  }
+
+  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
+  const adminModMatch = pathname.match(
+    /^\/admin\/(delivery|damage|purchase|sales|marketing|finance|staff|settings|config)$/
+  );
+  if (adminModMatch) {
+    const rawMod = adminModMatch[1];
+    const mod = rawMod === 'config' ? 'settings' : rawMod;
+    return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
+  }
+
+  // Route 4: Master Executive Hub (/admin or /admin/hub)
+  if (pathname === '/admin' || pathname === '/admin/hub' || pathname === '/hub') {
+    return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
+  }
+
+  // Route 5: Default Driver Portal (/)
+  return { type: 'driver', module: null, pathname: '/' };
+}
+
+function getModuleTitle(moduleKey) {
+  switch (moduleKey) {
+    case 'delivery':
+      return 'Delivery & Dispatch Console';
+    case 'damage':
+      return 'Damage & Returns Management';
+    case 'purchase':
+      return 'Purchase & Inward Management';
+    case 'sales':
+      return 'Sales & Billing';
+    case 'marketing':
+      return 'Marketing & Broadcasts';
+    case 'finance':
+      return 'Bahi Khata & Finance';
+    case 'staff':
+      return 'Staff & Attendance';
+    case 'settings':
+    case 'config':
+      return 'Store & System Config';
+    default:
+      return 'Enterprise Module';
   }
 }
 
 export default function App() {
-  // Routing States
-  const [isStaffRoute, setIsStaffRoute] = useState(() => parseUrlRoute().isStaff);
-  const [isAdminRoute, setIsAdminRoute] = useState(() => parseUrlRoute().isAdmin);
-  const [isAdminLoginRoute, setIsAdminLoginRoute] = useState(() => parseUrlRoute().isAdminLogin);
-  const [currentModule, setCurrentModule] = useState(() => parseUrlRoute().module);
+  // Current Route State
+  const [routeState, setRouteState] = useState(() => parseRoute());
 
-  // Synchronize route states on browser navigation (Back, Forward, PushState, Hash)
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const parsed = parseUrlRoute();
-      setIsStaffRoute(parsed.isStaff);
-      setIsAdminRoute(parsed.isAdmin);
-      setIsAdminLoginRoute(parsed.isAdminLogin);
-      if (parsed.module) {
-        setCurrentModule(parsed.module);
-      }
-    };
-
-    window.addEventListener('popstate', handleUrlChange);
-    window.addEventListener('hashchange', handleUrlChange);
-
-    return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-      window.removeEventListener('hashchange', handleUrlChange);
-    };
-  }, []);
-
-  // Admin Authentication State (persists across page reloads via session token)
+  // Admin Authentication State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     try {
       const session = localStorage.getItem(ADMIN_SESSION_KEY);
@@ -139,7 +137,7 @@ export default function App() {
     }
   });
 
-  // Common Staff Session State (persists across page reloads via session token)
+  // Common Staff Session State
   const [staffSession, setStaffSession] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_STAFF_KEY);
@@ -149,7 +147,7 @@ export default function App() {
     }
   });
 
-  // Authenticated Driver State (persists in localStorage)
+  // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {
     try {
       const saved = localStorage.getItem(LOGGED_IN_DRIVER_KEY);
@@ -159,29 +157,55 @@ export default function App() {
     }
   });
 
-  // Sync active module with browser URL query string for instant bookmarking & reload safety
+  // Toast Notification
+  const [toast, setToast] = useState(null);
+
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  }, []);
+
+  // Clean Navigation Helper
+  const navigate = useCallback((targetUrl, replace = false) => {
+    try {
+      if (replace) {
+        window.history.replaceState({}, '', targetUrl);
+      } else {
+        window.history.pushState({}, '', targetUrl);
+      }
+    } catch (e) {}
+    setRouteState(parseRoute());
+  }, []);
+
+  // Listen to browser navigation (back/forward) & clean legacy query params
   useEffect(() => {
-    if (typeof window !== 'undefined' && isAdminRoute && !isAdminLoginRoute) {
+    const handleLocationChange = () => {
+      setRouteState(parseRoute());
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+
+    // Strip legacy ?module=... query params and rewrite cleanly
+    const search = new URLSearchParams(window.location.search);
+    if (search.has('module')) {
+      const legacyMod = search.get('module');
+      search.delete('module');
+      const remainingQuery = search.toString() ? `?${search.toString()}` : '';
+      const newPath = legacyMod === 'hub' ? '/admin' : `/admin/${legacyMod}`;
       try {
-        const url = new URL(window.location.href);
-        if (currentModule === 'hub') {
-          if (url.searchParams.has('module')) {
-            url.searchParams.delete('module');
-            window.history.replaceState(null, '', url.pathname + (url.search ? url.search : ''));
-          }
-        } else {
-          if (url.searchParams.get('module') !== currentModule) {
-            url.searchParams.set('module', currentModule);
-            window.history.replaceState(null, '', url.toString());
-          }
-        }
+        window.history.replaceState({}, '', `${newPath}${remainingQuery}`);
+        setRouteState(parseRoute());
       } catch (e) {}
     }
-  }, [currentModule, isAdminRoute, isAdminLoginRoute]);
 
-  // Aliases for submodules
-  const adminSubView = currentModule;
-  const setAdminSubView = setCurrentModule;
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
 
   // Data States
   const [drivers, setDrivers] = useState([]);
@@ -195,17 +219,7 @@ export default function App() {
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [isDbInfoOpen, setIsDbInfoOpen] = useState(false);
 
-  // Toast Notification
-  const [toast, setToast] = useState(null);
-
-  const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 4000);
-  }, []);
-
-  // Multi-device synchronization: fetch latest orders, drivers & damages
+  // Multi-device synchronization
   const syncAllData = useCallback(async () => {
     try {
       const [driversData, ordersData] = await Promise.all([
@@ -223,7 +237,6 @@ export default function App() {
     }
   }, []);
 
-  // Fetch orders and update state
   const fetchOrders = useCallback(async () => {
     try {
       const data = await fetchOrdersFromApi();
@@ -236,7 +249,6 @@ export default function App() {
     }
   }, []);
 
-  // Load Data
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
@@ -262,7 +274,7 @@ export default function App() {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Robust Multi-Device Real-Time Synchronization
+  // Realtime multi-phone synchronization
   useEffect(() => {
     fetchOrders();
 
@@ -286,7 +298,7 @@ export default function App() {
     if (isSupabaseConfigured) {
       try {
         realtimeChannel = supabase
-          .channel('app-multiphone-realtime-channel')
+          .channel('app-realtime-global-sync')
           .on(
             'postgres_changes',
             { event: '*', schema: 'public', table: 'orders' },
@@ -315,157 +327,68 @@ export default function App() {
   }, [fetchOrders, syncAllData]);
 
   // ==========================================
-  // AUTHENTICATION & PORTAL NAVIGATION HANDLERS
+  // AUTHENTICATION & NAVIGATION HANDLERS
   // ==========================================
 
-  // 1. Admin Sign-In Success Handler
+  // Admin Login Success
   const handleAdminLoginSuccess = () => {
     setIsAdminLoggedIn(true);
-    setIsAdminLoginRoute(false);
-    setIsAdminRoute(true);
-    setIsStaffRoute(false);
-    setCurrentModule('hub');
-    try {
-      window.history.pushState({}, '', '/admin');
-    } catch (e) {}
+    navigate('/admin');
     showToast('Admin authenticated successfully! Welcome to Master Hub.', 'success');
   };
 
-  // 2. Admin Logout Handler
+  // Admin Logout (strictly navigates to /admin/login)
   const handleAdminLogout = () => {
     setIsAdminLoggedIn(false);
     try {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
     } catch (e) {}
-    setIsAdminRoute(true);
-    setIsAdminLoginRoute(true);
-    setIsStaffRoute(false);
-    setCurrentModule('hub');
-    try {
-      window.history.pushState({}, '', '/admin/login');
-    } catch (e) {}
+    navigate('/admin/login');
     showToast('Logged out of Admin Portal', 'info');
   };
 
-  // 3. Staff Sign-In Success Handler
+  // Staff Login Success
   const handleStaffLoginSuccess = (staff) => {
     setStaffSession(staff);
     try {
       localStorage.setItem(STORAGE_STAFF_KEY, JSON.stringify(staff));
     } catch (e) {}
 
-    // Redirection Logic upon verification:
-    // If allowed_modules contains only ONE item (e.g. delivery), route immediately to /admin?module=delivery without ever showing the Master Hub.
+    // If single module allowed: redirect directly to that module URL (e.g. /admin/delivery)
     if (Array.isArray(staff.allowed_modules) && staff.allowed_modules.length === 1) {
       const singleMod = staff.allowed_modules[0];
-      setCurrentModule(singleMod);
-      setIsStaffRoute(false);
-      setIsAdminRoute(true);
-      setIsAdminLoginRoute(false);
-      try {
-        window.history.pushState({}, '', `/admin?module=${singleMod}`);
-      } catch (e) {}
+      navigate(`/admin/${singleMod}`);
       showToast(`Welcome, ${staff.name}! Authorized for ${singleMod} operations.`, 'success');
     } else {
-      // If allowed_modules contains multiple items, display streamlined restricted staff hub
-      setCurrentModule('hub');
-      setIsStaffRoute(true);
-      setIsAdminRoute(false);
-      setIsAdminLoginRoute(false);
-      try {
-        window.history.pushState({}, '', '/staff');
-      } catch (e) {}
-      showToast(`Welcome back, ${staff.name}!`, 'success');
+      // Multiple modules allowed: stay at /staff showing minimal permitted workspace
+      navigate('/staff');
+      showToast(`Welcome, ${staff.name}! Staff workspace active.`, 'success');
     }
   };
 
-  // 4. Staff Logout Handler
+  // Staff Logout
   const handleStaffLogout = () => {
     setStaffSession(null);
     try {
       localStorage.removeItem(STORAGE_STAFF_KEY);
     } catch (e) {}
-    setIsStaffRoute(true);
-    setIsAdminRoute(false);
-    setIsAdminLoginRoute(false);
-    setCurrentModule('hub');
-    try {
-      window.history.pushState({}, '', '/staff');
-    } catch (e) {}
+    navigate('/staff');
     showToast('Logged out of Staff Portal', 'info');
   };
 
-  // 5. Switch to Staff Portal
-  const handleNavigateToStaff = () => {
-    setIsStaffRoute(true);
-    setIsAdminRoute(false);
-    setIsAdminLoginRoute(false);
-    try {
-      window.history.pushState({}, '', '/staff');
-    } catch (e) {}
-  };
-
-  // 6. Switch to Admin Login
-  const handleNavigateToAdminLogin = () => {
-    setIsStaffRoute(false);
-    setIsAdminRoute(true);
-    setIsAdminLoginRoute(true);
-    try {
-      window.history.pushState({}, '', '/admin/login');
-    } catch (e) {}
-  };
-
-  // 7. Back to Hub Navigation (from submodules e.g. delivery or damage)
+  // Back to Hub Handler:
+  // If staff member: navigates to /staff (never sees owner hub!)
+  // If admin: navigates to /admin
   const handleBackToHub = () => {
-    setCurrentModule('hub');
-    if (isStaffRoute || (staffSession && !isAdminLoggedIn)) {
-      setIsStaffRoute(true);
-      setIsAdminRoute(false);
-      setIsAdminLoginRoute(false);
-      try {
-        window.history.pushState({}, '', '/staff');
-      } catch (e) {}
+    if (staffSession && !isAdminLoggedIn) {
+      navigate('/staff');
     } else {
-      setIsAdminRoute(true);
-      setIsStaffRoute(false);
-      setIsAdminLoginRoute(false);
-      try {
-        window.history.pushState({}, '', '/admin');
-      } catch (e) {}
+      navigate('/admin');
     }
   };
 
-  // 8. Toggle Admin / Driver View from Navbar
-  const handleToggleAdminView = () => {
-    if (isAdminRoute || isStaffRoute) {
-      setIsAdminRoute(false);
-      setIsStaffRoute(false);
-      setIsAdminLoginRoute(false);
-      try {
-        window.history.pushState({}, '', '/');
-      } catch (e) {}
-    } else {
-      setIsAdminRoute(true);
-      setIsStaffRoute(false);
-      if (!isAdminLoggedIn) {
-        setIsAdminLoginRoute(true);
-        try {
-          window.history.pushState({}, '', '/admin/login');
-        } catch (e) {}
-      } else {
-        setIsAdminLoginRoute(false);
-        try {
-          window.history.pushState({}, '', '/admin');
-        } catch (e) {}
-      }
-    }
-  };
-
-  // ==========================================
-  // OPERATIONAL DATA ACTIONS (DELIVERY, ORDERS, DRIVERS)
-  // ==========================================
-
+  // Operational Action Handlers
   const handleAddDriver = async (driverData) => {
     try {
       const newDriver = await addDriver(driverData);
@@ -636,9 +559,7 @@ export default function App() {
         )
       );
       showToast(
-        driverId
-          ? `Order assigned to ${driverName}`
-          : 'Order set to unassigned',
+        driverId ? `Order assigned to ${driverName}` : 'Order set to unassigned',
         'info'
       );
     } catch (err) {
@@ -646,7 +567,7 @@ export default function App() {
     }
   };
 
-  // Driver Login (Driver Portal)
+  // Driver Login & Actions
   const handleDriverLogin = async (phone, pin) => {
     const driver = await driverLogin(phone, pin);
     if (!driver) {
@@ -717,134 +638,145 @@ export default function App() {
     }
   };
 
+  // Determine which sub-view is active
+  const isViewAdmin = routeState.type.startsWith('admin');
+  const isViewStaff = routeState.type === 'staff';
+
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
       <Navbar
-        isAdminView={isAdminRoute && !isAdminLoginRoute}
-        isAdminRoute={isAdminRoute}
-        adminSubView={currentModule}
-        onSelectAdminSubView={(mod) => setCurrentModule(mod)}
-        onToggleAdminView={handleToggleAdminView}
+        isAdminRoute={isViewAdmin}
+        isAdminView={isViewAdmin}
+        adminSubView={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : '')}
+        onNavigateToAdminHub={() => navigate('/admin')}
         currentDriver={currentDriver}
         onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
-        isStaffView={isStaffRoute}
+        isStaffView={isViewStaff}
         staffSession={staffSession}
         onStaffLogout={handleStaffLogout}
-        onNavigateToStaff={handleNavigateToStaff}
-        onNavigateToAdmin={handleNavigateToAdminLogin}
       />
 
-      {/* Main Container: Distinct Routes */}
+      {/* Main Routing Container */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
-        {isStaffRoute ? (
-          /* ======================================================== */
-          /* ROUTE /staff: COMMON STAFF PORTAL (LOGIN & RESTRICTED HUB) */
-          /* ======================================================== */
+        {/* ======================================================== */}
+        {/* ROUTE 1: /staff or /staff/login (COMMON STAFF LOGIN & WORKSPACE) */}
+        {/* ======================================================== */}
+        {routeState.type === 'staff' ? (
           <StaffPortal
             staffSession={staffSession}
             onStaffLoginSuccess={handleStaffLoginSuccess}
             onStaffLogout={handleStaffLogout}
-            onSelectModule={(mod) => {
-              setCurrentModule(mod);
-              setIsAdminRoute(true);
-              setIsStaffRoute(false);
-              try {
-                window.history.pushState({}, '', `/admin?module=${mod}`);
-              } catch (e) {}
-            }}
-            onNavigateToAdminLogin={handleNavigateToAdminLogin}
+            onNavigate={(path) => navigate(path)}
+            onNavigateToAdminLogin={() => navigate('/admin/login')}
           />
-        ) : isAdminRoute ? (
+        ) : routeState.type === 'admin-login' ? (
           /* ======================================================== */
-          /* ROUTE /admin OR /admin/login: EXCLUSIVE MASTER ADMIN HUB */
+          /* ROUTE 2: /admin/login (DEDICATED ADMIN LOGIN) */
           /* ======================================================== */
-          isAdminLoginRoute || !isAdminLoggedIn ? (
+          isAdminLoggedIn ? (
+            // If already logged in, navigate straight to /admin
+            <div className="p-8 text-center">
+              <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
+              <button
+                onClick={() => navigate('/admin')}
+                className="mt-4 px-4 py-2 bg-emerald-600 rounded-xl text-white font-bold text-xs"
+              >
+                Go to Hub
+              </button>
+            </div>
+          ) : (
             <AdminLogin
               onLoginSuccess={handleAdminLoginSuccess}
-              onNavigateToStaffLogin={handleNavigateToStaff}
+              onNavigateToStaffLogin={() => navigate('/staff')}
             />
+          )
+        ) : routeState.type === 'admin-hub' ? (
+          /* ======================================================== */
+          /* ROUTE 3: /admin (CLEAN EXECUTIVE MASTER HUB) */
+          /* ======================================================== */
+          !isAdminLoggedIn ? (
+            // Protected: Not logged in as Admin
+            staffSession ? (
+              // Staff members are never allowed to see the Owner Hub!
+              <div className="p-8 text-center space-y-4">
+                <p className="text-amber-400 font-bold">
+                  Owner Hub is restricted to Store Owner & Super Administrator.
+                </p>
+                <button
+                  onClick={() => navigate('/staff')}
+                  className="px-4 py-2 bg-cyan-600 rounded-xl text-white font-bold text-xs"
+                >
+                  Return to Staff Workspace
+                </button>
+              </div>
+            ) : (
+              <AdminLogin
+                onLoginSuccess={handleAdminLoginSuccess}
+                onNavigateToStaffLogin={() => navigate('/staff')}
+              />
+            )
+          ) : (
+            <AdminHub onNavigate={(path) => navigate(path)} />
+          )
+        ) : routeState.type === 'admin-module' ? (
+          /* ======================================================== */
+          /* ROUTE 4: /admin/{module} (DEDICATED MODULE PAGES) */
+          /* ======================================================== */
+          !isAdminLoggedIn && !staffSession ? (
+            // Protected: unauthenticated
+            <AdminLogin
+              onLoginSuccess={handleAdminLoginSuccess}
+              onNavigateToStaffLogin={() => navigate('/staff')}
+            />
+          ) : !isAdminLoggedIn &&
+            staffSession &&
+            Array.isArray(staffSession.allowed_modules) &&
+            !staffSession.allowed_modules.includes(routeState.module) ? (
+            // Protected: Staff member without permission for this module
+            <div className="p-8 text-center space-y-4 bg-slate-900 border border-slate-800 rounded-3xl">
+              <p className="text-rose-400 font-bold text-sm">
+                Access Denied: You do not have permission for the {getModuleTitle(routeState.module)} module.
+              </p>
+              <button
+                onClick={() => navigate('/staff')}
+                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-xl text-white font-bold text-xs transition"
+              >
+                Return to Staff Workspace
+              </button>
+            </div>
           ) : (
             <div>
-              {/* Persistent Breadcrumb Navigation Bar when inside sub-modules */}
-              {currentModule !== 'hub' && (
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
-                    <button
-                      type="button"
-                      onClick={handleBackToHub}
-                      className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition-colors shrink-0"
-                    >
-                      ← <span className="hidden xs:inline">Back to</span> Hub
-                    </button>
-                    <span className="text-slate-600 font-bold">/</span>
-                    <span className="text-white font-semibold truncate max-w-[170px] sm:max-w-none">
-                      {currentModule === 'purchase'
-                        ? 'Purchase & Inward Management'
-                        : currentModule === 'delivery'
-                        ? 'Delivery & Dispatch System'
-                        : 'Damage & Returns Management'}
+              {/* Clean Module Top Bar: Back to Hub + Module Title (NO Switcher lines) */}
+              <div className="flex items-center justify-between gap-3 mb-4 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    onClick={handleBackToHub}
+                    className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition-colors shrink-0 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 shadow-sm"
+                    title={
+                      staffSession && !isAdminLoggedIn
+                        ? 'Return to Staff Workspace'
+                        : 'Return to Master Hub'
+                    }
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>
+                      {staffSession && !isAdminLoggedIn ? '← Back to Workspace' : '← Back to Hub'}
                     </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                    {currentModule !== 'purchase' && (
-                      <button
-                        type="button"
-                        onClick={() => setCurrentModule('purchase')}
-                        className="text-xs text-amber-300 hover:text-white px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 transition-all font-medium"
-                      >
-                        <span className="hidden sm:inline">Switch to </span>Purchase →
-                      </button>
-                    )}
-                    {currentModule !== 'delivery' && (
-                      <button
-                        type="button"
-                        onClick={() => setCurrentModule('delivery')}
-                        className="text-xs text-emerald-300 hover:text-white px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all font-medium"
-                      >
-                        <span className="hidden sm:inline">Switch to </span>Dispatch →
-                      </button>
-                    )}
-                    {currentModule !== 'damage' && (
-                      <button
-                        type="button"
-                        onClick={() => setCurrentModule('damage')}
-                        className="text-xs text-rose-300 hover:text-white px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all font-medium"
-                      >
-                        <span className="hidden sm:inline">Switch to </span>Damage →
-                      </button>
-                    )}
-                  </div>
+                  </button>
+                  <span className="text-slate-600 font-bold">/</span>
+                  <span className="text-white font-semibold truncate">
+                    {getModuleTitle(routeState.module)}
+                  </span>
                 </div>
-              )}
+              </div>
 
-              {/* Render Selected Admin Sub-Module */}
-              {currentModule === 'hub' ? (
-                <AdminHub
-                  onSelectModule={(mod) => setCurrentModule(mod)}
-                  orders={orders}
-                  drivers={drivers}
-                  damages={damages}
-                  onOpenCreateTask={() => setIsCreateTaskOpen(true)}
-                  onOpenAddDriver={() => setIsAddDriverOpen(true)}
-                  onRefreshAll={loadInitialData}
-                  onAdminLogout={handleAdminLogout}
-                />
-              ) : currentModule === 'purchase' ? (
-                <PurchaseInwardHub
-                  onBackToHub={handleBackToHub}
-                  showToast={showToast}
-                />
-              ) : currentModule === 'damage' ? (
-                <DamageReturnHub
-                  onBackToHub={handleBackToHub}
-                  drivers={drivers}
-                />
-              ) : (
+              {/* Render Selected Module Component */}
+              {routeState.module === 'delivery' ? (
                 <ErrorBoundary title="Delivery & Dispatch Console">
                   <AdminDashboard
                     orders={orders}
@@ -866,14 +798,30 @@ export default function App() {
                     onDeleteAddress={handleDeleteAddress}
                     onRefresh={loadInitialData}
                     onLogout={handleAdminLogout}
+                    onBackToHub={handleBackToHub}
                   />
                 </ErrorBoundary>
+              ) : routeState.module === 'purchase' ? (
+                <PurchaseInwardHub
+                  onBackToHub={handleBackToHub}
+                  showToast={showToast}
+                />
+              ) : routeState.module === 'damage' ? (
+                <DamageReturnHub
+                  onBackToHub={handleBackToHub}
+                  drivers={drivers}
+                />
+              ) : (
+                <PlannedModuleView
+                  moduleId={routeState.module}
+                  onBackToHub={handleBackToHub}
+                />
               )}
             </div>
           )
         ) : (
           /* ======================================================== */
-          /* ROUTE /: EXCLUSIVELY DRIVER PORTAL VIEW */
+          /* ROUTE 5: / (EXCLUSIVELY DRIVER PORTAL) */
           /* ======================================================== */
           <DriverPortal
             currentDriver={currentDriver}

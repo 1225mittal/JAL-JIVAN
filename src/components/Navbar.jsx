@@ -1,13 +1,12 @@
 import React from 'react';
-import { ShieldCheck, Droplets, Database, LogOut, UserCheck, Truck, LayoutGrid, Users } from 'lucide-react';
+import { Droplets, LogOut, Users, ShieldCheck } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
   isAdminRoute = false,
   isAdminView = false,
   adminSubView = 'hub',
-  onSelectAdminSubView,
-  onToggleAdminView,
+  onNavigateToAdminHub,
   currentDriver = null,
   onDriverLogout,
   onOpenDbInfo,
@@ -15,123 +14,96 @@ export default function Navbar({
   onAdminLogout,
   isStaffView = false,
   staffSession = null,
-  onStaffLogout,
-  onNavigateToStaff,
-  onNavigateToAdmin
+  onStaffLogout
 }) {
   const isViewAdmin = Boolean(isAdminView || isAdminRoute);
 
+  const handleLogoClick = () => {
+    if (isAdminLoggedIn || isViewAdmin) {
+      if (onNavigateToAdminHub) {
+        onNavigateToAdminHub();
+      }
+    }
+  };
+
   return (
-    <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md overflow-x-hidden">
-      <div className="w-full max-w-full sm:max-w-6xl mx-auto px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-        {/* Left Section: Driver View shows ONLY status indicator ("🟢 Online"); Admin/Staff View shows Brand */}
+    <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-md overflow-x-hidden">
+      <div className="w-full max-w-full sm:max-w-6xl mx-auto px-3.5 py-2.5 flex items-center justify-between gap-3">
+        {/* Left Section: Logo & Branding */}
         {!isViewAdmin && !isStaffView ? (
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm">
+          /* Driver View Header */
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0">
+              <Droplets className="w-4 h-4 text-white" />
+            </div>
+            <div className="min-w-0">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-white block">
+                JAL-JIVAN
+              </span>
+            </div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm ml-2">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
-              <span>🟢 Online</span>
+              <span>Driver Portal Online</span>
             </span>
           </div>
         ) : isStaffView ? (
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+          /* Staff View Header */
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold shrink-0">
               <Users className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">Mittal Brothers</span>
-                <span className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-cyan-500/20 text-cyan-300 border-cyan-500/30">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">
+                  JAL-JIVAN
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-cyan-500/15 text-cyan-300 border-cyan-500/30">
                   Staff Workspace
                 </span>
               </div>
-              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium hidden sm:block truncate">
-                Authorized Operations Access
-              </p>
             </div>
           </div>
         ) : (
-          <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
-            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0">
+          /* Admin View Header: Clicking Logo navigates directly to /admin */
+          <div
+            onClick={handleLogoClick}
+            className={`flex items-center gap-2.5 min-w-0 ${
+              isAdminLoggedIn ? 'cursor-pointer group select-none' : ''
+            }`}
+            title={isAdminLoggedIn ? 'Navigate to Master Admin Hub (/admin)' : 'JAL-JIVAN Admin'}
+          >
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0 group-hover:scale-105 transition-transform">
               <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-pulse" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white shrink-0">Mittal Brothers</span>
-                <span
-                  className="text-[9px] sm:text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border shrink-0 bg-indigo-500/20 text-indigo-300 border-indigo-500/30"
-                >
-                  {adminSubView === 'purchase' ? (
-                    <>
-                      <span className="sm:hidden">Purchase</span>
-                      <span className="hidden sm:inline">Purchase & Inward</span>
-                    </>
-                  ) : adminSubView === 'damage' ? (
-                    <>
-                      <span className="sm:hidden">Damage</span>
-                      <span className="hidden sm:inline">Damage & Returns</span>
-                    </>
-                  ) : adminSubView === 'delivery' ? (
-                    <>
-                      <span className="sm:hidden">Dispatch</span>
-                      <span className="hidden sm:inline">Dispatch Console</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="sm:hidden">Admin Hub</span>
-                      <span className="hidden sm:inline">Master Admin Hub</span>
-                    </>
-                  )}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-sm sm:text-base tracking-tight text-white group-hover:text-emerald-300 transition-colors shrink-0">
+                  JAL-JIVAN
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                  {adminSubView === 'hub' ? 'Executive Hub' : 'Admin'}
                 </span>
               </div>
-              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium hidden sm:block truncate">
-                Fleet Logistics & Command Center
-              </p>
             </div>
           </div>
         )}
 
-        {/* Right Section: Role Controls & Logout */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap justify-end">
-          {/* Quick Hub button if inside Admin sub-module */}
-          {isViewAdmin && isAdminLoggedIn && adminSubView !== 'hub' && onSelectAdminSubView && (
-            <button
-              type="button"
-              onClick={() => onSelectAdminSubView('hub')}
-              className="flex items-center gap-1 text-[11px] sm:text-xs px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 font-semibold transition-all shadow-sm shrink-0"
-              title="Return to Master Admin Hub"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden xs:inline">Hub</span>
-            </button>
-          )}
-
-          {/* Quick Hub button if staff is in a sub-module */}
-          {isStaffView && staffSession && adminSubView !== 'hub' && onSelectAdminSubView && (
-            <button
-              type="button"
-              onClick={() => onSelectAdminSubView('hub')}
-              className="flex items-center gap-1 text-[11px] sm:text-xs px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 font-semibold transition-all shadow-sm shrink-0"
-              title="Return to Staff Hub"
-            >
-              <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden xs:inline">Staff Hub</span>
-            </button>
-          )}
-
-          {/* Operational Status indicator (for Admin View) */}
-          {isViewAdmin && (
+        {/* Right Section: Strictly ONE Single Clean Logout Button */}
+        <div className="flex items-center gap-2.5 shrink-0 justify-end">
+          {/* Operational Cloud Sync Status Pill for Admin */}
+          {isViewAdmin && onOpenDbInfo && (
             <button
               type="button"
               onClick={onOpenDbInfo}
-              className={`flex items-center gap-1 text-[10px] sm:text-xs px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full font-medium transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 py-1 rounded-full font-medium transition-all shrink-0 ${
                 isSupabaseConfigured
                   ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20'
                   : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
               }`}
-              title="System Status: Operational"
+              title="System Connectivity"
             >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span
@@ -146,12 +118,12 @@ export default function Navbar({
                 />
               </span>
               <span className="hidden sm:inline">
-                {isSupabaseConfigured ? 'System Online' : 'Demo Local Mode'}
+                {isSupabaseConfigured ? 'System Online' : 'Local Mode'}
               </span>
             </button>
           )}
 
-          {/* DRIVER VIEW: Log Out Button */}
+          {/* DRIVER VIEW: Log Out Driver Button */}
           {!isViewAdmin && !isStaffView && currentDriver && (
             <button
               type="button"
@@ -175,7 +147,7 @@ export default function Navbar({
                 type="button"
                 id="staff-navbar-logout-btn"
                 onClick={onStaffLogout}
-                className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 transition-all active:scale-95 shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 transition-all active:scale-95 shrink-0"
                 title="Logout from Staff Portal"
               >
                 <LogOut className="w-3.5 h-3.5 shrink-0" />
@@ -184,15 +156,15 @@ export default function Navbar({
             </div>
           )}
 
-          {/* ADMIN VIEW (/admin): Admin Logout Button */}
+          {/* ADMIN VIEW (/admin): Strictly ONE Clean Admin Logout Button on Top Right */}
           {isViewAdmin && (
             isAdminLoggedIn ? (
-              <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-slate-800 shrink-0">
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
                 <button
                   type="button"
                   id="admin-navbar-logout-btn"
                   onClick={onAdminLogout}
-                  className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold shadow-md shadow-red-600/30 hover:shadow-red-600/50 active:scale-95 transition-all shrink-0"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 hover:shadow-rose-600/50 active:scale-95 transition-all shrink-0"
                   title="Logout from Admin Panel"
                 >
                   <LogOut className="w-3.5 h-3.5 shrink-0" />

@@ -34,7 +34,8 @@ import {
   AlertCircle,
   X,
   FileText,
-  Calendar
+  Calendar,
+  ArrowLeft
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -114,7 +115,8 @@ export function AdminPanel({
   onDeleteAddress,
   onRefresh,
   loading,
-  onLogout
+  onLogout,
+  onBackToHub
 }) {
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL' | 'Pending' | 'Out for Delivery' | 'Delivered'
   const [searchQuery, setSearchQuery] = useState('');
@@ -665,13 +667,26 @@ export function AdminPanel({
     <div className="space-y-5 pb-12 w-full max-w-full overflow-x-hidden">
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-            Dispatch Command Center
-          </h1>
-          <p className="text-xs text-slate-400">
-            Monitor real-time deliveries, dispatch drivers, and view live status
-          </p>
+        <div className="flex items-center gap-3">
+          {onBackToHub && (
+            <button
+              type="button"
+              onClick={onBackToHub}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm"
+              title="Return to Master Admin Hub"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Hub</span>
+            </button>
+          )}
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              Delivery & Dispatch Console
+            </h1>
+            <p className="text-xs text-slate-400">
+              Monitor real-time deliveries, dispatch drivers, and view live status
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
