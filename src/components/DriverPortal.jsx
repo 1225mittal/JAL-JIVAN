@@ -33,10 +33,12 @@ import {
   Flame,
   Package,
   Banknote,
-  Radio
+  Radio,
+  Camera
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
+import LiveExpiryScanner from './LiveExpiryScanner';
 import {
   supabase,
   fetchOrders as fetchOrdersApi,
@@ -49,7 +51,8 @@ import {
   fetchStoreSettings,
   updateDriverLocation,
   defaultStoreSettings,
-  updateDriverHeartbeat
+  updateDriverHeartbeat,
+  createDamageExpiryItem
 } from '../lib/supabase';
 import {
   calculateDistanceMeters,
@@ -124,6 +127,30 @@ export default function DriverPortal({
   const [selectedSlipOrder, setSelectedSlipOrder] = useState(null);
   const [pinningOrderId, setPinningOrderId] = useState(null);
   const [gpsError, setGpsError] = useState(null);
+  const [isExpiryCamOpen, setIsExpiryCamOpen] = useState(false);
+
+  // Log expired/damaged item scanned by delivery boy directly into inventory
+  const handleLogDamagedFromCam = async (detectedData) => {
+    try {
+      await createDamageExpiryItem({
+        product_name: detectedData.product_name && detectedData.product_name !== 'unknown'
+          ? detectedData.product_name
+          : 'Expired Item (Field Return)',
+        company_name: 'FMCG Return',
+        damage_type: 'Expired',
+        expiry_date: detectedData.expiry_date || '',
+        mfg_date: detectedData.mfg_date || '',
+        quantity_pcs: 1,
+        rack_number: `Delivery Van (${currentDriver?.name || 'Field Rider'})`,
+        front_photo_url: detectedData.capturedImage || '',
+        notes: `Scanned & logged by delivery boy ${currentDriver?.name || 'Rider'}: ${detectedData.notes || detectedData.reason || 'Flagged expired by Live Expiry Cam'}`
+      });
+      alert(`✅ Expired product "${detectedData.product_name || 'Item'}" logged to Return Stock by ${currentDriver?.name || 'Rider'}!`);
+    } catch (err) {
+      console.warn('Field damage log error:', err);
+      alert(`Item scanned: Expired on ${detectedData.expiry_date || 'date'}.`);
+    }
+  };
 
   // Staff Attendance Records & State
   const [attendanceRecords, setAttendanceRecords] = useState([]);
@@ -1245,6 +1272,16 @@ export default function DriverPortal({
 
       {/* 3. Utility Row: Neutral Action Pills */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+        {/* Live Expiry Scanner Cam for Delivery Boys */}
+        <button
+          type="button"
+          onClick={() => setIsExpiryCamOpen(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 text-xs font-medium transition shrink-0"
+          title="Open Real-time Expiry Scanner Camera to check product packaging dates"
+        >
+          <Camera className="w-3.5 h-3.5 text-amber-400" />
+          <span>Expiry Cam 📸</span>
+        </button>
 
         {notifPermission !== 'granted' ? (
           <button
@@ -1783,10 +1820,20 @@ export default function DriverPortal({
                       </div>
 
                       {/* Proof of Delivery / Complete Action */}
-                      <div className="pt-2 border-t border-slate-800">
+                      <div className="pt-2 border-t border-slate-800 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsExpiryCamOpen(true)}
+                          className="py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-amber-300 border border-amber-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm shrink-0"
+                          title="Check product packaging expiry / return date"
+                        >
+                          <Camera className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="hidden xs:inline">Check Expiry</span>
+                        </button>
+
                         <button
                           onClick={() => setSelectedOrderForPod(order)}
-                          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
+                          className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           <span>
@@ -2235,6 +2282,13 @@ export default function DriverPortal({
         onClose={() => setSelectedSlipOrder(null)}
         imageUrl={selectedSlipOrder?.slip_image_url}
         orderNumber={selectedSlipOrder?.order_number}
+      />
+
+      {/* Live Groq Vision Expiry Scanner Modal for Delivery Boys */}
+      <LiveExpiryScanner
+        isOpen={isExpiryCamOpen}
+        onClose={() => setIsExpiryCamOpen(false)}
+        onLogDamaged={handleLogDamagedFromCam}
       />
 
 
