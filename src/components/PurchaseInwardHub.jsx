@@ -568,23 +568,34 @@ export default function PurchaseInwardHub({
       const parsed = await response.json();
       setRawOcrData(parsed);
 
-      // Populate Editable Header Fields
-      if (parsed.seller) {
+      // Populate Editable Header Fields (Priority to standard schema with fallback to nested)
+      const vendorName = parsed.vendor_name || parsed.seller?.name || '';
+      const vendorGstin = parsed.vendor_gstin || parsed.seller?.gst || '';
+      const vendorAddress = parsed.vendor_address || parsed.seller?.address || '';
+      const vendorPhone = parsed.vendor_phone || parsed.seller?.contact || '';
+      const fssai = parsed.vendor_fssai || parsed.fssai || parsed.seller?.fssai || '';
+      const salesmanName = parsed.salesman_name || parsed.seller?.salesman_name || '';
+      const salesmanNumber = parsed.salesman_number || parsed.seller?.salesman_number || '';
+
+      if (vendorName || vendorGstin || parsed.seller) {
         setSellerData({
-          name: parsed.seller.name || '',
-          gst: parsed.seller.gst || '',
-          fssai: parsed.seller.fssai || '',
-          contact: parsed.seller.contact || '',
-          address: parsed.seller.address || '',
-          salesman_name: parsed.seller.salesman_name || '',
-          salesman_number: parsed.seller.salesman_number || ''
+          name: vendorName,
+          gst: vendorGstin,
+          fssai: fssai,
+          contact: vendorPhone,
+          address: vendorAddress,
+          salesman_name: salesmanName,
+          salesman_number: salesmanNumber
         });
       }
 
-      if (parsed.invoice) {
+      const invoiceNum = parsed.invoice_no || parsed.invoice?.invoice_number || '';
+      const invoiceDate = parsed.invoice_date || parsed.invoice?.invoice_date || '';
+
+      if (invoiceNum || invoiceDate || parsed.invoice) {
         setInvoiceData({
-          invoice_number: parsed.invoice.invoice_number || `INV-${Date.now().toString().slice(-6)}`,
-          invoice_date: parsed.invoice.invoice_date || new Date().toISOString().split('T')[0]
+          invoice_number: invoiceNum || `INV-${Date.now().toString().slice(-6)}`,
+          invoice_date: invoiceDate || new Date().toISOString().split('T')[0]
         });
       }
 
@@ -600,27 +611,36 @@ export default function PurchaseInwardHub({
       if (Array.isArray(parsed.items) && parsed.items.length > 0) {
         setItems(
           parsed.items.map((it, idx) => {
-            const qty = Number(it.quantity) || 1;
-            const rate = Number(it.rate) || Number(it.purchase_price) || Number(it.price_before_gst) || 0;
-            const disc = Number(it.discount) || 0;
-            const taxable = Number(it.taxable_amount) || +((qty * rate) - disc).toFixed(2);
-            const gstPct = Number(it.gst_pct) || Number(it.gst_rate) || 18;
+            const sn = Number(it.sn) || (idx + 1);
+            const qty = Number(it.qty ?? it.quantity) || 1;
+            const rate = Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0;
+            const disc = Number(it.discount_amount ?? it.discount) || 0;
+            const taxable = Number(it.taxable_amount) || +Math.max(0, (qty * rate) - disc).toFixed(2);
+            const gstPct = Number(it.gst_pct ?? it.gst_rate) || 18;
             const cgstPct = Number(it.cgst_pct) || (gstPct / 2);
             const sgstPct = Number(it.sgst_pct) || (gstPct / 2);
             const cgstAmt = Number(it.cgst_amount) || +((taxable * (cgstPct / 100))).toFixed(2);
             const sgstAmt = Number(it.sgst_amount) || +((taxable * (sgstPct / 100))).toFixed(2);
-            const cessAmt = Number(it.cess_amount) || Number(it.cess) || 0;
-            const totalAmt = Number(it.total_amount) || Number(it.price_after_gst) || +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
+            const cessAmt = Number(it.cess_amount ?? it.cess) || 0;
+            const totalAmt = Number(it.total_amount ?? it.price_after_gst) || +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
+            const hsnCode = (it.hsn ?? it.hsn_code ?? '').toString().trim();
+            const rawBarcode = (it.barcode || '').toString().trim();
+            // Discard barcode if it matches HSN or is less than 12 digits
+            const cleanBarcode = (rawBarcode && rawBarcode !== hsnCode && rawBarcode.length >= 12) ? rawBarcode : '';
 
             return {
               id: `temp_${Date.now()}_${idx}`,
-              barcode: it.barcode || '',
-              item_name: it.item_name || `Item ${idx + 1}`,
-              hsn_code: it.hsn_code || '',
+              sn,
+              barcode: cleanBarcode,
+              item_name: it.item_name || `Item ${sn}`,
+              hsn_code: hsnCode,
+              hsn: hsnCode,
               unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
               quantity: qty,
+              qty,
               mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
               rate: rate,
+              purchase_price: rate,
               price_before_gst: rate,
               taxable_amount: taxable,
               gst_pct: gstPct,
@@ -633,6 +653,7 @@ export default function PurchaseInwardHub({
               cess_amount: cessAmt,
               cess: cessAmt,
               discount: disc,
+              discount_amount: disc,
               total_amount: totalAmt,
               price_after_gst: totalAmt
             };

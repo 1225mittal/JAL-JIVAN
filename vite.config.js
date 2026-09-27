@@ -146,7 +146,7 @@ export default defineConfig(({ mode }) => {
               })
               return
             }
-            if (req.url?.startsWith('/api/purchase-ocr') && req.method === 'POST') {
+            if ((req.url?.startsWith('/api/purchase-ocr') || req.url?.startsWith('/api/groq-ocr')) && req.method === 'POST') {
               let body = ''
               req.on('data', (chunk) => { body += chunk })
               req.on('end', async () => {
