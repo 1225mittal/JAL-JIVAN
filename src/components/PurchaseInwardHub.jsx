@@ -30,34 +30,55 @@ import {
   Check,
   RefreshCw,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Zap,
+  ZoomIn,
+  Link2,
+  Smartphone,
+  Image as ImageIcon
 } from 'lucide-react';
 import BarcodeScannerModal from './BarcodeScannerModal';
+import MobileScannerModal from './MobileScannerModal';
+import VendorsDirectory from './purchase/VendorsDirectory';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
 import {
   fetchPurchaseInvoices,
   savePurchaseInvoice,
-  deletePurchaseInvoice
+  deletePurchaseInvoice,
+  fetchPurchaseVendors,
+  syncPurchaseVendorFromOcr,
+  deletePurchaseVendor
 } from '../lib/supabase';
 
 export default function PurchaseInwardHub({
   onBackToHub,
   showToast = () => {}
 }) {
-  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history'
+  const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history' | 'vendors'
   const [invoicesHistory, setInvoicesHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedInvoiceId, setExpandedInvoiceId] = useState(null);
 
-  // Bill Upload & Processing State
+  // Bill Queue & Upload State (Individual Bill Queue)
+  const [billQueue, setBillQueue] = useState([]);
+  const [activeProcessingBillId, setActiveProcessingBillId] = useState(null);
+  const [isMobileScannerOpen, setIsMobileScannerOpen] = useState(false);
+  const [zoomedQueueImage, setZoomedQueueImage] = useState(null);
+
+  // Active / Selected Bill Form State
   const [selectedFile, setSelectedFile] = useState(null);
   const [billPreviewUrl, setBillPreviewUrl] = useState(null);
   const [billBase64, setBillBase64] = useState(null);
   const [isProcessingOcr, setIsProcessingOcr] = useState(false);
   const [ocrError, setOcrError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Vendors State
+  const [vendorsList, setVendorsList] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [vendorLedgerFilter, setVendorLedgerFilter] = useState(null);
 
   // Barcode Scanner Modal State
   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
@@ -107,42 +128,210 @@ export default function PurchaseInwardHub({
     }
   };
 
+  // Load vendors list
+  const loadVendors = async () => {
+    setVendorsLoading(true);
+    try {
+      const data = await fetchPurchaseVendors();
+      setVendorsList(data || []);
+    } catch (err) {
+      console.warn('Failed to load vendors:', err);
+    } finally {
+      setVendorsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadHistory();
+    loadVendors();
   }, []);
 
-  // Handle File / Camera Capture
+  // Handle Multi-File / Image / PDF Upload
   const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setOcrError('');
-    setSelectedFile(file);
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+          const { dataUrl, base64 } = await renderPdfFirstPageToImage(file, 2.0);
+          const newItem = {
+            id: `bill_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+            dataUrl,
+            base64,
+            mimeType: 'image/jpeg',
+            name: file.name,
+            size: file.size,
+            uploadedAt: new Date().toISOString(),
+            attachedToPrevious: false,
+            status: 'queued'
+          };
+          setBillQueue((prev) => [...prev, newItem]);
+        } else {
+          await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+              const dataUrl = evt.target.result;
+              const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+              const newItem = {
+                id: `bill_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+                dataUrl,
+                base64,
+                mimeType: file.type || 'image/jpeg',
+                name: file.name,
+                size: file.size,
+                uploadedAt: new Date().toISOString(),
+                attachedToPrevious: false,
+                status: 'queued'
+              };
+              setBillQueue((prev) => [...prev, newItem]);
+              resolve();
+            };
+            reader.readAsDataURL(file);
+          });
+        }
+      } catch (err) {
+        console.error('File conversion error:', err);
+        setOcrError(`Failed to process document "${file.name}": ${err.message || 'Corrupted file'}`);
+      }
+    }
+
+    e.target.value = '';
+    showToast(`Added ${files.length} document${files.length > 1 ? 's' : ''} to Uploaded Bills Queue`, 'info');
+  };
+
+  // Process an individual bill card via Groq Vision OCR
+  const handleProcessIndividualBill = async (billItem) => {
+    setActiveProcessingBillId(billItem.id);
+    setIsProcessingOcr(true);
+    setOcrError('');
+    setSelectedFile({ name: billItem.name, size: billItem.size || Math.round(billItem.base64.length * 0.75), type: billItem.mimeType });
+    setBillPreviewUrl(billItem.dataUrl);
+    setBillBase64(billItem.base64);
 
     try {
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        // PDF Document: Render 1st page to canvas image via pdfjs-dist
-        setIsProcessingOcr(true);
-        const { dataUrl, base64 } = await renderPdfFirstPageToImage(file, 2.0);
-        setBillPreviewUrl(dataUrl);
-        setBillBase64(base64);
-        await processWithGroqVision(base64, 'image/jpeg');
-      } else {
-        // Standard Image (PNG/JPG/JPEG/Camera capture)
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-          const dataUrl = event.target.result;
-          setBillPreviewUrl(dataUrl);
-          const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-          setBillBase64(base64);
-          await processWithGroqVision(base64, file.type || 'image/jpeg');
-        };
-        reader.readAsDataURL(file);
+      const response = await fetch('/api/purchase-ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: billItem.base64,
+          mimeType: billItem.mimeType || 'image/jpeg'
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server OCR Error (${response.status})`);
       }
+
+      const parsed = await response.json();
+      setRawOcrData(parsed);
+
+      // Automated Vendor Profile Sync on OCR Extraction (Requirement 2)
+      if (parsed.seller && parsed.seller.name) {
+        const grandTotal = Number(parsed.totals?.grand_total) || 0;
+        try {
+          await syncPurchaseVendorFromOcr(
+            {
+              name: parsed.seller.name,
+              gstin: parsed.seller.gst,
+              phone: parsed.seller.contact,
+              address: parsed.seller.address,
+              bill_date: parsed.invoice?.invoice_date || new Date().toISOString().split('T')[0]
+            },
+            grandTotal
+          );
+          loadVendors();
+        } catch (vErr) {
+          console.warn('Vendor profile sync notice:', vErr);
+        }
+      }
+
+      // Populate Editable Fields
+      if (parsed.seller) {
+        setSellerData({
+          name: parsed.seller.name || '',
+          gst: parsed.seller.gst || '',
+          fssai: parsed.seller.fssai || '',
+          contact: parsed.seller.contact || '',
+          address: parsed.seller.address || '',
+          salesman_name: parsed.seller.salesman_name || '',
+          salesman_number: parsed.seller.salesman_number || ''
+        });
+      }
+
+      if (parsed.invoice) {
+        setInvoiceData({
+          invoice_number: parsed.invoice.invoice_number || `INV-${Date.now().toString().slice(-6)}`,
+          invoice_date: parsed.invoice.invoice_date || new Date().toISOString().split('T')[0]
+        });
+      }
+
+      if (parsed.bank_details) {
+        setBankDetails({
+          bank_name: parsed.bank_details.bank_name || '',
+          account_no: parsed.bank_details.account_no || '',
+          ifsc: parsed.bank_details.ifsc || ''
+        });
+      }
+
+      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+        setItems(
+          parsed.items.map((it, idx) => ({
+            id: `temp_${Date.now()}_${idx}`,
+            barcode: it.barcode || '',
+            item_name: it.item_name || `Item ${idx + 1}`,
+            hsn_code: it.hsn_code || '',
+            quantity: Number(it.quantity) || 1,
+            mrp: Number(it.mrp) || 0,
+            purchase_price: Number(it.purchase_price) || Number(it.price_before_gst) || 0,
+            price_before_gst: Number(it.price_before_gst) || Number(it.purchase_price) || 0,
+            gst_rate: Number(it.gst_rate) || 18,
+            cess: Number(it.cess) || 0,
+            discount: Number(it.discount) || 0,
+            price_after_gst: Number(it.price_after_gst) || 0
+          }))
+        );
+      } else {
+        setItems([
+          {
+            id: `temp_${Date.now()}`,
+            barcode: '',
+            item_name: 'New Product Item',
+            hsn_code: '2201',
+            quantity: 1,
+            mrp: 100,
+            purchase_price: 70,
+            price_before_gst: 70,
+            gst_rate: 18,
+            cess: 0,
+            discount: 0,
+            price_after_gst: 82.60
+          }
+        ]);
+      }
+
+      // Mark this bill item in queue as processed
+      setBillQueue((prev) =>
+        prev.map((b) => (b.id === billItem.id ? { ...b, status: 'processed', extracted: true } : b))
+      );
+
+      showToast(`⚡ Bill "${billItem.name}" extracted successfully via Groq Vision!`, 'success');
+
+      // Scroll to review editor
+      setTimeout(() => {
+        const reviewEl = document.getElementById('inward-bill-review-section');
+        if (reviewEl) reviewEl.scrollIntoView({ behavior: 'smooth' });
+      }, 150);
     } catch (err) {
-      console.error('File conversion error:', err);
-      setOcrError(`Failed to process document: ${err.message || 'Corrupted file'}`);
+      console.error('Groq Vision OCR failure:', err);
+      setOcrError(err.message || 'Failed to extract text from bill. You can still input details manually.');
+    } finally {
       setIsProcessingOcr(false);
+      setActiveProcessingBillId(null);
     }
   };
 
@@ -376,6 +565,26 @@ export default function PurchaseInwardHub({
 
       // Write to purchase_invoices first, obtain generated invoice id, and insert line items into purchase_items with purchase_invoice_id: id
       const saved = await savePurchaseInvoice(invoicePayload, items);
+
+      // Auto-sync vendor profile upon saving purchase entry (Requirement 2)
+      if (sellerData.name) {
+        try {
+          await syncPurchaseVendorFromOcr(
+            {
+              name: sellerData.name,
+              gstin: sellerData.gst,
+              phone: sellerData.contact,
+              address: sellerData.address,
+              bill_date: invoiceData.invoice_date
+            },
+            grandTotal
+          );
+          loadVendors();
+        } catch (vErr) {
+          console.warn('Vendor profile sync notice on save:', vErr);
+        }
+      }
+
       showToast('🎉 Purchase invoice & inward stock committed successfully!', 'success');
 
       // Immediately trigger a re-fetch after saving so the new bill appears without a page reload
@@ -397,6 +606,7 @@ export default function PurchaseInwardHub({
     setBillPreviewUrl(null);
     setBillBase64(null);
     setOcrError('');
+    setActiveProcessingBillId(null);
     setSellerData({
       name: '',
       gst: '',
@@ -477,11 +687,11 @@ export default function PurchaseInwardHub({
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-950/80 border border-slate-800 shrink-0">
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-950/80 border border-slate-800 shrink-0 flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab('new')}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'new'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white'
@@ -497,14 +707,30 @@ export default function PurchaseInwardHub({
               setActiveTab('history');
               loadHistory();
             }}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
               activeTab === 'history'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Purchase History ({invoicesHistory.length})</span>
+            <span>Inward Invoices Ledger ({invoicesHistory.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('vendors');
+              loadVendors();
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+              activeTab === 'vendors'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>🏢 Vendors Directory ({vendorsList.length})</span>
           </button>
         </div>
       </div>
@@ -514,16 +740,16 @@ export default function PurchaseInwardHub({
       {/* ======================================================== */}
       {activeTab === 'new' && (
         <div className="space-y-6">
-          {/* Upload Dropzone Card */}
-          <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-4">
+          {/* Upload Dropzone & Queue Hub Card */}
+          <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Upload className="w-5 h-5 text-amber-400" />
-                  <span>Invoice Upload Drop-Zone</span>
+                  <span>Invoice Upload Drop-Zone & Photo Queue</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Capture physical bill via phone camera or upload PDF / Image tax invoice.
+                  Snap physical receipts via camera or upload multiple bill files. Each bill is queued and processed individually.
                 </p>
               </div>
 
@@ -534,7 +760,7 @@ export default function PurchaseInwardHub({
                   className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-rose-400 transition"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Clear & Retake</span>
+                  <span>Clear Active Bill</span>
                 </button>
               )}
             </div>
@@ -552,95 +778,214 @@ export default function PurchaseInwardHub({
               ref={fileInputRef}
               type="file"
               accept="image/png, image/jpeg, image/jpg, application/pdf"
+              multiple
               onChange={handleFileChange}
               className="hidden"
             />
 
-            {/* Dropzone with 2 Options */}
-            {!selectedFile ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                {/* Option 1: Take Photo with Camera */}
-                <button
-                  type="button"
-                  onClick={() => cameraInputRef.current?.click()}
-                  className="group relative flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500/80 bg-slate-950/60 hover:bg-slate-950/90 transition-all cursor-pointer text-center space-y-3"
-                >
-                  <div className="w-14 h-14 rounded-2xl bg-amber-500/10 group-hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center transition shadow-lg shadow-amber-500/10">
-                    <Camera className="w-7 h-7" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white text-sm group-hover:text-amber-400 transition">
-                      Take Photo with Camera
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Direct back-camera capture for mobile & tablet dispatch desks
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-                    Fast Mobile Cam
-                  </span>
-                </button>
-
-                {/* Option 2: Upload File (PDF / Images) */}
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="group relative flex flex-col items-center justify-center p-8 rounded-2xl border-2 border-dashed border-slate-700 hover:border-cyan-500/80 bg-slate-950/60 hover:bg-slate-950/90 transition-all cursor-pointer text-center space-y-3"
-                >
-                  <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 group-hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center transition shadow-lg shadow-cyan-500/10">
-                    <Upload className="w-7 h-7" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white text-sm group-hover:text-cyan-400 transition">
-                      Upload File (PDF / PNG / JPG)
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Renders multi-page PDF documents via canvas & extracts first page
-                    </p>
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-cyan-400 bg-cyan-500/10 px-2.5 py-1 rounded-full border border-cyan-500/20">
-                    PDF & Image Docs
-                  </span>
-                </button>
-              </div>
-            ) : (
-              /* Selected File & Preview Display */
-              <div className="flex flex-col md:flex-row items-center gap-5 p-4 rounded-2xl bg-slate-950/80 border border-slate-800">
-                {billPreviewUrl && (
-                  <div className="relative w-full md:w-48 h-40 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0 flex items-center justify-center">
-                    <img
-                      src={billPreviewUrl}
-                      alt="Bill Preview"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-1.5 flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="font-bold text-white text-sm truncate">
-                      {selectedFile.name}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Size: {(selectedFile.size / 1024).toFixed(1)} KB • Type: {selectedFile.type || 'Document'}
-                  </p>
-
-                  {isProcessingOcr ? (
-                    <div className="flex items-center gap-2 text-xs font-semibold text-amber-400 pt-2">
-                      <Sparkles className="w-4 h-4 animate-spin-slow text-amber-400" />
-                      <span>Groq Vision LPU OCR is extracting vendor, HSN, and price columns...</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs text-emerald-400 pt-1">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Extraction completed. Review and edit fields below.</span>
-                    </div>
-                  )}
+            {/* Top Action Triggers: Mobile Scanner Modal & Multi-File Upload */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Trigger 1: Open Mobile Scanner Modal */}
+              <button
+                type="button"
+                onClick={() => setIsMobileScannerOpen(true)}
+                className="group relative flex items-center gap-4 p-5 rounded-2xl border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-amber-500/5"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 group-hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 transition">
+                  <Camera className="w-6 h-6" />
                 </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-white text-sm group-hover:text-amber-400 transition flex items-center gap-1.5">
+                    <span>📱 Open Mobile Bill Scanner</span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                      Live Queue
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Live camera viewfinder for continuous photo snaps and queue processing
+                  </p>
+                </div>
+              </button>
+
+              {/* Trigger 2: Upload Files (Multi-file enabled) */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="group relative flex items-center gap-4 p-5 rounded-2xl border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-cyan-500/5"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 group-hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0 transition">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-white text-sm group-hover:text-cyan-400 transition flex items-center gap-1.5">
+                    <span>📁 Upload Bill Photos / PDF (Multi-File)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Upload multiple images or PDFs. Each bill is queued as a separate entry
+                  </p>
+                </div>
+              </button>
+            </div>
+
+            {/* ======================================================== */}
+            {/* REQUIREMENT 1: UPLOADED BILLS QUEUE TRAY (INDIVIDUAL CARDS) */}
+            {/* ======================================================== */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-sm font-bold text-white">
+                    Uploaded Bills Queue
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    {billQueue.length} bill{billQueue.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Process each bill card separately through Groq Vision OCR
+                </span>
               </div>
-            )}
+
+              {billQueue.length === 0 ? (
+                <div className="rounded-2xl border-2 border-dashed border-slate-800 bg-slate-950/40 p-8 text-center space-y-2">
+                  <FileText className="w-8 h-8 mx-auto text-slate-700" />
+                  <p className="text-xs font-semibold text-slate-300">No bills currently in queue</p>
+                  <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                    Snap physical bills using "📱 Open Mobile Bill Scanner" or upload images/PDFs above to add them to your queue.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {billQueue.map((item, index) => {
+                    const isProcessing = activeProcessingBillId === item.id;
+                    const isCurrentlyActive = billPreviewUrl === item.dataUrl;
+                    const formattedTime = new Date(item.uploadedAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-4 rounded-2xl border transition-all ${
+                          isCurrentlyActive
+                            ? 'bg-slate-950 border-amber-500 shadow-lg shadow-amber-500/10'
+                            : item.attachedToPrevious
+                            ? 'bg-slate-950/90 border-cyan-500/40'
+                            : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3.5">
+                          {/* Image Thumbnail with Zoom Preview Button */}
+                          <div
+                            onClick={() => setZoomedQueueImage(item.dataUrl)}
+                            className="relative w-20 h-24 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden shrink-0 group cursor-pointer"
+                            title="Click to Zoom Preview"
+                          >
+                            <img
+                              src={item.dataUrl}
+                              alt="Thumbnail"
+                              className="w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                              <ZoomIn className="w-5 h-5 text-amber-300" />
+                            </div>
+                            <span className="absolute bottom-1 right-1 bg-black/70 text-[9px] font-bold text-slate-300 px-1 rounded">
+                              Zoom
+                            </span>
+                          </div>
+
+                          {/* Card Information */}
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-white text-xs truncate max-w-[170px]">
+                                    {item.name || `Bill #${index + 1}`}
+                                  </span>
+                                  {isCurrentlyActive && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500 text-slate-950">
+                                      Active
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                  <Clock className="w-3 h-3 text-slate-500" />
+                                  <span>{formattedTime}</span>
+                                </p>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBillQueue((prev) => prev.filter((b) => b.id !== item.id));
+                                  if (billPreviewUrl === item.dataUrl) resetUploadState();
+                                }}
+                                title="Delete Image"
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {/* Status badge */}
+                            <div className="flex items-center gap-1.5">
+                              {item.status === 'processed' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  <Check className="w-2.5 h-2.5" />
+                                  <span>Extracted & Loaded Below</span>
+                                </span>
+                              ) : isProcessing ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                                  <span>Extracting OCR...</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300">
+                                  <span>Queued (Ready to Process)</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Card Actions: Process Button & Multi-Page Link Option */}
+                            <div className="flex items-center gap-2 pt-1 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={() => handleProcessIndividualBill(item)}
+                                disabled={isProcessing}
+                                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition active:scale-[0.98] cursor-pointer"
+                              >
+                                <Zap className="w-3.5 h-3.5 fill-slate-950" />
+                                <span>{isProcessing ? 'Extracting...' : '⚡ Process This Bill (OCR Entry)'}</span>
+                              </button>
+
+                              {/* Multi-page linking checkbox */}
+                              {index > 0 && (
+                                <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer select-none bg-slate-900 px-2 py-1.5 rounded-xl border border-slate-800 hover:border-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!item.attachedToPrevious}
+                                    onChange={() => {
+                                      setBillQueue((prev) =>
+                                        prev.map((b) =>
+                                          b.id === item.id ? { ...b, attachedToPrevious: !b.attachedToPrevious } : b
+                                        )
+                                      );
+                                    }}
+                                    className="w-3.5 h-3.5 text-cyan-500 rounded border-slate-700 focus:ring-0 cursor-pointer"
+                                  />
+                                  <span className="text-[10px] text-cyan-300">Attach to Previous Bill Page</span>
+                                </label>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* Error Message */}
             {ocrError && (
@@ -1072,6 +1417,36 @@ export default function PurchaseInwardHub({
         <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('history')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeTab === 'history'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Inward Invoices Ledger
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('vendors');
+                      loadVendors();
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeTab === 'vendors'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    🏢 Vendors Directory
+                  </button>
+                </div>
+              </div>
+
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <FileSpreadsheet className="w-5 h-5 text-amber-400" />
                 <span>Purchase Inward Invoices Ledger</span>
@@ -1106,6 +1481,29 @@ export default function PurchaseInwardHub({
               </button>
             </div>
           </div>
+
+          {/* Active Vendor Filter Alert */}
+          {vendorLedgerFilter && (
+            <div className="p-3 px-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Filtered by vendor: <strong>{vendorLedgerFilter.vendor_name}</strong>
+                  {vendorLedgerFilter.gstin ? ` (${vendorLedgerFilter.gstin})` : ''}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setVendorLedgerFilter(null);
+                  setSearchQuery('');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold transition text-[11px]"
+              >
+                Clear Filter
+              </button>
+            </div>
+          )}
 
           {/* History Error Alert */}
           {historyError && (
@@ -1309,6 +1707,102 @@ export default function PurchaseInwardHub({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB 3: VENDORS DIRECTORY VIEW */}
+      {/* ======================================================== */}
+      {activeTab === 'vendors' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800 self-start w-fit">
+            <button
+              type="button"
+              onClick={() => setActiveTab('history')}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition"
+            >
+              Inward Invoices Ledger
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('vendors');
+                loadVendors();
+              }}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 transition"
+            >
+              🏢 Vendors Directory
+            </button>
+          </div>
+
+          <VendorsDirectory
+            vendors={vendorsList}
+            invoicesHistory={invoicesHistory}
+            onSelectVendorInvoices={(vendor) => {
+              setActiveTab('history');
+              setSearchQuery(vendor.vendor_name || vendor.gstin || '');
+              setVendorLedgerFilter(vendor);
+            }}
+            onRefresh={loadVendors}
+            loading={vendorsLoading}
+            onDeleteVendor={async (id) => {
+              await deletePurchaseVendor(id);
+              loadVendors();
+            }}
+          />
+        </div>
+      )}
+
+      {/* Mobile Scanner Modal with Camera Viewfinder & Photo Queue */}
+      <MobileScannerModal
+        isOpen={isMobileScannerOpen}
+        onClose={() => setIsMobileScannerOpen(false)}
+        queue={billQueue}
+        onAddToQueue={(newItem) => {
+          setBillQueue((prev) => [...prev, newItem]);
+          showToast(`Photo added to queue (${billQueue.length + 1} total)`, 'info');
+        }}
+        onRemoveFromQueue={(id) => {
+          setBillQueue((prev) => prev.filter((b) => b.id !== id));
+          if (billPreviewUrl === billQueue.find((b) => b.id === id)?.dataUrl) {
+            resetUploadState();
+          }
+        }}
+        onToggleAttachToPrevious={(id) => {
+          setBillQueue((prev) =>
+            prev.map((b) => (b.id === id ? { ...b, attachedToPrevious: !b.attachedToPrevious } : b))
+          );
+        }}
+        onProcessBill={(item) => {
+          setIsMobileScannerOpen(false);
+          handleProcessIndividualBill(item);
+        }}
+        processingBillId={activeProcessingBillId}
+      />
+
+      {/* Lightbox Zoom Preview Modal */}
+      {zoomedQueueImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in"
+          onClick={() => setZoomedQueueImage(null)}
+        >
+          <div
+            className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setZoomedQueueImage(null)}
+              className="absolute top-3 right-3 p-2 rounded-xl bg-black/60 text-white hover:bg-black/90 transition z-10"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={zoomedQueueImage}
+              alt="Enlarged Bill Preview"
+              className="w-full h-auto max-h-[85vh] object-contain"
+            />
+          </div>
         </div>
       )}
 

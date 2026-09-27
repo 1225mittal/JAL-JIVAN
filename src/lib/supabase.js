@@ -2881,6 +2881,241 @@ export async function deletePurchaseInvoice(invoiceId) {
 }
 
 // ==========================================
+// PURCHASE VENDORS DIRECTORY & AUTO-SYNC
+// ==========================================
+export const STORAGE_PURCHASE_VENDORS = 'jal_jivan_purchase_vendors';
+
+export function getLocalPurchaseVendors() {
+  try {
+    const raw = localStorage.getItem(STORAGE_PURCHASE_VENDORS);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error('Failed to read local purchase vendors:', e);
+    return [];
+  }
+}
+
+export function saveLocalPurchaseVendors(vendors) {
+  try {
+    localStorage.setItem(STORAGE_PURCHASE_VENDORS, JSON.stringify(vendors));
+  } catch (e) {
+    console.error('Failed to save local purchase vendors:', e);
+  }
+}
+
+export async function fetchPurchaseVendors() {
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_vendors')
+        .select('*')
+        .order('last_billed_date', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        saveLocalPurchaseVendors(data);
+        return data;
+      }
+      if (error) {
+        console.warn('Supabase purchase_vendors query note:', error.message);
+      }
+    } catch (err) {
+      console.warn('fetchPurchaseVendors error, falling back to local/inferred cache:', err);
+    }
+  }
+
+  // Fallback to local storage
+  const local = getLocalPurchaseVendors();
+  if (local && local.length > 0) return local;
+
+  // Auto-aggregate from purchase invoices history if vendor directory is empty
+  const invoices = getLocalPurchaseInvoices();
+  if (Array.isArray(invoices) && invoices.length > 0) {
+    const map = new Map();
+    for (const inv of invoices) {
+      const vName = (inv.seller_name || '').trim();
+      if (!vName) continue;
+      const key = (inv.seller_gst || vName).toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          id: `ven_agg_${Math.random().toString(36).substr(2, 7)}`,
+          vendor_name: vName,
+          gstin: inv.seller_gst || null,
+          phone: inv.seller_contact || null,
+          address: inv.seller_address || null,
+          last_billed_date: inv.invoice_date || new Date().toISOString().split('T')[0],
+          total_bills_count: 1,
+          total_purchased_amount: Number(inv.grand_total) || 0
+        });
+      } else {
+        const item = map.get(key);
+        item.total_bills_count += 1;
+        item.total_purchased_amount += Number(inv.grand_total) || 0;
+        if (inv.invoice_date && inv.invoice_date > item.last_billed_date) {
+          item.last_billed_date = inv.invoice_date;
+        }
+      }
+    }
+    const result = Array.from(map.values());
+    if (result.length > 0) {
+      saveLocalPurchaseVendors(result);
+      return result;
+    }
+  }
+
+  return [];
+}
+
+export async function syncPurchaseVendorFromOcr(extractedVendor, billAmount = 0) {
+  if (!extractedVendor) return null;
+  const vendorName = (extractedVendor.name || extractedVendor.vendor_name || '').toString().trim();
+  if (!vendorName) return null;
+
+  const gstin = (extractedVendor.gst || extractedVendor.gstin || '').toString().trim() || null;
+  const phone = (extractedVendor.contact || extractedVendor.phone || '').toString().trim() || null;
+  const address = (extractedVendor.address || '').toString().trim() || null;
+  const billDate = extractedVendor.bill_date || extractedVendor.invoice_date || new Date().toISOString().split('T')[0];
+  const amount = Number(billAmount) || 0;
+
+  let syncedVendor = null;
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Check if vendor exists by GSTIN or vendor_name
+      let existingVendor = null;
+      if (gstin) {
+        const { data: byGst } = await supabase
+          .from('purchase_vendors')
+          .select('*')
+          .eq('gstin', gstin)
+          .maybeSingle();
+        if (byGst) existingVendor = byGst;
+      }
+
+      if (!existingVendor && vendorName) {
+        const { data: byName } = await supabase
+          .from('purchase_vendors')
+          .select('*')
+          .ilike('vendor_name', vendorName)
+          .maybeSingle();
+        if (byName) existingVendor = byName;
+      }
+
+      if (existingVendor) {
+        const updatedCount = (Number(existingVendor.total_bills_count) || 1) + 1;
+        const updatedAmount = Number(((Number(existingVendor.total_purchased_amount) || 0) + amount).toFixed(2));
+
+        const updatePayload = {
+          vendor_name: vendorName || existingVendor.vendor_name,
+          gstin: gstin || existingVendor.gstin || null,
+          phone: phone || existingVendor.phone || null,
+          address: address || existingVendor.address || null,
+          last_billed_date: billDate,
+          total_bills_count: updatedCount,
+          total_purchased_amount: updatedAmount
+        };
+
+        const { data: updated, error: updErr } = await supabase
+          .from('purchase_vendors')
+          .update(updatePayload)
+          .eq('id', existingVendor.id)
+          .select()
+          .maybeSingle();
+
+        if (!updErr && updated) {
+          syncedVendor = updated;
+        } else {
+          syncedVendor = { ...existingVendor, ...updatePayload };
+        }
+      } else {
+        const insertPayload = {
+          vendor_name: vendorName,
+          gstin: gstin || null,
+          phone: phone || null,
+          address: address || null,
+          last_billed_date: billDate,
+          total_bills_count: 1,
+          total_purchased_amount: Number(amount.toFixed(2))
+        };
+
+        const { data: inserted, error: insErr } = await supabase
+          .from('purchase_vendors')
+          .upsert(insertPayload, { onConflict: gstin ? 'gstin' : undefined })
+          .select()
+          .maybeSingle();
+
+        if (!insErr && inserted) {
+          syncedVendor = inserted;
+        } else {
+          syncedVendor = { ...insertPayload, id: `ven_${Date.now()}` };
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase syncPurchaseVendorFromOcr note:', err?.message);
+    }
+  }
+
+  // Always keep local storage updated
+  try {
+    const localVendors = getLocalPurchaseVendors();
+    let idx = -1;
+    if (gstin) {
+      idx = localVendors.findIndex((v) => v.gstin && v.gstin.toLowerCase() === gstin.toLowerCase());
+    }
+    if (idx === -1) {
+      idx = localVendors.findIndex((v) => (v.vendor_name || '').toLowerCase() === vendorName.toLowerCase());
+    }
+
+    if (idx >= 0) {
+      const existing = localVendors[idx];
+      const updated = {
+        ...existing,
+        vendor_name: vendorName,
+        gstin: gstin || existing.gstin || null,
+        phone: phone || existing.phone || null,
+        address: address || existing.address || null,
+        last_billed_date: billDate,
+        total_bills_count: (Number(existing.total_bills_count) || 1) + 1,
+        total_purchased_amount: Number(((Number(existing.total_purchased_amount) || 0) + amount).toFixed(2))
+      };
+      localVendors[idx] = updated;
+      if (!syncedVendor) syncedVendor = updated;
+    } else {
+      const newEntry = syncedVendor || {
+        id: `ven_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        vendor_name: vendorName,
+        gstin: gstin || null,
+        phone: phone || null,
+        address: address || null,
+        last_billed_date: billDate,
+        total_bills_count: 1,
+        total_purchased_amount: Number(amount.toFixed(2))
+      };
+      localVendors.unshift(newEntry);
+      if (!syncedVendor) syncedVendor = newEntry;
+    }
+    saveLocalPurchaseVendors(localVendors);
+  } catch (localErr) {
+    console.warn('Local storage vendor sync note:', localErr);
+  }
+
+  return syncedVendor;
+}
+
+export async function deletePurchaseVendor(vendorId) {
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      await supabase.from('purchase_vendors').delete().eq('id', vendorId);
+    } catch (e) {
+      console.warn('deletePurchaseVendor supabase warning:', e);
+    }
+  }
+  const local = getLocalPurchaseVendors().filter((v) => v.id !== vendorId);
+  saveLocalPurchaseVendors(local);
+  return true;
+}
+
+
+// ==========================================
 // STAFF DIRECTORY, PAYROLL ADVANCES & ATTENDANCE
 // ==========================================
 export const STORAGE_STAFF_DIRECTORY = 'jal_jivan_staff_directory';

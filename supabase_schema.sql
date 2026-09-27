@@ -347,3 +347,21 @@ CREATE POLICY "Public access purchase_invoices" ON public.purchase_invoices FOR 
 
 DROP POLICY IF EXISTS "Public access purchase_items" ON public.purchase_items;
 CREATE POLICY "Public access purchase_items" ON public.purchase_items FOR ALL USING (true) WITH CHECK (true);
+
+-- 20. Purchase Vendors (Automated Archiving & Vendor Profiles)
+CREATE TABLE IF NOT EXISTS public.purchase_vendors (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    vendor_name TEXT NOT NULL,
+    gstin TEXT UNIQUE,
+    phone TEXT,
+    address TEXT,
+    last_billed_date DATE,
+    total_bills_count INT DEFAULT 1,
+    total_purchased_amount NUMERIC(14, 2) DEFAULT 0.00
+);
+
+ALTER TABLE public.purchase_vendors ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access purchase_vendors" ON public.purchase_vendors;
+CREATE POLICY "Public access purchase_vendors" ON public.purchase_vendors FOR ALL USING (true) WITH CHECK (true);
+
