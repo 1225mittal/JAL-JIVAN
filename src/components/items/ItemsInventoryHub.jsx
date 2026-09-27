@@ -74,26 +74,26 @@ export default function ItemsInventoryHub({
   // Unique categories list
   const categories = useMemo(() => {
     const set = new Set();
-    items.forEach((item) => {
-      if (item.category) set.add(item.category);
+    (items || []).forEach((item) => {
+      if (item && item.category) set.add(item.category);
     });
     return Array.from(set).sort();
   }, [items]);
 
   // Filtered & Sorted items
   const filteredItems = useMemo(() => {
-    let result = [...items];
+    let result = [...(items || [])];
 
     // Stock Filter
     if (stockFilter === 'low') {
-      result = result.filter((i) => Number(i.stock_qty || 0) > 0 && Number(i.stock_qty || 0) < 10);
+      result = result.filter((i) => Number(i?.stock_qty || 0) > 0 && Number(i?.stock_qty || 0) < 10);
     } else if (stockFilter === 'out') {
-      result = result.filter((i) => Number(i.stock_qty || 0) <= 0);
+      result = result.filter((i) => Number(i?.stock_qty || 0) <= 0);
     }
 
     // Category Filter
     if (selectedCategory !== 'all') {
-      result = result.filter((i) => i.category === selectedCategory);
+      result = result.filter((i) => i?.category === selectedCategory);
     }
 
     // Search Query (name, barcode, hsn, category)
@@ -101,17 +101,17 @@ export default function ItemsInventoryHub({
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         (i) =>
-          (i.item_name && i.item_name.toLowerCase().includes(q)) ||
-          (i.barcode && i.barcode.toLowerCase().includes(q)) ||
-          (i.hsn_code && i.hsn_code.toLowerCase().includes(q)) ||
-          (i.category && i.category.toLowerCase().includes(q))
+          (i?.item_name && i.item_name.toLowerCase().includes(q)) ||
+          (i?.barcode && i.barcode.toLowerCase().includes(q)) ||
+          (i?.hsn_code && i.hsn_code.toLowerCase().includes(q)) ||
+          (i?.category && i.category.toLowerCase().includes(q))
       );
     }
 
     // Sorting
     result.sort((a, b) => {
-      let aVal = a[sortField] ?? '';
-      let bVal = b[sortField] ?? '';
+      let aVal = a?.[sortField] ?? '';
+      let bVal = b?.[sortField] ?? '';
 
       if (typeof aVal === 'number' || typeof bVal === 'number') {
         aVal = Number(aVal) || 0;
@@ -131,13 +131,13 @@ export default function ItemsInventoryHub({
 
   // Inventory KPI Metrics
   const metrics = useMemo(() => {
-    const totalSkus = items.length;
+    const totalSkus = (items || []).length;
     let totalStockUnits = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
     let totalValuation = 0;
 
-    items.forEach((item) => {
+    (items || []).forEach((item) => {
       const qty = Number(item.stock_qty) || 0;
       const cost = Number(item.cost_price) || 0;
 
@@ -403,7 +403,7 @@ export default function ItemsInventoryHub({
               className="h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
             >
               <option value="all">All Categories</option>
-              {categories.map((c) => (
+              {(categories || []).map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
@@ -464,8 +464,8 @@ export default function ItemsInventoryHub({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {filteredItems.map((item) => {
-                const qty = Number(item.stock_qty) || 0;
+              {(filteredItems || []).map((item) => {
+                const qty = Number(item?.stock_qty) || 0;
                 const isOut = qty <= 0;
                 const isLow = qty > 0 && qty < 10;
 

@@ -20,8 +20,10 @@ export default function MobileScannerModal({
   isOpen,
   onClose,
   queue = [],
-  onAddToQueue
+  onAddToQueue,
+  onBillSnapped
 }) {
+  const triggerAdd = onAddToQueue || onBillSnapped;
   // Generate a unique session ID whenever modal opens
   const [sessionId, setSessionId] = useState('');
   const [copied, setCopied] = useState(false);
@@ -70,8 +72,8 @@ export default function MobileScannerModal({
             attachedToPrevious: false
           };
 
-          if (typeof onAddToQueue === 'function') {
-            onAddToQueue(newBill);
+          if (typeof triggerAdd === 'function') {
+            triggerAdd(newBill);
           }
 
           setReceivedCount((prev) => prev + 1);

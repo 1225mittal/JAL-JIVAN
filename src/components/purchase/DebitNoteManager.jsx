@@ -265,14 +265,15 @@ export default function DebitNoteManager({ showToast = () => {} }) {
 
   // Filtered Debit Notes
   const filteredDebitNotes = useMemo(() => {
-    if (!searchQuery.trim()) return debitNotes;
+    const list = Array.isArray(debitNotes) ? debitNotes : [];
+    if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase().trim();
-    return debitNotes.filter(
+    return list.filter(
       (dn) =>
-        (dn.debit_note_number && dn.debit_note_number.toLowerCase().includes(q)) ||
-        (dn.vendor_name && dn.vendor_name.toLowerCase().includes(q)) ||
-        (dn.original_invoice_no && dn.original_invoice_no.toLowerCase().includes(q)) ||
-        (dn.return_reason && dn.return_reason.toLowerCase().includes(q))
+        (dn?.debit_note_number && dn.debit_note_number.toLowerCase().includes(q)) ||
+        (dn?.vendor_name && dn.vendor_name.toLowerCase().includes(q)) ||
+        (dn?.original_invoice_no && dn.original_invoice_no.toLowerCase().includes(q)) ||
+        (dn?.return_reason && dn.return_reason.toLowerCase().includes(q))
     );
   }, [debitNotes, searchQuery]);
 
@@ -338,7 +339,7 @@ export default function DebitNoteManager({ showToast = () => {} }) {
                   className="w-full h-9 px-2.5 bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl text-white font-medium focus:outline-none cursor-pointer"
                 >
                   <option value="">-- Choose Vendor or Enter Manually --</option>
-                  {vendors.map((v) => (
+                  {(vendors || []).map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.vendor_name} {v.gstin ? `(${v.gstin})` : ''}
                     </option>
@@ -477,7 +478,7 @@ export default function DebitNoteManager({ showToast = () => {} }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/80">
-                  {returnItems.map((item, idx) => (
+                  {(returnItems || []).map((item, idx) => (
                     <tr key={item.id || idx} className="hover:bg-slate-900/60">
                       {/* Name */}
                       <td className="py-2 px-3">
@@ -672,8 +673,8 @@ export default function DebitNoteManager({ showToast = () => {} }) {
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredDebitNotes.map((dn) => {
-                const itemsList = Array.isArray(dn.items) ? dn.items : [];
+              {(filteredDebitNotes || []).map((dn) => {
+                const itemsList = Array.isArray(dn?.items) ? dn.items : [];
                 const isExpanded = expandedNoteId === dn.id;
 
                 return (

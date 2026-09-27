@@ -779,25 +779,33 @@ export default function App() {
               />
             </ErrorBoundary>
           ) : routeState.module === 'purchase' ? (
-            <PurchaseInwardHub
-              onBackToHub={handleBackToHub}
-              showToast={showToast}
-            />
+            <ErrorBoundary title="Purchase & Inward Hub">
+              <PurchaseInwardHub
+                onBackToHub={handleBackToHub}
+                showToast={showToast}
+              />
+            </ErrorBoundary>
           ) : routeState.module === 'items' ? (
-            <ItemsInventoryHub
-              onBackToHub={handleBackToHub}
-              showToast={showToast}
-            />
+            <ErrorBoundary title="Items & Inventory Hub">
+              <ItemsInventoryHub
+                onBackToHub={handleBackToHub}
+                showToast={showToast}
+              />
+            </ErrorBoundary>
           ) : routeState.module === 'damage' ? (
-            <DamageReturnHub
-              onBackToHub={handleBackToHub}
-              drivers={drivers}
-            />
+            <ErrorBoundary title="Damage & Returns Hub">
+              <DamageReturnHub
+                onBackToHub={handleBackToHub}
+                drivers={drivers}
+              />
+            </ErrorBoundary>
           ) : routeState.module === 'staff' ? (
-            <StaffDirectoryHub
-              onBackToHub={handleBackToHub}
-              showToast={showToast}
-            />
+            <ErrorBoundary title="Staff Directory Hub">
+              <StaffDirectoryHub
+                onBackToHub={handleBackToHub}
+                showToast={showToast}
+              />
+            </ErrorBoundary>
           ) : (
             <PlannedModuleView
               moduleId={routeState.module}

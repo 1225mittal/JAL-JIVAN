@@ -30,33 +30,39 @@ export default function VendorsDirectory({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVendorForModal, setSelectedVendorForModal] = useState(null);
 
+  // Safe array normalizations
+  const safeVendors = useMemo(() => (Array.isArray(vendors) ? vendors : []), [vendors]);
+  const safeHistory = useMemo(() => (Array.isArray(invoicesHistory) ? invoicesHistory : []), [invoicesHistory]);
+
   // Filter vendors based on search input (name, GSTIN, phone)
   const filteredVendors = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return vendors;
-    return vendors.filter((v) => {
+    const q = (searchQuery || '').toLowerCase().trim();
+    if (!q) return safeVendors;
+    return safeVendors.filter((v) => {
+      if (!v) return false;
       const name = (v.vendor_name || '').toLowerCase();
       const gst = (v.gstin || '').toLowerCase();
       const phone = (v.phone || '').toLowerCase();
       const address = (v.address || '').toLowerCase();
       return name.includes(q) || gst.includes(q) || phone.includes(q) || address.includes(q);
     });
-  }, [vendors, searchQuery]);
+  }, [safeVendors, searchQuery]);
 
   // Overall statistics
   const stats = useMemo(() => {
-    const totalVendors = vendors.length;
-    const totalBills = vendors.reduce((sum, v) => sum + (Number(v.total_bills_count) || 1), 0);
-    const totalSpend = vendors.reduce((sum, v) => sum + (Number(v.total_purchased_amount) || 0), 0);
+    const totalVendors = safeVendors.length;
+    const totalBills = safeVendors.reduce((sum, v) => sum + (Number(v?.total_bills_count) || 1), 0);
+    const totalSpend = safeVendors.reduce((sum, v) => sum + (Number(v?.total_purchased_amount) || 0), 0);
     return { totalVendors, totalBills, totalSpend };
-  }, [vendors]);
+  }, [safeVendors]);
 
   // Get historical invoices for a specific vendor
   const getVendorInvoices = (vendor) => {
     if (!vendor) return [];
     const vName = (vendor.vendor_name || '').toLowerCase();
     const vGst = (vendor.gstin || '').toLowerCase();
-    return invoicesHistory.filter((inv) => {
+    return safeHistory.filter((inv) => {
+      if (!inv) return false;
       const invName = (inv.seller_name || '').toLowerCase();
       const invGst = (inv.seller_gst || '').toLowerCase();
       if (vGst && invGst && vGst === invGst) return true;
@@ -184,7 +190,7 @@ export default function VendorsDirectory({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/70">
-                {filteredVendors.map((vendor) => {
+                {(filteredVendors || []).map((vendor) => {
                   const billCount = Number(vendor.total_bills_count) || 1;
                   const totalPurchased = Number(vendor.total_purchased_amount) || 0;
                   const lastDate = vendor.last_billed_date || 'N/A';
@@ -378,7 +384,7 @@ export default function VendorsDirectory({
                   }
                   return (
                     <div className="space-y-2">
-                      {bills.map((b) => (
+                      {(bills || []).map((b) => (
                         <div
                           key={b.id}
                           className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-3 text-xs"

@@ -47,6 +47,7 @@ import MobileScannerModal from './MobileScannerModal';
 import VendorsDirectory from './purchase/VendorsDirectory';
 import DebitNoteManager from './purchase/DebitNoteManager';
 import ItemsInventoryHub from './items/ItemsInventoryHub';
+import ErrorBoundary from './ErrorBoundary';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
 import {
   fetchPurchaseInvoices,
@@ -85,6 +86,7 @@ export default function PurchaseInwardHub({
 
   // Bill Queue & Upload State (Individual Bill Queue)
   const [billQueue, setBillQueue] = useState([]);
+  const [selectedBill, setSelectedBill] = useState(null);
   const [activeProcessingBillId, setActiveProcessingBillId] = useState(null);
   const [currentQueueBillId, setCurrentQueueBillId] = useState(null);
   const [isMobileScannerOpen, setIsMobileScannerOpen] = useState(false);
@@ -114,6 +116,7 @@ export default function PurchaseInwardHub({
 
   // Vendors State
   const [vendorsList, setVendorsList] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorLedgerFilter, setVendorLedgerFilter] = useState(null);
 
@@ -157,10 +160,11 @@ export default function PurchaseInwardHub({
     setHistoryError('');
     try {
       const data = await fetchPurchaseInvoices();
-      setInvoicesHistory(data || []);
+      setInvoicesHistory(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to load purchase history:', err);
       setHistoryError(err.message || 'Failed to fetch purchase invoices from database');
+      setInvoicesHistory([]);
     } finally {
       setHistoryLoading(false);
     }
@@ -171,11 +175,27 @@ export default function PurchaseInwardHub({
     setVendorsLoading(true);
     try {
       const data = await fetchPurchaseVendors();
-      setVendorsList(data || []);
+      const list = Array.isArray(data) ? data : [];
+      setVendorsList(list);
+      setVendors(list);
     } catch (err) {
       console.warn('Failed to load vendors:', err);
+      setVendorsList([]);
+      setVendors([]);
     } finally {
       setVendorsLoading(false);
+    }
+  };
+
+  const handleDeleteVendor = async (vendorId) => {
+    if (!window.confirm('Are you sure you want to delete this vendor?')) return;
+    try {
+      await deletePurchaseVendor(vendorId);
+      showToast('Vendor deleted successfully', 'info');
+      await loadVendors();
+    } catch (err) {
+      console.error('Delete vendor error:', err);
+      showToast(err.message || 'Failed to delete vendor', 'error');
     }
   };
 
@@ -269,7 +289,7 @@ export default function PurchaseInwardHub({
   // Toggle multi-page attachment flag
   const handleToggleAttachToPrevious = (billId) => {
     setBillQueue((prev) =>
-      prev.map((b) =>
+      (prev || []).map((b) =>
         b.id === billId ? { ...b, attachedToPrevious: !b.attachedToPrevious } : b
       )
     );
@@ -341,7 +361,7 @@ export default function PurchaseInwardHub({
             const updated = payload.new;
             setBillQueue((prev) =>
               updated.status === 'pending_ocr'
-                ? prev.map((b) =>
+                ? (prev || []).map((b) =>
                     b.id === updated.id
                       ? {
                           ...b,
@@ -351,7 +371,7 @@ export default function PurchaseInwardHub({
                         }
                       : b
                   )
-                : prev.filter((b) => b.id !== updated.id)
+                : (prev || []).filter((b) => b.id !== updated.id)
             );
           }
         )
@@ -624,7 +644,7 @@ export default function PurchaseInwardHub({
       }
 
       setBillQueue((prev) =>
-        prev.map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
+        (prev || []).map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
       );
 
       showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Groq Vision!`, 'success');
@@ -745,7 +765,8 @@ export default function PurchaseInwardHub({
     let sgst = 0;
     let cess = 0;
 
-    items.forEach((it) => {
+    (items || []).forEach((it) => {
+      if (!it) return;
       taxable += Number(it.taxable_amount) || 0;
       cgst += Number(it.cgst_amount) || 0;
       sgst += Number(it.sgst_amount) || 0;
@@ -786,7 +807,7 @@ export default function PurchaseInwardHub({
       // Collect all permanent bill image URLs
       const billImageUrls = [
         billPreviewUrl,
-        ...(billQueue.filter((b) => b.id === currentQueueBillId || b.attachedToPrevious).map((b) => b.image_url || b.dataUrl))
+        ...((billQueue || []).filter((b) => b && (b.id === currentQueueBillId || b.attachedToPrevious)).map((b) => b.image_url || b.dataUrl))
       ].filter(Boolean);
 
       const uniqueBillUrls = Array.from(new Set(billImageUrls));
@@ -794,14 +815,14 @@ export default function PurchaseInwardHub({
       const invoicePayload = {
         invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
         invoice_date: invoiceData.invoice_date || new Date().toISOString().split('T')[0],
-        seller_name: sellerData.name.trim(),
-        seller_gst: sellerData.gst.trim(),
-        seller_fssai: sellerData.fssai.trim(),
-        seller_contact: sellerData.contact.trim(),
-        seller_address: sellerData.address.trim(),
-        salesman_name: sellerData.salesman_name.trim(),
-        salesman_number: sellerData.salesman_number.trim(),
-        bank_name: bankDetails.bank_name.trim() || null,
+        seller_name: (sellerData.name || '').trim(),
+        seller_gst: (sellerData.gst || '').trim(),
+        seller_fssai: (sellerData.fssai || '').trim(),
+        seller_contact: (sellerData.contact || '').trim(),
+        seller_address: (sellerData.address || '').trim(),
+        salesman_name: (sellerData.salesman_name || '').trim(),
+        salesman_number: (sellerData.salesman_number || '').trim(),
+        bank_name: (bankDetails.bank_name || '').trim() || null,
         bank_account_no: bankAccountNo || null,
         bank_ifsc: bankIfsc || null,
         account_no: bankAccountNo || null,
@@ -829,7 +850,7 @@ export default function PurchaseInwardHub({
       }
 
       // Format items with detailed GST fields for purchase_items & inventory sync
-      const formattedItems = items.map((it) => ({
+      const formattedItems = (items || []).map((it) => ({
         ...it,
         purchase_price: Number(it.rate ?? it.price_before_gst) || 0,
         rate: Number(it.rate ?? it.price_before_gst) || 0,
@@ -955,7 +976,7 @@ export default function PurchaseInwardHub({
 
       // Update in ledger history state
       setInvoicesHistory((prev) =>
-        prev.map((inv) => {
+        (prev || []).map((inv) => {
           if (inv.id === selectedLedgerInvoice?.id) {
             const updatedItems = (inv.purchase_items || inv.items || []).map((it) =>
               it.id === item.id ? { ...it, barcode: newBarcodeInput.trim() } : it
@@ -977,10 +998,12 @@ export default function PurchaseInwardHub({
   };
 
   const filteredHistory = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q && !vendorLedgerFilter) return invoicesHistory;
+    const list = Array.isArray(invoicesHistory) ? invoicesHistory : [];
+    const q = (searchQuery || '').toLowerCase().trim();
+    if (!q && !vendorLedgerFilter) return list;
 
-    return invoicesHistory.filter((inv) => {
+    return list.filter((inv) => {
+      if (!inv) return false;
       const matchVendorFilter = vendorLedgerFilter
         ? (inv.seller_name || '').toLowerCase() === (vendorLedgerFilter.vendor_name || '').toLowerCase()
         : true;
@@ -996,7 +1019,8 @@ export default function PurchaseInwardHub({
   }, [invoicesHistory, searchQuery, vendorLedgerFilter]);
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-white">
+    <ErrorBoundary title="Purchase Inward Management">
+      <div className="min-h-screen bg-[#070b14] text-white">
       {/* ======================================================== */}
       {/* REQUIREMENT 7: MODERN 2-COLUMN ENTERPRISE LAYOUT */}
       {/* ======================================================== */}
@@ -1159,9 +1183,10 @@ export default function PurchaseInwardHub({
           {/* WORKSPACE TAB 1: ADD NEW PURCHASE (ACTIVE QUEUE & OCR) */}
           {/* ======================================================== */}
           {activeTab === 'new' && (
-            <div className="space-y-4 max-w-[1400px]">
-              {/* Dropzone & Mobile Pairing Header Banner */}
-              <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 shadow-xl space-y-3">
+            <ErrorBoundary title="New Purchase Entry">
+              <div className="space-y-4 max-w-[1400px]">
+                {/* Dropzone & Mobile Pairing Header Banner */}
+                <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 shadow-xl space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-2.5">
                   <div>
                     <h2 className="text-base font-black text-white flex items-center gap-2">
@@ -1262,13 +1287,13 @@ export default function PurchaseInwardHub({
                     </span>
                   </div>
 
-                  {billQueue.length === 0 ? (
+                  {(!billQueue || billQueue.length === 0) ? (
                     <div className="p-6 rounded-xl border border-dashed border-slate-800 text-center text-slate-500 text-xs">
                       No bills in the inward queue. Snap a photo using your phone or click Upload above.
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                      {billQueue.map((bill, index) => {
+                      {(billQueue || []).map((bill, index) => {
                         const isProcessingThis = activeProcessingBillId === bill.id;
                         const isRecentlyArrived = recentlyArrivedIds.has(bill.id);
                         const imgSrc = bill.image_url || bill.dataUrl;
@@ -1589,7 +1614,7 @@ export default function PurchaseInwardHub({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/80">
-                        {items.map((it, idx) => {
+                        {(items || []).map((it, idx) => {
                           const hasBarcode = Boolean(it.barcode);
 
                           return (
@@ -1805,13 +1830,15 @@ export default function PurchaseInwardHub({
                 </div>
               </div>
             </div>
+            </ErrorBoundary>
           )}
 
           {/* ======================================================== */}
           {/* WORKSPACE TAB 2: INVOICES LEDGER (HISTORY & SIDE-BY-SIDE ARCHIVE) */}
           {/* ======================================================== */}
           {activeTab === 'history' && (
-            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 shadow-xl space-y-4 max-w-[1400px]">
+            <ErrorBoundary title="Purchase Inward Invoices Ledger">
+              <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-4 shadow-xl space-y-4 max-w-[1400px]">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
                 <div>
                   <h2 className="text-base font-black text-white flex items-center gap-2">
@@ -1862,7 +1889,7 @@ export default function PurchaseInwardHub({
               )}
 
               {/* History Invoices List */}
-              {filteredHistory.length === 0 ? (
+              {(!filteredHistory || filteredHistory.length === 0) ? (
                 <div className="py-12 text-center text-slate-500 text-xs space-y-2">
                   <FileSpreadsheet className="w-8 h-8 mx-auto text-slate-600" />
                   <p>No purchase invoices recorded yet.</p>
@@ -1876,7 +1903,7 @@ export default function PurchaseInwardHub({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {filteredHistory.map((inv) => {
+                  {(filteredHistory || []).map((inv) => {
                     const lineItems = inv.purchase_items || inv.items || [];
                     const hasUnbarcoded = lineItems.some((it) => !it.barcode);
                     const billImage = inv.bill_image_urls?.[0] || inv.bill_image_url;
@@ -1959,6 +1986,7 @@ export default function PurchaseInwardHub({
                 </div>
               )}
             </div>
+            </ErrorBoundary>
           )}
 
           {/* ======================================================== */}
@@ -1966,7 +1994,12 @@ export default function PurchaseInwardHub({
           {/* ======================================================== */}
           {activeTab === 'items' && (
             <div className="max-w-[1400px]">
-              <ItemsInventoryHub showToast={showToast} />
+              <ErrorBoundary title="Item & Stock Master">
+                <ItemsInventoryHub
+                  onBackToHub={() => setActiveTab('new')}
+                  showToast={showToast}
+                />
+              </ErrorBoundary>
             </div>
           )}
 
@@ -1975,13 +2008,19 @@ export default function PurchaseInwardHub({
           {/* ======================================================== */}
           {activeTab === 'vendors' && (
             <div className="max-w-[1400px]">
-              <VendorsDirectory
-                onSelectVendor={(v) => {
-                  setVendorLedgerFilter(v);
-                  setActiveTab('history');
-                }}
-                showToast={showToast}
-              />
+              <ErrorBoundary title="Vendors Directory">
+                <VendorsDirectory
+                  vendors={vendorsList || vendors || []}
+                  invoicesHistory={invoicesHistory || []}
+                  onSelectVendorInvoices={(v) => {
+                    setVendorLedgerFilter(v);
+                    setActiveTab('history');
+                  }}
+                  onRefresh={loadVendors}
+                  loading={vendorsLoading}
+                  onDeleteVendor={handleDeleteVendor}
+                />
+              </ErrorBoundary>
             </div>
           )}
 
@@ -1990,7 +2029,9 @@ export default function PurchaseInwardHub({
           {/* ======================================================== */}
           {activeTab === 'debit_notes' && (
             <div className="max-w-[1400px]">
-              <DebitNoteManager showToast={showToast} />
+              <ErrorBoundary title="Sale Return & Debit Notes">
+                <DebitNoteManager showToast={showToast} />
+              </ErrorBoundary>
             </div>
           )}
         </main>
@@ -2267,5 +2308,6 @@ export default function PurchaseInwardHub({
         />
       )}
     </div>
+  </ErrorBoundary>
   );
 }

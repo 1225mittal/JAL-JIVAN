@@ -16,9 +16,11 @@ import { Html5Qrcode } from 'html5-qrcode';
 export default function BarcodeScannerModal({
   isOpen,
   onClose,
-  item,
-  onAssignBarcode
+  item = null,
+  onAssignBarcode,
+  onScan
 }) {
+  const triggerAssign = onAssignBarcode || onScan;
   const [activeTab, setActiveTab] = useState('usb'); // 'usb' | 'camera'
   const [manualCode, setManualCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
@@ -134,8 +136,8 @@ export default function BarcodeScannerModal({
     }
 
     setTimeout(() => {
-      if (onAssignBarcode) {
-        onAssignBarcode(cleanCode);
+      if (typeof triggerAssign === 'function') {
+        triggerAssign(cleanCode);
       }
       onClose();
     }, 400);
