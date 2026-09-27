@@ -29,6 +29,28 @@ export default function VendorsDirectory({
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedVendorForModal, setSelectedVendorForModal] = useState(null);
+  const [vendorToDelete, setVendorToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleConfirmDelete = async (deleteInvoices = false) => {
+    if (!vendorToDelete) return;
+    setIsDeleting(true);
+    try {
+      if (typeof onDeleteVendor === 'function') {
+        await onDeleteVendor(vendorToDelete, deleteInvoices);
+      }
+      setVendorToDelete(null);
+      if (
+        selectedVendorForModal &&
+        (selectedVendorForModal.id === vendorToDelete.id ||
+          selectedVendorForModal.vendor_name === vendorToDelete.vendor_name)
+      ) {
+        setSelectedVendorForModal(null);
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Safe array normalizations
   const safeVendors = useMemo(() => (Array.isArray(vendors) ? vendors : []), [vendors]);
@@ -267,20 +289,31 @@ export default function VendorsDirectory({
                       </td>
 
                       <td className="py-3.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (typeof onSelectVendorInvoices === 'function') {
-                              onSelectVendorInvoices(vendor);
-                            } else {
-                              setSelectedVendorForModal(vendor);
-                            }
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-slate-300 border border-slate-800 transition text-[11px] font-semibold inline-flex items-center gap-1"
-                        >
-                          <span>View Bills</span>
-                          <ChevronRight className="w-3 h-3" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (typeof onSelectVendorInvoices === 'function') {
+                                onSelectVendorInvoices(vendor);
+                              } else {
+                                setSelectedVendorForModal(vendor);
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-slate-300 border border-slate-800 transition text-[11px] font-semibold inline-flex items-center gap-1 cursor-pointer"
+                            title="View Bills for this vendor"
+                          >
+                            <span>View Bills</span>
+                            <ChevronRight className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setVendorToDelete(vendor)}
+                            className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/25 transition text-[11px] font-semibold inline-flex items-center justify-center cursor-pointer shadow-sm"
+                            title={`Delete vendor ${vendor.vendor_name || ''}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -414,25 +447,112 @@ export default function VendorsDirectory({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between">
+            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setSelectedVendorForModal(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
               >
                 Close
               </button>
 
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = selectedVendorForModal;
+                    setSelectedVendorForModal(null);
+                    setVendorToDelete(v);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/25 transition text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Vendor</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = selectedVendorForModal;
+                    setSelectedVendorForModal(null);
+                    if (onSelectVendorInvoices) onSelectVendorInvoices(v);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shadow-md shadow-amber-500/20 cursor-pointer"
+                >
+                  Filter Invoices Ledger
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Vendor Confirmation Modal */}
+      {vendorToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in"
+          onClick={() => !isDeleting && setVendorToDelete(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-slate-900 border border-rose-500/30 shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-white">Delete Vendor Profile</h3>
+                <p className="text-xs text-slate-400">
+                  Are you sure you want to delete <span className="text-white font-bold">{vendorToDelete.vendor_name}</span>?
+                </p>
+                {vendorToDelete.gstin && (
+                  <span className="inline-block font-mono text-[10px] text-cyan-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    GSTIN: {vendorToDelete.gstin}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1.5">
+              <div className="flex justify-between text-slate-400">
+                <span>Invoices on record:</span>
+                <span className="font-bold text-white">{vendorToDelete.total_bills_count || 1} bills</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Total procurement:</span>
+                <span className="font-mono font-bold text-amber-400">₹{Number(vendorToDelete.total_purchased_amount || 0).toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
               <button
                 type="button"
-                onClick={() => {
-                  const v = selectedVendorForModal;
-                  setSelectedVendorForModal(null);
-                  if (onSelectVendorInvoices) onSelectVendorInvoices(v);
-                }}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition shadow-md shadow-amber-500/20"
+                disabled={isDeleting}
+                onClick={() => handleConfirmDelete(false)}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2 border border-slate-700"
               >
-                Filter Invoices Ledger
+                <span>Remove Vendor Profile Only</span>
+                <span className="text-[10px] font-normal text-slate-400">(Keep bills in ledger)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => handleConfirmDelete(true)}
+                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Vendor & All Associated Invoices</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setVendorToDelete(null)}
+                className="w-full py-2 px-4 rounded-xl bg-transparent hover:bg-slate-800/60 text-slate-400 hover:text-white text-xs font-semibold transition cursor-pointer"
+              >
+                Cancel
               </button>
             </div>
           </div>

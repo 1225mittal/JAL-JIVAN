@@ -2964,6 +2964,22 @@ export async function deletePurchaseInvoice(invoiceId) {
 // PURCHASE VENDORS DIRECTORY & AUTO-SYNC
 // ==========================================
 export const STORAGE_PURCHASE_VENDORS = 'jal_jivan_purchase_vendors';
+export const STORAGE_DELETED_PURCHASE_VENDORS = 'jal_jivan_deleted_purchase_vendors';
+
+export function getDeletedPurchaseVendors() {
+  try {
+    const raw = localStorage.getItem(STORAGE_DELETED_PURCHASE_VENDORS);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveDeletedPurchaseVendors(list) {
+  try {
+    localStorage.setItem(STORAGE_DELETED_PURCHASE_VENDORS, JSON.stringify(list || []));
+  } catch (e) {}
+}
 
 export function getLocalPurchaseVendors() {
   try {
@@ -2984,6 +3000,8 @@ export function saveLocalPurchaseVendors(vendors) {
 }
 
 export async function fetchPurchaseVendors() {
+  const deletedVendors = getDeletedPurchaseVendors();
+
   if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
@@ -2991,9 +3009,19 @@ export async function fetchPurchaseVendors() {
         .select('*')
         .order('last_billed_date', { ascending: false });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        saveLocalPurchaseVendors(data);
-        return data;
+      if (!error && Array.isArray(data)) {
+        const filtered = data.filter((v) => {
+          const vName = (v.vendor_name || '').toLowerCase().trim();
+          const vGst = (v.gstin || '').toLowerCase().trim();
+          const vId = (v.id || '').toString();
+          return (
+            !deletedVendors.includes(vId) &&
+            (!vName || !deletedVendors.includes(vName)) &&
+            (!vGst || !deletedVendors.includes(vGst))
+          );
+        });
+        saveLocalPurchaseVendors(filtered);
+        return filtered;
       }
       if (error) {
         console.warn('Supabase purchase_vendors query note:', error.message);
@@ -3003,18 +3031,39 @@ export async function fetchPurchaseVendors() {
     }
   }
 
-  // Fallback to local storage
+  // Fallback to local storage (filtered by deleted blacklist)
   const local = getLocalPurchaseVendors();
-  if (local && local.length > 0) return local;
+  const filteredLocal = (local || []).filter((v) => {
+    const vName = (v.vendor_name || '').toLowerCase().trim();
+    const vGst = (v.gstin || '').toLowerCase().trim();
+    const vId = (v.id || '').toString();
+    return (
+      !deletedVendors.includes(vId) &&
+      (!vName || !deletedVendors.includes(vName)) &&
+      (!vGst || !deletedVendors.includes(vGst))
+    );
+  });
+  if (filteredLocal.length > 0) return filteredLocal;
 
-  // Auto-aggregate from purchase invoices history if vendor directory is empty
+  // Auto-aggregate from purchase invoices history ONLY if not explicitly deleted
   const invoices = getLocalPurchaseInvoices();
   if (Array.isArray(invoices) && invoices.length > 0) {
     const map = new Map();
     for (const inv of invoices) {
       const vName = (inv.seller_name || '').trim();
       if (!vName) continue;
-      const key = (inv.seller_gst || vName).toLowerCase();
+      const vGst = (inv.seller_gst || '').toLowerCase().trim();
+      const key = (vGst || vName).toLowerCase();
+
+      // Check if vendor has been deleted
+      if (
+        deletedVendors.includes(vName.toLowerCase()) ||
+        (vGst && deletedVendors.includes(vGst)) ||
+        deletedVendors.includes(key)
+      ) {
+        continue;
+      }
+
       if (!map.has(key)) {
         map.set(key, {
           id: `ven_agg_${Math.random().toString(36).substr(2, 7)}`,
@@ -3036,10 +3085,8 @@ export async function fetchPurchaseVendors() {
       }
     }
     const result = Array.from(map.values());
-    if (result.length > 0) {
-      saveLocalPurchaseVendors(result);
-      return result;
-    }
+    saveLocalPurchaseVendors(result);
+    return result;
   }
 
   return [];
@@ -3181,16 +3228,68 @@ export async function syncPurchaseVendorFromOcr(extractedVendor, billAmount = 0)
   return syncedVendor;
 }
 
-export async function deletePurchaseVendor(vendorId) {
+export async function deletePurchaseVendor(vendorId, vendorGstin = null, vendorName = null, deleteInvoices = false) {
   if (isSupabaseConfigured && supabase) {
     try {
-      await supabase.from('purchase_vendors').delete().eq('id', vendorId);
+      if (vendorId && !vendorId.toString().startsWith('ven_agg_')) {
+        await supabase.from('purchase_vendors').delete().eq('id', vendorId);
+      }
+      if (vendorGstin) {
+        await supabase.from('purchase_vendors').delete().eq('gstin', vendorGstin);
+      }
+      if (vendorName) {
+        await supabase.from('purchase_vendors').delete().ilike('vendor_name', vendorName);
+      }
+
+      // If requested to delete associated invoices
+      if (deleteInvoices) {
+        let invQuery = supabase.from('purchase_invoices').select('id');
+        if (vendorGstin && vendorName) {
+          invQuery = invQuery.or(`seller_gst.eq.${vendorGstin},seller_name.ilike.${vendorName}`);
+        } else if (vendorGstin) {
+          invQuery = invQuery.eq('seller_gst', vendorGstin);
+        } else if (vendorName) {
+          invQuery = invQuery.ilike('seller_name', vendorName);
+        }
+        const { data: invRows } = await invQuery;
+        if (Array.isArray(invRows) && invRows.length > 0) {
+          const invIds = invRows.map((r) => r.id);
+          await supabase.from('purchase_items').delete().in('purchase_invoice_id', invIds);
+          await supabase.from('purchase_invoices').delete().in('id', invIds);
+        }
+      }
     } catch (e) {
       console.warn('deletePurchaseVendor supabase warning:', e);
     }
   }
-  const local = getLocalPurchaseVendors().filter((v) => v.id !== vendorId);
+
+  // Blacklist vendor identifier so auto-aggregation never resurrects it
+  try {
+    const deletedList = getDeletedPurchaseVendors();
+    const toAdd = [vendorId, vendorName, vendorGstin].filter(Boolean).map((s) => s.toString().toLowerCase().trim());
+    const merged = Array.from(new Set([...deletedList, ...toAdd]));
+    saveDeletedPurchaseVendors(merged);
+  } catch (e) {}
+
+  // Update local purchase vendors
+  const local = getLocalPurchaseVendors().filter((v) => {
+    if (vendorId && v.id === vendorId) return false;
+    if (vendorGstin && v.gstin && v.gstin.toLowerCase() === vendorGstin.toLowerCase()) return false;
+    if (vendorName && (v.vendor_name || '').toLowerCase() === vendorName.toLowerCase()) return false;
+    return true;
+  });
   saveLocalPurchaseVendors(local);
+
+  // If deleteInvoices requested, remove invoices from local storage
+  if (deleteInvoices) {
+    const localInvoices = getLocalPurchaseInvoices().filter((inv) => {
+      if (vendorGstin && inv.seller_gst && inv.seller_gst.toLowerCase() === vendorGstin.toLowerCase()) return false;
+      if (vendorName && (inv.seller_name || '').toLowerCase() === vendorName.toLowerCase()) return false;
+      return true;
+    });
+    saveLocalPurchaseInvoices(localInvoices);
+  }
+
   return true;
 }
 

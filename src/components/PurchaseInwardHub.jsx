@@ -187,15 +187,34 @@ export default function PurchaseInwardHub({
     }
   };
 
-  const handleDeleteVendor = async (vendorId) => {
-    if (!window.confirm('Are you sure you want to delete this vendor?')) return;
+  const handleDeleteVendor = async (vendorOrId, deleteInvoices = false) => {
+    const vendorId = typeof vendorOrId === 'object' ? vendorOrId?.id : vendorOrId;
+    const vendorName = typeof vendorOrId === 'object' ? vendorOrId?.vendor_name : '';
+    const vendorGstin = typeof vendorOrId === 'object' ? vendorOrId?.gstin : '';
+    const label = vendorName || 'this vendor';
+
     try {
-      await deletePurchaseVendor(vendorId);
-      showToast('Vendor deleted successfully', 'info');
-      await loadVendors();
+      setVendorsLoading(true);
+      await deletePurchaseVendor(vendorId, vendorGstin, vendorName, deleteInvoices);
+      showToast(
+        deleteInvoices
+          ? `Vendor "${label}" and associated bills deleted successfully`
+          : `Vendor "${label}" removed from directory`,
+        'info'
+      );
+      await Promise.all([loadVendors(), loadHistory()]);
+      if (
+        vendorLedgerFilter &&
+        ((vendorName && vendorLedgerFilter.vendor_name === vendorName) ||
+          (vendorId && vendorLedgerFilter.id === vendorId))
+      ) {
+        setVendorLedgerFilter(null);
+      }
     } catch (err) {
       console.error('Delete vendor error:', err);
       showToast(err.message || 'Failed to delete vendor', 'error');
+    } finally {
+      setVendorsLoading(false);
     }
   };
 
