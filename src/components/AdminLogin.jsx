@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, Lock, User, AlertCircle, ArrowRight, KeyRound, Users } from 'lucide-react';
 
-export const AdminLogin = ({ onLoginSuccess, onNavigateToStaffLogin }) => {
+export const AdminLogin = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -113,18 +113,16 @@ export const AdminLogin = ({ onLoginSuccess, onNavigateToStaffLogin }) => {
           </button>
         </form>
 
-        {/* Quick Switch to Staff Login */}
+        {/* Switch to Driver Portal */}
         <div className="pt-4 border-t border-slate-800/80 text-center">
           <p className="text-xs text-slate-400">
-            Delivery Staff or Operations Member?{' '}
-            <button
-              type="button"
-              onClick={onNavigateToStaffLogin}
-              className="text-cyan-400 hover:text-cyan-300 font-bold underline transition ml-1 inline-flex items-center gap-1"
+            Delivery Boy / Rider?{' '}
+            <a
+              href="/driver"
+              className="text-emerald-400 hover:text-emerald-300 font-bold underline transition ml-1"
             >
-              <Users className="w-3.5 h-3.5 inline" />
-              <span>Go to Staff Sign-In →</span>
-            </button>
+              Go to Driver Portal →
+            </a>
           </p>
         </div>
       </div>

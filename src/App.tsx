@@ -117,7 +117,7 @@ export default function App() {
     const queryModule = params.get('module');
 
     // Explicit path matching takes absolute priority
-    if (path.includes('/staff') || path.includes('/driver')) {
+    if (path.includes('/driver')) {
       localStorage.setItem('active_module', 'driver');
       return 'driver';
     }

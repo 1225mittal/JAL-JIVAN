@@ -148,7 +148,7 @@ export default function DriverPortal({
 
   const currentDriver = localDriver || propDriver;
 
-  // Logout Handler that completely clears localStorage and redirects to /staff
+  // Logout Handler that completely clears localStorage and redirects to /driver
   const handleLogout = () => {
     try {
       if (typeof onLogout === 'function') {
@@ -161,7 +161,7 @@ export default function DriverPortal({
       }
     } catch (e) {}
     localStorage.clear();
-    window.location.href = '/staff';
+    window.location.href = '/driver';
   };
 
   // Login Form State
@@ -1107,7 +1107,7 @@ export default function DriverPortal({
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Staff & Delivery Portal</span>
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Driver & Delivery Portal</span>
           </div>
           <button
             type="button"

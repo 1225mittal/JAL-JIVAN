@@ -4,11 +4,9 @@ import AdminHub from './components/AdminHub';
 import DamageReturnHub from './components/damage/DamageReturnHub';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
-import StaffPortal from './components/StaffPortal';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
-import StaffPermissions from './components/admin/StaffPermissions';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -37,8 +35,7 @@ import {
   deleteSavedAddress,
   fetchProductDamages,
   supabase,
-  isSupabaseConfigured,
-  STORAGE_STAFF_KEY
+  isSupabaseConfigured
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
@@ -54,7 +51,7 @@ export const getInitialModule = () => {
   const queryModule = params.get('module');
 
   // Explicit path matching takes absolute priority
-  if (path.includes('/staff') || path.includes('/driver')) {
+  if (path.includes('/driver')) {
     return 'driver';
   }
   if (path.includes('/admin/purchase') || queryModule === 'purchase') {
@@ -85,24 +82,19 @@ export function parseRoute() {
   }
 
   // Explicit pathname matching takes absolute priority over legacy query params
-  // Route 1: Staff Portal (/staff or /staff/login)
-  if (pathname === '/staff' || pathname === '/staff/login') {
-    return { type: 'staff', module: null, pathname: '/staff' };
-  }
-
-  // Route 2: Dedicated Driver Portal (/driver)
+  // Route 1: Dedicated Driver Portal (/driver)
   if (pathname === '/driver') {
     return { type: 'driver', module: null, pathname: '/driver' };
   }
 
-  // Route 3: Dedicated Admin Login (/admin/login)
+  // Route 2: Dedicated Admin Login (/admin/login)
   if (pathname === '/admin/login') {
     return { type: 'admin-login', module: null, pathname: '/admin/login' };
   }
 
-  // Route 4: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
+  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
   const adminModMatch = pathname.match(
-    /^\/admin\/(delivery|damage|purchase|sales|marketing|finance|staff|settings|config)$/
+    /^\/admin\/(delivery|damage|purchase|sales|marketing|finance|settings|config)$/
   );
   if (adminModMatch) {
     const rawMod = adminModMatch[1];
@@ -142,8 +134,6 @@ function getModuleTitle(moduleKey) {
       return 'Marketing & Broadcasts';
     case 'finance':
       return 'Bahi Khata & Finance';
-    case 'staff':
-      return 'Staff & Roles (स्टाफ एवं अनुमतियाँ)';
     case 'settings':
     case 'config':
       return 'Store & System Config';
@@ -169,15 +159,6 @@ export default function App() {
     }
   });
 
-  // Common Staff Session State
-  const [staffSession, setStaffSession] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_STAFF_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
 
   // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {
@@ -210,7 +191,7 @@ export default function App() {
     } catch (e) {}
     const newRoute = parseRoute();
     setRouteState(newRoute);
-    if (newRoute.type === 'staff' || newRoute.type === 'driver') {
+    if (newRoute.type === 'driver') {
       setCurrentModule('driver');
     } else if (newRoute.module) {
       setCurrentModule(newRoute.module);
@@ -231,7 +212,7 @@ export default function App() {
     const handleLocationChange = () => {
       const newRoute = parseRoute();
       setRouteState(newRoute);
-      if (newRoute.type === 'staff' || newRoute.type === 'driver') {
+      if (newRoute.type === 'driver') {
         setCurrentModule('driver');
       } else if (newRoute.module) {
         setCurrentModule(newRoute.module);
@@ -407,44 +388,9 @@ export default function App() {
     showToast('Logged out of Admin Portal', 'info');
   };
 
-  // Staff Login Success
-  const handleStaffLoginSuccess = (staff) => {
-    setStaffSession(staff);
-    try {
-      localStorage.setItem(STORAGE_STAFF_KEY, JSON.stringify(staff));
-    } catch (e) {}
-
-    // If single module allowed: redirect directly to that module URL (e.g. /admin/delivery)
-    if (Array.isArray(staff.allowed_modules) && staff.allowed_modules.length === 1) {
-      const singleMod = staff.allowed_modules[0];
-      navigate(`/admin/${singleMod}`);
-      showToast(`Welcome, ${staff.name}! Authorized for ${singleMod} operations.`, 'success');
-    } else {
-      // Multiple modules allowed: stay at /staff showing minimal permitted workspace
-      navigate('/staff');
-      showToast(`Welcome, ${staff.name}! Staff workspace active.`, 'success');
-    }
-  };
-
-  // Staff Logout
-  const handleStaffLogout = () => {
-    setStaffSession(null);
-    try {
-      localStorage.removeItem(STORAGE_STAFF_KEY);
-    } catch (e) {}
-    navigate('/staff');
-    showToast('Logged out of Staff Portal', 'info');
-  };
-
-  // Back to Hub Handler:
-  // If staff member: navigates to /staff (never sees owner hub!)
-  // If admin: navigates to /admin
+  // Back to Hub Handler
   const handleBackToHub = () => {
-    if (staffSession && !isAdminLoggedIn) {
-      navigate('/staff');
-    } else {
-      navigate('/admin');
-    }
+    navigate('/admin');
   };
 
   // Operational Action Handlers
@@ -645,7 +591,7 @@ export default function App() {
     setCurrentDriver(null);
     localStorage.clear();
     showToast('Logged out of driver portal', 'info');
-    window.location.href = '/staff';
+    window.location.href = '/driver';
   };
 
   const handlePinLocation = async (orderId, latitude, longitude) => {
@@ -701,17 +647,16 @@ export default function App() {
     }
   };
 
-  // Simple, resilient path checking for staff/driver route
-  // ONLY URLs explicitly containing /staff or /driver render DriverPortal
-  const isStaffRoute =
+  // Simple, resilient path checking for driver route
+  // ONLY URLs explicitly containing /driver render DriverPortal
+  const isDriverRoute =
     typeof window !== 'undefined' &&
-    (window.location.pathname.toLowerCase().includes('/staff') ||
-     window.location.pathname.toLowerCase().includes('/driver') ||
-     (window.location.hash && (window.location.hash.toLowerCase().includes('/staff') || window.location.hash.toLowerCase().includes('/driver'))));
+    (window.location.pathname.toLowerCase().includes('/driver') ||
+     (window.location.hash && window.location.hash.toLowerCase().includes('/driver')));
 
-  // When isStaffRoute is true:
+  // When isDriverRoute is true:
   // Render ONLY the <DriverPortal /> component without ErrorBoundary, Navbar, or Admin panels.
-  if (isStaffRoute) {
+  if (isDriverRoute) {
     return (
       <DriverPortal
         currentDriver={currentDriver}
@@ -728,7 +673,6 @@ export default function App() {
   }
 
   const isViewAdmin = routeState.type.startsWith('admin');
-  const isViewStaff = routeState.type === 'staff';
 
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
@@ -741,30 +685,15 @@ export default function App() {
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
-        isStaffView={isViewStaff}
-        staffSession={staffSession}
-        onStaffLogout={handleStaffLogout}
       />
 
       {/* Main Routing Container */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
-        {/* ======================================================== */}
-        {/* ROUTE 1: /staff or /staff/login (COMMON STAFF LOGIN & WORKSPACE) */}
-        {/* ======================================================== */}
-        {routeState.type === 'staff' ? (
-          <StaffPortal
-            staffSession={staffSession}
-            onStaffLoginSuccess={handleStaffLoginSuccess}
-            onStaffLogout={handleStaffLogout}
-            onNavigate={(path) => navigate(path)}
-            onNavigateToAdminLogin={() => navigate('/admin/login')}
-          />
-        ) : routeState.type === 'admin-login' ? (
+        {routeState.type === 'admin-login' ? (
           /* ======================================================== */
-          /* ROUTE 2: /admin/login (DEDICATED ADMIN LOGIN) */
+          /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
           /* ======================================================== */
           isAdminLoggedIn ? (
-            // If already logged in, navigate straight to /admin
             <div className="p-8 text-center">
               <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
               <button
@@ -775,65 +704,23 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <AdminLogin
-              onLoginSuccess={handleAdminLoginSuccess}
-              onNavigateToStaffLogin={() => navigate('/staff')}
-            />
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           )
         ) : routeState.type === 'admin-hub' ? (
           /* ======================================================== */
-          /* ROUTE 3: /admin (CLEAN EXECUTIVE MASTER HUB) */
+          /* ROUTE: /admin (CLEAN EXECUTIVE MASTER HUB) */
           /* ======================================================== */
           !isAdminLoggedIn ? (
-            // Protected: Not logged in as Admin
-            staffSession ? (
-              // Staff members are never allowed to see the Owner Hub!
-              <div className="p-8 text-center space-y-4">
-                <p className="text-amber-400 font-bold">
-                  Owner Hub is restricted to Store Owner & Super Administrator.
-                </p>
-                <button
-                  onClick={() => navigate('/staff')}
-                  className="px-4 py-2 bg-cyan-600 rounded-xl text-white font-bold text-xs"
-                >
-                  Return to Staff Workspace
-                </button>
-              </div>
-            ) : (
-              <AdminLogin
-                onLoginSuccess={handleAdminLoginSuccess}
-                onNavigateToStaffLogin={() => navigate('/staff')}
-              />
-            )
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           ) : (
             <AdminHub onNavigate={(path) => navigate(path)} />
           )
         ) : routeState.type === 'admin-module' ? (
           /* ======================================================== */
-          /* ROUTE 4: /admin/{module} (DEDICATED MODULE PAGES) */
+          /* ROUTE: /admin/{module} (DEDICATED MODULE PAGES) */
           /* ======================================================== */
-          !isAdminLoggedIn && !staffSession ? (
-            // Protected: unauthenticated
-            <AdminLogin
-              onLoginSuccess={handleAdminLoginSuccess}
-              onNavigateToStaffLogin={() => navigate('/staff')}
-            />
-          ) : !isAdminLoggedIn &&
-            staffSession &&
-            Array.isArray(staffSession.allowed_modules) &&
-            !staffSession.allowed_modules.includes(routeState.module) ? (
-            // Protected: Staff member without permission for this module
-            <div className="p-8 text-center space-y-4 bg-slate-900 border border-slate-800 rounded-3xl">
-              <p className="text-rose-400 font-bold text-sm">
-                Access Denied: You do not have permission for the {getModuleTitle(routeState.module)} module.
-              </p>
-              <button
-                onClick={() => navigate('/staff')}
-                className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-xl text-white font-bold text-xs transition"
-              >
-                Return to Staff Workspace
-              </button>
-            </div>
+          !isAdminLoggedIn ? (
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           ) : (
             <div>
               {/* Clean Module Top Bar: Back to Hub + Module Title + Direct Navigation Tabs */}
@@ -843,16 +730,10 @@ export default function App() {
                     type="button"
                     onClick={handleBackToHub}
                     className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition-colors shrink-0 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 shadow-sm"
-                    title={
-                      staffSession && !isAdminLoggedIn
-                        ? 'Return to Staff Workspace'
-                        : 'Switch to Admin Hub'
-                    }
+                    title="Switch to Admin Hub"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>
-                      {staffSession && !isAdminLoggedIn ? '← Back to Workspace' : '← Switch to Admin Hub'}
-                    </span>
+                    <span>← Switch to Admin Hub</span>
                   </button>
                   <span className="text-slate-600 font-bold">/</span>
                   <span className="text-white font-semibold truncate">
@@ -896,18 +777,6 @@ export default function App() {
                     >
                       🧾 Purchase Bills
                     </button>
-                    <button
-                      type="button"
-                      id="admin-module-header-staff-btn"
-                      onClick={() => navigate('/admin/staff')}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
-                        routeState.module === 'staff'
-                          ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                          : 'bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-900/60'
-                      }`}
-                    >
-                      👥 Staff & Roles (स्टाफ एवं अनुमतियाँ)
-                    </button>
                   </div>
                 )}
               </div>
@@ -948,10 +817,6 @@ export default function App() {
                   onBackToHub={handleBackToHub}
                   drivers={drivers}
                 />
-              ) : routeState.module === 'staff' ? (
-                <div className="w-full">
-                  <StaffPermissions onBackToHub={handleBackToHub} />
-                </div>
               ) : (
                 <PlannedModuleView
                   moduleId={routeState.module}
@@ -967,10 +832,7 @@ export default function App() {
           isAdminLoggedIn ? (
             <AdminHub onNavigate={(path) => navigate(path)} />
           ) : (
-            <AdminLogin
-              onLoginSuccess={handleAdminLoginSuccess}
-              onNavigateToStaffLogin={() => navigate('/staff')}
-            />
+            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           )
         )}
       </main>
