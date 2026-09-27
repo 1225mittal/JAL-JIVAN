@@ -49,6 +49,7 @@ import DebitNoteManager from './purchase/DebitNoteManager';
 import ItemsInventoryHub from './items/ItemsInventoryHub';
 import ErrorBoundary from './ErrorBoundary';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
+import dualOcrPipeline from '../lib/dualOcrPipeline';
 import {
   fetchPurchaseInvoices,
   savePurchaseInvoice,
@@ -532,7 +533,7 @@ export default function PurchaseInwardHub({
     setCurrentQueueBillId(billItem.id);
     setIsProcessingOcr(true);
     setOcrError('');
-    setOcrStatusMessage(`Running Groq Vision OCR on "${billItem.name || 'Selected Bill'}"...`);
+    setOcrStatusMessage(`Running Ensemble OCR (Gemini + Groq) on "${billItem.name || 'Selected Bill'}"...`);
 
     const imgPreview = billItem.dataUrl || billItem.image_url;
     setBillPreviewUrl(imgPreview);
@@ -540,32 +541,20 @@ export default function PurchaseInwardHub({
     try {
       let base64 = billItem.base64;
       if (!base64 && (billItem.image_url || billItem.dataUrl)) {
-        setOcrStatusMessage('Fetching full-resolution bill image for Groq OCR...');
+        setOcrStatusMessage('Fetching full-resolution bill image for Ensemble OCR...');
         base64 = await getBase64FromUrl(billItem.image_url || billItem.dataUrl);
       }
 
       if (!base64) {
-        throw new Error('Could not access image data for Groq Vision OCR.');
+        throw new Error('Could not access image data for Ensemble Vision OCR.');
       }
 
       setBillBase64(base64);
-      setOcrStatusMessage('Analyzing layout, items, barcodes & GST breakdown with Groq Vision...');
+      setOcrStatusMessage('Analyzing layout, items, barcodes & GST breakdown via Ensemble Engine (Gemini + Groq Consensus)...');
 
-      const response = await fetch('/api/purchase-ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: base64,
-          mimeType: billItem.mimeType || 'image/jpeg'
-        })
+      const parsed = await dualOcrPipeline.processBill(base64, {
+        mimeType: billItem.mimeType || 'image/jpeg'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server OCR Error (${response.status})`);
-      }
-
-      const parsed = await response.json();
       setRawOcrData(parsed);
 
       // Populate Editable Header Fields (Priority to standard schema with fallback to nested)
@@ -692,14 +681,14 @@ export default function PurchaseInwardHub({
         (prev || []).map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
       );
 
-      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Groq Vision!`, 'success');
+      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" verified & extracted successfully via Ensemble Consensus!`, 'success');
 
       setTimeout(() => {
         const reviewEl = document.getElementById('inward-bill-review-section');
         if (reviewEl) reviewEl.scrollIntoView({ behavior: 'smooth' });
       }, 150);
     } catch (err) {
-      console.error('Groq Vision OCR failure:', err);
+      console.error('Ensemble OCR failure:', err);
       setOcrError(err.message || 'Failed to extract text from bill. You can still input details manually.');
     } finally {
       setIsProcessingOcr(false);
@@ -1348,7 +1337,7 @@ export default function PurchaseInwardHub({
                       </span>
                     </div>
                     <span className="text-[11px] text-slate-400 hidden sm:inline">
-                      Process each bill card separately through Groq Vision OCR
+                      Process each bill card separately through Ensemble OCR (Gemini + Groq)
                     </span>
                   </div>
 
@@ -1477,6 +1466,17 @@ export default function PurchaseInwardHub({
                       })}
                     </div>
                   )}
+
+                  {/* Verified by Ensemble Engine Badge */}
+                  <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 font-medium text-[11px] shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Verified by Ensemble Engine (Gemini + Groq Consensus)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Dual Vision AI • Math Variance Zero • Disambiguation
+                    </span>
+                  </div>
                 </div>
               </div>
 

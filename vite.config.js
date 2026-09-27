@@ -146,7 +146,7 @@ export default defineConfig(({ mode }) => {
               })
               return
             }
-            if ((req.url?.startsWith('/api/purchase-ocr') || req.url?.startsWith('/api/groq-ocr')) && req.method === 'POST') {
+            if ((req.url?.startsWith('/api/ocr-ensemble') || req.url?.startsWith('/api/purchase-ocr') || req.url?.startsWith('/api/groq-ocr')) && req.method === 'POST') {
               let body = ''
               req.on('data', (chunk) => { body += chunk })
               req.on('end', async () => {
@@ -155,7 +155,10 @@ export default defineConfig(({ mode }) => {
                   if (!process.env.GROQ_API_KEY) {
                     process.env.GROQ_API_KEY = env.GROQ_API_KEY || env.VITE_GROQ_API_KEY || ''
                   }
-                  const { default: handler } = await import('./api/purchase-ocr.js')
+                  if (!process.env.GEMINI_API_KEY) {
+                    process.env.GEMINI_API_KEY = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || ''
+                  }
+                  const { default: handler } = await import('./api/ocr-ensemble.js')
                   res.status = (code) => { res.statusCode = code; return res }
                   res.json = (data) => {
                     res.setHeader('Content-Type', 'application/json')
