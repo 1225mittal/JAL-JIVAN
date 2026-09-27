@@ -643,14 +643,18 @@ export default function App() {
     }
     setCurrentDriver(driver);
     localStorage.setItem(LOGGED_IN_DRIVER_KEY, JSON.stringify(driver));
+    localStorage.setItem('driver_session', JSON.stringify(driver));
+    localStorage.setItem('active_role', 'driver');
+    localStorage.setItem('active_module', 'driver');
     showToast(`Welcome back, ${driver.name}!`, 'success');
     return driver;
   };
 
   const handleDriverLogout = () => {
     setCurrentDriver(null);
-    localStorage.removeItem(LOGGED_IN_DRIVER_KEY);
+    localStorage.clear();
     showToast('Logged out of driver portal', 'info');
+    window.location.href = '/staff';
   };
 
   const handlePinLocation = async (orderId, latitude, longitude) => {
@@ -706,16 +710,19 @@ export default function App() {
     }
   };
 
-  // Determine which sub-view is active
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
-  const isDriverOrStaff =
-    currentModule === 'driver' ||
-    currentPath.includes('/staff') ||
-    currentPath.includes('/driver');
+  // Enforce strict role-based separation:
+  const isStaffRoute =
+    typeof window !== 'undefined' &&
+    (window.location.pathname.toLowerCase().includes('/staff') ||
+     window.location.pathname.toLowerCase().includes('/driver'));
 
-  // 1. When currentModule === 'driver' OR pathname includes '/staff', render ONLY DriverPortal
-  // It completely bypasses the Admin Hub, the Admin header (Navbar), and any Admin navigation bars.
-  if (isDriverOrStaff) {
+  const activeRole = typeof window !== 'undefined' ? localStorage.getItem('active_role') : null;
+
+  // If isStaffRoute is true OR active_role === 'driver':
+  // - Render ONLY <DriverPortal />.
+  // - DO NOT render <Navbar />, <AdminPanel />, <AdminHub />, or any Admin dispatch tabs.
+  // - Keep the driver completely contained inside the Driver app screen.
+  if (isStaffRoute || activeRole === 'driver') {
     return (
       <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
         <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">

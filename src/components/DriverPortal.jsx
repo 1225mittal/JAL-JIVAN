@@ -42,6 +42,7 @@ import SlipViewerModal from './SlipViewerModal';
 import LiveExpiryScanner from './LiveExpiryScanner';
 import {
   supabase,
+  driverLogin,
   fetchOrders as fetchOrdersApi,
   acceptOrderDelivery,
   fetchRewardSettings,
@@ -105,7 +106,7 @@ import {
 } from '../lib/soundEffects';
 
 export default function DriverPortal({
-  currentDriver,
+  currentDriver: propDriver,
   drivers = [],
   orders = [],
   onLogin,
@@ -116,16 +117,42 @@ export default function DriverPortal({
 }) {
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // Logout / Exit Handler to return to /staff
-  const handleLogoutExit = () => {
+  // Initialize driver from prop or localStorage session
+  const [localDriver, setLocalDriver] = useState(() => {
+    if (propDriver) return propDriver;
     try {
-      localStorage.removeItem('active_module');
-      localStorage.removeItem('driver_session');
-      localStorage.removeItem('jal_jivan_current_driver');
+      const saved =
+        localStorage.getItem('driver_session') ||
+        localStorage.getItem('jal_jivan_current_driver');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    const activeRole = typeof window !== 'undefined' ? localStorage.getItem('active_role') : null;
+    const session = typeof window !== 'undefined' ? (localStorage.getItem('driver_session') || localStorage.getItem('jal_jivan_current_driver')) : null;
+    return Boolean((propDriver || session) && (activeRole === 'driver' || propDriver || session));
+  });
+
+  useEffect(() => {
+    if (propDriver) {
+      setLocalDriver(propDriver);
+      setIsLoggedIn(true);
+    }
+  }, [propDriver]);
+
+  const currentDriver = localDriver || propDriver;
+
+  // Logout Handler that completely clears localStorage and redirects to /staff
+  const handleLogout = () => {
+    try {
       if (typeof onLogout === 'function') {
         onLogout();
       }
     } catch (e) {}
+    localStorage.clear();
     window.location.href = '/staff';
   };
 
@@ -887,7 +914,23 @@ export default function DriverPortal({
 
     try {
       setLoginLoading(true);
-      await onLogin(phone.trim(), pin.trim());
+      let driverData = null;
+      if (typeof onLogin === 'function') {
+        driverData = await onLogin(phone.trim(), pin.trim());
+      } else {
+        driverData = await driverLogin(phone.trim(), pin.trim());
+      }
+
+      if (!driverData) {
+        throw new Error('Invalid mobile phone number or 4-digit PIN');
+      }
+
+      // Store driver role and session; do NOT call setCurrentModule or navigate to /admin
+      localStorage.setItem('active_role', 'driver');
+      localStorage.setItem('driver_session', JSON.stringify(driverData));
+      localStorage.setItem('jal_jivan_current_driver', JSON.stringify(driverData));
+      setLocalDriver(driverData);
+      setIsLoggedIn(true);
     } catch (err) {
       setLoginError(err.message || 'Invalid phone number or PIN. Please check again.');
     } finally {
@@ -1020,7 +1063,7 @@ export default function DriverPortal({
   const starsEarned = Math.floor(completedTodayCount / minPerStar) * starsPerTier;
 
   // If driver is not logged in, render Mobile Driver Login Screen
-  if (!currentDriver) {
+  if (!isLoggedIn || !currentDriver) {
     return (
       <div className="max-w-md mx-auto py-4 sm:py-8 px-2">
         <div className="flex justify-between items-center mb-3 px-1">
@@ -1031,12 +1074,12 @@ export default function DriverPortal({
           <button
             type="button"
             id="driver-login-exit-btn"
-            onClick={handleLogoutExit}
+            onClick={handleLogout}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold transition shadow-sm"
-            title="Logout / Exit"
+            title="Logout"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Logout / Exit</span>
+            <span>Logout</span>
           </button>
         </div>
         <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-2xl space-y-6">
@@ -1156,29 +1199,68 @@ export default function DriverPortal({
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
-      {/* Top Header Bar with Clean Logout / Exit */}
-      <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
+      {/* Top Header Bar with Driver Name, Status (Online/Offline toggle), and Logout */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900/95 border border-slate-800 shadow-xl backdrop-blur-md">
+        {/* Left: Driver Name & Status Badge */}
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white shadow-md shadow-emerald-600/20 shrink-0">
-            <Truck className="w-4 h-4" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white font-black text-sm shadow-md shadow-emerald-600/20 shrink-0">
+            {currentDriver?.name ? currentDriver.name.charAt(0).toUpperCase() : 'D'}
           </div>
           <div className="min-w-0">
-            <h1 className="font-extrabold text-white text-xs sm:text-sm tracking-tight truncate">
-              JAL-JIVAN Delivery Console
-            </h1>
-            <p className="text-[10px] text-slate-400 truncate">Driver Duty & Task Console</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="font-extrabold text-white text-sm sm:text-base tracking-tight truncate">
+                {currentDriver?.name || 'Delivery Partner'}
+              </h1>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${
+                  isPunchedIn
+                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isPunchedIn ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span>{isPunchedIn ? 'Online' : 'Offline'}</span>
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-mono truncate">{currentDriver?.phone || ''}</p>
           </div>
         </div>
-        <button
-          type="button"
-          id="driver-top-logout-exit-btn"
-          onClick={handleLogoutExit}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold transition shadow-sm shrink-0"
-          title="Logout / Exit"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Logout / Exit</span>
-        </button>
+
+        {/* Right: Online / Offline Toggle & Logout Button */}
+        <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+          <button
+            type="button"
+            id="driver-status-toggle-btn"
+            onClick={() => {
+              if (isPunchedIn) {
+                setShowPunchOutConfirm(true);
+              } else {
+                handlePunchIn();
+              }
+            }}
+            disabled={punchActionLoading || verifyingLocation}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 disabled:opacity-50 ${
+              isPunchedIn
+                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
+            title={isPunchedIn ? 'Click to Go Offline' : 'Click to Go Online'}
+          >
+            <span className={`w-2 h-2 rounded-full ${isPunchedIn ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+            <span>{isPunchedIn ? 'Go Offline' : 'Go Online'}</span>
+          </button>
+
+          <button
+            type="button"
+            id="driver-top-logout-btn"
+            onClick={handleLogout}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-rose-500/30 text-xs font-bold transition shadow-sm active:scale-95 shrink-0"
+            title="Logout"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Logout</span>
+          </button>
+        </div>
       </div>
       {/* Geoguard Alert Overlay if Internet or GPS lost */}
       {(!isOnline || !hasGps) && !guardDismissed && (
@@ -1297,12 +1379,12 @@ export default function DriverPortal({
             <button
               type="button"
               id="driver-profile-logout-exit-btn"
-              onClick={handleLogoutExit}
+              onClick={handleLogout}
               className="px-3 py-2.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 shrink-0"
-              title="Logout and Exit to Staff"
+              title="Logout"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logout / Exit</span>
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </div>
