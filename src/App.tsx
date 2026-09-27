@@ -109,27 +109,46 @@ export default function App() {
   const [damages, setDamages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage'
-  const [currentModule, setCurrentModule] = useState<'hub' | 'delivery' | 'damage'>(() => {
-    if (typeof window !== 'undefined') {
-      const urlParam = new URLSearchParams(window.location.search).get('module') as 'hub' | 'delivery' | 'damage';
-      if (urlParam) return urlParam;
-      const saved = localStorage.getItem('active_module') as 'hub' | 'delivery' | 'damage';
-      if (saved) return saved;
-    }
-    return 'hub';
-  });
+  // Admin Module Sub-View: 'hub' (default) | 'delivery' | 'damage' | 'purchase' | 'driver'
+  const getInitialModule = (): string => {
+    if (typeof window === 'undefined') return 'hub';
+    const path = window.location.pathname.toLowerCase();
+    const params = new URLSearchParams(window.location.search);
+    const queryModule = params.get('module');
 
-  // Sync currentModule with localStorage and URL query string to preserve screen on page refresh
+    // Explicit path matching takes absolute priority
+    if (path.includes('/staff') || path.includes('/driver')) {
+      localStorage.setItem('active_module', 'driver');
+      return 'driver';
+    }
+    if (path.includes('/admin/purchase') || queryModule === 'purchase') {
+      localStorage.setItem('active_module', 'purchase');
+      return 'purchase';
+    }
+    if (path.includes('/admin/delivery') || queryModule === 'delivery') {
+      localStorage.setItem('active_module', 'delivery');
+      return 'delivery';
+    }
+    if (path.includes('/admin/damage') || queryModule === 'damage') {
+      localStorage.setItem('active_module', 'damage');
+      return 'damage';
+    }
+    if (path === '/admin' || path === '/admin/' || path === '/admin/hub' || path.startsWith('/admin/login') || queryModule === 'hub') {
+      localStorage.setItem('active_module', 'hub');
+      return 'hub';
+    }
+
+    // If root '/' or unrecognized, use saved localStorage or fallback to 'hub'
+    return localStorage.getItem('active_module') || 'hub';
+  };
+
+  const [currentModule, setCurrentModule] = useState<any>(getInitialModule);
+
+  // Sync currentModule with localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('active_module', currentModule);
-        const url = new URL(window.location.href);
-        if (url.searchParams.get('module') !== currentModule) {
-          url.searchParams.set('module', currentModule);
-          window.history.replaceState(null, '', url.toString());
-        }
       } catch (e) {}
     }
   }, [currentModule]);

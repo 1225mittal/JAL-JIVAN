@@ -44,8 +44,40 @@ const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
 const ADMIN_SESSION_KEY = 'admin_session';
 
 // ==========================================
-// 1. CLEAN URL ROUTE PARSER (NO MESSY QUERY PARAMS)
+// 1. CLEAN URL ROUTE & MODULE PARSER (PREVENTS HUB OVERRIDE)
 // ==========================================
+export const getInitialModule = () => {
+  if (typeof window === 'undefined') return 'hub';
+  const path = window.location.pathname.toLowerCase();
+  const params = new URLSearchParams(window.location.search);
+  const queryModule = params.get('module');
+
+  // Explicit path matching takes absolute priority
+  if (path.includes('/staff') || path.includes('/driver')) {
+    localStorage.setItem('active_module', 'driver');
+    return 'driver';
+  }
+  if (path.includes('/admin/purchase') || queryModule === 'purchase') {
+    localStorage.setItem('active_module', 'purchase');
+    return 'purchase';
+  }
+  if (path.includes('/admin/delivery') || queryModule === 'delivery') {
+    localStorage.setItem('active_module', 'delivery');
+    return 'delivery';
+  }
+  if (path.includes('/admin/damage') || queryModule === 'damage') {
+    localStorage.setItem('active_module', 'damage');
+    return 'damage';
+  }
+  if (path === '/admin' || path === '/admin/' || path === '/admin/hub' || path.startsWith('/admin/login') || queryModule === 'hub') {
+    localStorage.setItem('active_module', 'hub');
+    return 'hub';
+  }
+
+  // If root '/' or unrecognized, use saved localStorage or fallback to 'hub'
+  return localStorage.getItem('active_module') || 'hub';
+};
+
 export function parseRoute() {
   if (typeof window === 'undefined') {
     return { type: 'driver', module: null, pathname: '/' };
@@ -61,15 +93,7 @@ export function parseRoute() {
     pathname = '/' + hash;
   }
 
-  // Handle legacy query params (?module=...)
-  if (legacyModule) {
-    const mod = legacyModule === 'hub' ? 'hub' : legacyModule;
-    if (mod === 'hub') {
-      return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
-    }
-    return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
-  }
-
+  // Explicit pathname matching takes absolute priority over legacy query params
   // Route 1: Staff Portal (/staff or /staff/login)
   if (pathname === '/staff' || pathname === '/staff/login') {
     return { type: 'staff', module: null, pathname: '/staff' };
@@ -95,7 +119,21 @@ export function parseRoute() {
     return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
   }
 
-  // Route 5: Default Driver Portal (/)
+  // Route 5: Dedicated Driver Portal (/driver)
+  if (pathname === '/driver') {
+    return { type: 'driver', module: null, pathname: '/driver' };
+  }
+
+  // Handle legacy query params (?module=...) only for root '/' or fallback
+  if (legacyModule) {
+    const mod = legacyModule === 'hub' ? 'hub' : legacyModule;
+    if (mod === 'hub') {
+      return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
+    }
+    return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
+  }
+
+  // Route 6: Default Driver Portal (/)
   return { type: 'driver', module: null, pathname: '/' };
 }
 
@@ -124,6 +162,9 @@ function getModuleTitle(moduleKey) {
 }
 
 export default function App() {
+  // Current Active Module State (checked from URL before localStorage)
+  const [currentModule, setCurrentModule] = useState(getInitialModule);
+
   // Current Route State
   const [routeState, setRouteState] = useState(() => parseRoute());
 
@@ -176,25 +217,52 @@ export default function App() {
         window.history.pushState({}, '', targetUrl);
       }
     } catch (e) {}
-    setRouteState(parseRoute());
+    const newRoute = parseRoute();
+    setRouteState(newRoute);
+    if (newRoute.type === 'staff' || newRoute.type === 'driver') {
+      setCurrentModule('driver');
+    } else if (newRoute.module) {
+      setCurrentModule(newRoute.module);
+    } else if (newRoute.type === 'admin-hub') {
+      setCurrentModule('hub');
+    }
   }, []);
+
+  // Sync currentModule with localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('active_module', currentModule);
+    } catch (e) {}
+  }, [currentModule]);
 
   // Listen to browser navigation (back/forward) & clean legacy query params
   useEffect(() => {
     const handleLocationChange = () => {
-      setRouteState(parseRoute());
+      const newRoute = parseRoute();
+      setRouteState(newRoute);
+      if (newRoute.type === 'staff' || newRoute.type === 'driver') {
+        setCurrentModule('driver');
+      } else if (newRoute.module) {
+        setCurrentModule(newRoute.module);
+      } else if (newRoute.type === 'admin-hub') {
+        setCurrentModule('hub');
+      }
     };
 
     window.addEventListener('popstate', handleLocationChange);
     window.addEventListener('hashchange', handleLocationChange);
 
-    // Strip legacy ?module=... query params and rewrite cleanly
+    // Strip legacy ?module=... query params and rewrite cleanly without overriding direct URLs
     const search = new URLSearchParams(window.location.search);
     if (search.has('module')) {
       const legacyMod = search.get('module');
       search.delete('module');
       const remainingQuery = search.toString() ? `?${search.toString()}` : '';
-      const newPath = legacyMod === 'hub' ? '/admin' : `/admin/${legacyMod}`;
+      const currentPath = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+      let newPath = currentPath;
+      if (currentPath === '/' || currentPath === '') {
+        newPath = legacyMod === 'hub' ? '/admin' : `/admin/${legacyMod}`;
+      }
       try {
         window.history.replaceState({}, '', `${newPath}${remainingQuery}`);
         setRouteState(parseRoute());
