@@ -328,3 +328,6 @@ export default function BarcodeScannerModal({
     </div>
   );
 }
+
+export { BarcodeScannerModal };
+

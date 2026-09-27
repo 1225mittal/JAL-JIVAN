@@ -321,7 +321,8 @@ export default function PurchaseInwardHub({
     loadVendors();
 
     // Supabase Realtime Subscription on purchase_bill_queue
-    if (isSupabaseConfigured() && supabase) {
+    const isConfigured = typeof isSupabaseConfigured === 'function' ? isSupabaseConfigured() : Boolean(isSupabaseConfigured);
+    if (isConfigured && supabase) {
       const queueChannel = supabase
         .channel('realtime_bill_queue')
         .on(
@@ -1995,10 +1996,14 @@ export default function PurchaseInwardHub({
           {activeTab === 'items' && (
             <div className="max-w-[1400px]">
               <ErrorBoundary title="Item & Stock Master">
-                <ItemsInventoryHub
-                  onBackToHub={() => setActiveTab('new')}
-                  showToast={showToast}
-                />
+                {typeof ItemsInventoryHub === 'function' ? (
+                  <ItemsInventoryHub
+                    onBackToHub={() => setActiveTab('new')}
+                    showToast={showToast}
+                  />
+                ) : (
+                  <div className="p-8 text-center text-slate-400">Items & Stock Master module loading...</div>
+                )}
               </ErrorBoundary>
             </div>
           )}
@@ -2009,17 +2014,21 @@ export default function PurchaseInwardHub({
           {activeTab === 'vendors' && (
             <div className="max-w-[1400px]">
               <ErrorBoundary title="Vendors Directory">
-                <VendorsDirectory
-                  vendors={vendorsList || vendors || []}
-                  invoicesHistory={invoicesHistory || []}
-                  onSelectVendorInvoices={(v) => {
-                    setVendorLedgerFilter(v);
-                    setActiveTab('history');
-                  }}
-                  onRefresh={loadVendors}
-                  loading={vendorsLoading}
-                  onDeleteVendor={handleDeleteVendor}
-                />
+                {typeof VendorsDirectory === 'function' ? (
+                  <VendorsDirectory
+                    vendors={vendorsList || vendors || []}
+                    invoicesHistory={invoicesHistory || []}
+                    onSelectVendorInvoices={(v) => {
+                      setVendorLedgerFilter(v);
+                      setActiveTab('history');
+                    }}
+                    onRefresh={loadVendors}
+                    loading={vendorsLoading}
+                    onDeleteVendor={handleDeleteVendor}
+                  />
+                ) : (
+                  <div className="p-8 text-center text-slate-400">Vendors Directory loading...</div>
+                )}
               </ErrorBoundary>
             </div>
           )}
@@ -2030,7 +2039,11 @@ export default function PurchaseInwardHub({
           {activeTab === 'debit_notes' && (
             <div className="max-w-[1400px]">
               <ErrorBoundary title="Sale Return & Debit Notes">
-                <DebitNoteManager showToast={showToast} />
+                {typeof DebitNoteManager === 'function' ? (
+                  <DebitNoteManager showToast={showToast} />
+                ) : (
+                  <div className="p-8 text-center text-slate-400">Debit Note module loading...</div>
+                )}
               </ErrorBoundary>
             </div>
           )}
@@ -2291,7 +2304,7 @@ export default function PurchaseInwardHub({
       )}
 
       {/* Mobile QR Code Pairing Scanner Modal */}
-      {isMobileScannerOpen && (
+      {isMobileScannerOpen && typeof MobileScannerModal === 'function' && (
         <MobileScannerModal
           isOpen={isMobileScannerOpen}
           onClose={() => setIsMobileScannerOpen(false)}
@@ -2300,7 +2313,7 @@ export default function PurchaseInwardHub({
       )}
 
       {/* Barcode Camera Scanner Modal */}
-      {isBarcodeModalOpen && (
+      {isBarcodeModalOpen && typeof BarcodeScannerModal === 'function' && (
         <BarcodeScannerModal
           isOpen={isBarcodeModalOpen}
           onClose={() => setIsBarcodeModalOpen(false)}

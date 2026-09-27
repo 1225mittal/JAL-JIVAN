@@ -64,3 +64,6 @@ export async function renderPdfFirstPageToImage(pdfInput, scale = 2.0) {
     height: canvas.height
   };
 }
+
+export default renderPdfFirstPageToImage;
+

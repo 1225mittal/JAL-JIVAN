@@ -797,3 +797,6 @@ export default function ItemsInventoryHub({
     </div>
   );
 }
+
+export { ItemsInventoryHub };
+

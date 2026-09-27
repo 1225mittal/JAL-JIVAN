@@ -249,3 +249,6 @@ export default function MobileScannerModal({
     </div>
   );
 }
+
+export { MobileScannerModal };
+

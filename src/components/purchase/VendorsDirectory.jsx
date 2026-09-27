@@ -441,3 +441,6 @@ export default function VendorsDirectory({
     </div>
   );
 }
+
+export { VendorsDirectory };
+

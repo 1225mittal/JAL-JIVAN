@@ -776,3 +776,6 @@ export default function DebitNoteManager({ showToast = () => {} }) {
     </div>
   );
 }
+
+export { DebitNoteManager };
+
