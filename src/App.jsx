@@ -733,6 +733,7 @@ export default function App() {
               orders={orders}
               onLogin={handleDriverLogin}
               onLogout={handleDriverLogout}
+              onBack={handleBackToHub}
               onPinLocation={handlePinLocation}
               onCompleteDelivery={handleCompleteDelivery}
               onAcceptOrder={handleAcceptOrder}
@@ -935,6 +936,7 @@ export default function App() {
             orders={orders}
             onLogin={handleDriverLogin}
             onLogout={handleDriverLogout}
+            onBack={handleBackToHub}
             onPinLocation={handlePinLocation}
             onCompleteDelivery={handleCompleteDelivery}
             onAcceptOrder={handleAcceptOrder}

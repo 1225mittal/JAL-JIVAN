@@ -111,6 +111,7 @@ export default function DriverPortal({
   orders = [],
   onLogin,
   onLogout,
+  onBack,
   onPinLocation,
   onCompleteDelivery,
   onAcceptOrder
@@ -150,6 +151,11 @@ export default function DriverPortal({
     try {
       if (typeof onLogout === 'function') {
         onLogout();
+      }
+    } catch (e) {}
+    try {
+      if (typeof onBack === 'function') {
+        onBack();
       }
     } catch (e) {}
     localStorage.clear();
@@ -1062,6 +1068,32 @@ export default function DriverPortal({
   const starsPerTier = rewardRule.stars_rewarded || 1;
   const starsEarned = Math.floor(completedTodayCount / minPerStar) * starsPerTier;
 
+  // Determine if driver is within geofence radius (<= storeHub.radius_meters)
+  const isInsideHubGeofence = hubDistance !== null && hubDistance <= (storeHub.radius_meters || 150);
+
+  // Compute Monthly Attendance Statistics (Hooks declared unconditionally before any returns)
+  const currentMonthStr = todayStr.slice(0, 7);
+  const currentMonthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
+
+  const monthlyPresentDates = useMemo(() => {
+    const dates = new Set();
+    attendanceRecords.forEach((r) => {
+      if (r.created_at && r.created_at.startsWith(currentMonthStr)) {
+        dates.add(r.created_at.slice(0, 10));
+      }
+    });
+    if (isPunchedIn) {
+      dates.add(todayStr);
+    }
+    return Array.from(dates).sort().reverse();
+  }, [attendanceRecords, currentMonthStr, isPunchedIn, todayStr]);
+
+  const daysPresentCount = monthlyPresentDates.length;
+
+  const todayAttendanceRecord = useMemo(() => {
+    return attendanceRecords.find((r) => r.created_at && r.created_at.startsWith(todayStr));
+  }, [attendanceRecords, todayStr]);
+
   // If driver is not logged in, render Mobile Driver Login Screen
   if (!isLoggedIn || !currentDriver) {
     return (
@@ -1170,32 +1202,6 @@ export default function DriverPortal({
       </div>
     );
   }
-
-  // Determine if driver is within geofence radius (<= storeHub.radius_meters)
-  const isInsideHubGeofence = hubDistance !== null && hubDistance <= (storeHub.radius_meters || 150);
-
-  // Compute Monthly Attendance Statistics
-  const currentMonthStr = todayStr.slice(0, 7);
-  const currentMonthName = new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
-
-  const monthlyPresentDates = useMemo(() => {
-    const dates = new Set();
-    attendanceRecords.forEach((r) => {
-      if (r.created_at && r.created_at.startsWith(currentMonthStr)) {
-        dates.add(r.created_at.slice(0, 10));
-      }
-    });
-    if (isPunchedIn) {
-      dates.add(todayStr);
-    }
-    return Array.from(dates).sort().reverse();
-  }, [attendanceRecords, currentMonthStr, isPunchedIn, todayStr]);
-
-  const daysPresentCount = monthlyPresentDates.length;
-
-  const todayAttendanceRecord = useMemo(() => {
-    return attendanceRecords.find((r) => r.created_at && r.created_at.startsWith(todayStr));
-  }, [attendanceRecords, todayStr]);
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
