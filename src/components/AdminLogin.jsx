@@ -113,15 +113,15 @@ export const AdminLogin = ({ onLoginSuccess }) => {
           </button>
         </form>
 
-        {/* Switch to Driver Portal */}
+        {/* Switch to Rider Portal */}
         <div className="pt-4 border-t border-slate-800/80 text-center">
           <p className="text-xs text-slate-400">
             Delivery Boy / Rider?{' '}
             <a
-              href="/driver"
+              href="/rider"
               className="text-emerald-400 hover:text-emerald-300 font-bold underline transition ml-1"
             >
-              Go to Driver Portal →
+              Go to Rider Portal (/rider) →
             </a>
           </p>
         </div>

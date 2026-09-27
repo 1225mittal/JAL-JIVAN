@@ -161,7 +161,23 @@ export default function AdminHub({ onNavigate }) {
         'Customer Jar Deposit Ledger (Bahi Khata)'
       ]
     },
-
+    {
+      id: 'staff',
+      path: '/admin/staff',
+      title: 'Staff & Roles Directory',
+      category: 'Workforce & HR',
+      tag: 'Active / Live',
+      isLive: true,
+      icon: UserCheck,
+      accentColor: 'from-blue-600 to-cyan-600',
+      tagColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40 shadow-sm shadow-cyan-500/20',
+      description: 'Master-Detail Staff Directory, Live Payroll, Advances & Monthly Attendance',
+      features: [
+        'Master-Detail Personnel Directory with ID Proofs',
+        'Live Outstanding Salary & Instant Advance Ledger',
+        'Month-wise Interactive Attendance Calendar'
+      ]
+    },
     {
       id: 'settings',
       path: '/admin/settings',

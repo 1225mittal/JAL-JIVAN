@@ -64,6 +64,7 @@ import SlipViewerModal from './SlipViewerModal';
 import StaffAttendanceModal from './StaffAttendanceModal';
 import RiderMiniMap from './RiderMiniMap';
 import DamageWorkflowToggles from './admin/DamageWorkflowToggles';
+import StaffDirectoryHub from './staff/StaffDirectoryHub';
 
 // Lightweight URL search params hook adhering to useSearchParams standard without react-router-dom dependency
 export function useSearchParams() {
@@ -842,6 +843,19 @@ export function AdminPanel({
             >
               <Package className="w-4 h-4" />
               <span>Products ({products.length})</span>
+            </button>
+
+            <button
+              id="admin-staff-tab"
+              onClick={() => handleTabChange('staff')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'staff'
+                  ? 'border-emerald-500 text-emerald-400 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Staff & Roles</span>
             </button>
 
             <button
@@ -1742,6 +1756,13 @@ export function AdminPanel({
       {activeTab === 'damage-config' && (
         <div className="space-y-4">
           <DamageWorkflowToggles />
+        </div>
+      )}
+
+      {/* TAB 8: STAFF & ROLES DIRECTORY */}
+      {activeTab === 'staff' && (
+        <div className="space-y-4">
+          <StaffDirectoryHub onBackToHub={onBackToHub} />
         </div>
       )}
 

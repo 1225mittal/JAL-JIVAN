@@ -5,6 +5,7 @@ import DamageReturnHub from './components/damage/DamageReturnHub';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
+import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
 import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
 import AddDriverModal from './components/AddDriverModal';
@@ -51,8 +52,11 @@ export const getInitialModule = () => {
   const queryModule = params.get('module');
 
   // Explicit path matching takes absolute priority
-  if (path.includes('/driver')) {
+  if (path.includes('/rider') || path.includes('/driver')) {
     return 'driver';
+  }
+  if (path.includes('/admin/staff') || queryModule === 'staff') {
+    return 'staff';
   }
   if (path.includes('/admin/purchase') || queryModule === 'purchase') {
     return 'purchase';
@@ -82,9 +86,9 @@ export function parseRoute() {
   }
 
   // Explicit pathname matching takes absolute priority over legacy query params
-  // Route 1: Dedicated Driver Portal (/driver)
-  if (pathname === '/driver') {
-    return { type: 'driver', module: null, pathname: '/driver' };
+  // Route 1: Dedicated Rider Portal (/rider, with /driver as legacy alias)
+  if (pathname === '/rider' || pathname === '/driver') {
+    return { type: 'driver', module: null, pathname: '/rider' };
   }
 
   // Route 2: Dedicated Admin Login (/admin/login)
@@ -92,9 +96,9 @@ export function parseRoute() {
     return { type: 'admin-login', module: null, pathname: '/admin/login' };
   }
 
-  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
+  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/staff, etc.)
   const adminModMatch = pathname.match(
-    /^\/admin\/(delivery|damage|purchase|sales|marketing|finance|settings|config)$/
+    /^\/admin\/(delivery|damage|purchase|staff|sales|marketing|finance|settings|config)$/
   );
   if (adminModMatch) {
     const rawMod = adminModMatch[1];
@@ -128,6 +132,8 @@ function getModuleTitle(moduleKey) {
       return 'Damage & Returns Management';
     case 'purchase':
       return 'Purchase & Inward Management';
+    case 'staff':
+      return 'Staff & Roles Directory';
     case 'sales':
       return 'Sales & Billing';
     case 'marketing':
@@ -590,8 +596,8 @@ export default function App() {
   const handleDriverLogout = () => {
     setCurrentDriver(null);
     localStorage.clear();
-    showToast('Logged out of driver portal', 'info');
-    window.location.href = '/driver';
+    showToast('Logged out of rider portal', 'info');
+    window.location.href = '/rider';
   };
 
   const handlePinLocation = async (orderId, latitude, longitude) => {
@@ -647,12 +653,15 @@ export default function App() {
     }
   };
 
-  // Simple, resilient path checking for driver route
-  // ONLY URLs explicitly containing /driver render DriverPortal
+  // Simple, resilient path checking for rider route (/rider or legacy /driver)
+  // ONLY URLs explicitly containing /rider or /driver render DriverPortal
   const isDriverRoute =
     typeof window !== 'undefined' &&
-    (window.location.pathname.toLowerCase().includes('/driver') ||
-     (window.location.hash && window.location.hash.toLowerCase().includes('/driver')));
+    (window.location.pathname.toLowerCase().includes('/rider') ||
+     window.location.pathname.toLowerCase().includes('/driver') ||
+     (window.location.hash &&
+       (window.location.hash.toLowerCase().includes('/rider') ||
+        window.location.hash.toLowerCase().includes('/driver'))));
 
   // When isDriverRoute is true:
   // Render ONLY the <DriverPortal /> component without ErrorBoundary, Navbar, or Admin panels.
@@ -777,6 +786,17 @@ export default function App() {
                     >
                       🧾 Purchase Bills
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/admin/staff')}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
+                        routeState.module === 'staff'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
+                      }`}
+                    >
+                      👥 Staff & Roles
+                    </button>
                   </div>
                 )}
               </div>
@@ -816,6 +836,11 @@ export default function App() {
                 <DamageReturnHub
                   onBackToHub={handleBackToHub}
                   drivers={drivers}
+                />
+              ) : routeState.module === 'staff' ? (
+                <StaffDirectoryHub
+                  onBackToHub={handleBackToHub}
+                  showToast={showToast}
                 />
               ) : (
                 <PlannedModuleView

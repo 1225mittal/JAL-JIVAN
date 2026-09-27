@@ -148,7 +148,7 @@ export default function DriverPortal({
 
   const currentDriver = localDriver || propDriver;
 
-  // Logout Handler that completely clears localStorage and redirects to /driver
+  // Logout Handler that completely clears localStorage and redirects to /rider
   const handleLogout = () => {
     try {
       if (typeof onLogout === 'function') {
@@ -161,7 +161,7 @@ export default function DriverPortal({
       }
     } catch (e) {}
     localStorage.clear();
-    window.location.href = '/driver';
+    window.location.href = '/rider';
   };
 
   // Login Form State

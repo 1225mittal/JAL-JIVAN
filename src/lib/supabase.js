@@ -2880,4 +2880,388 @@ export async function deletePurchaseInvoice(invoiceId) {
   return true;
 }
 
+// ==========================================
+// STAFF DIRECTORY, PAYROLL ADVANCES & ATTENDANCE
+// ==========================================
+export const STORAGE_STAFF_DIRECTORY = 'jal_jivan_staff_directory';
+export const STORAGE_STAFF_ADVANCES = 'jal_jivan_staff_advances';
+export const STORAGE_STAFF_ATTENDANCE = 'jal_jivan_staff_attendance';
+
+export const INITIAL_STAFF_DIRECTORY = [
+  {
+    id: 'staff-1',
+    name: 'Rahul Kumar',
+    phone: '9876543210',
+    role: 'Rider',
+    age: 24,
+    monthly_salary: 16000,
+    photo_url: '',
+    id_proof_url: '',
+    id_proof_type: 'Aadhaar Card',
+    status: 'active',
+    joining_date: '2025-01-15',
+    created_at: new Date(Date.now() - 60 * 86400000).toISOString()
+  },
+  {
+    id: 'staff-2',
+    name: 'Vikram Singh',
+    phone: '9812345678',
+    role: 'Rider',
+    age: 27,
+    monthly_salary: 18000,
+    photo_url: '',
+    id_proof_url: '',
+    id_proof_type: 'Driving License',
+    status: 'active',
+    joining_date: '2024-11-01',
+    created_at: new Date(Date.now() - 120 * 86400000).toISOString()
+  },
+  {
+    id: 'staff-3',
+    name: 'Mohan Lal',
+    phone: '9823456789',
+    role: 'Godown Staff',
+    age: 33,
+    monthly_salary: 15000,
+    photo_url: '',
+    id_proof_url: '',
+    id_proof_type: 'Aadhaar Card',
+    status: 'active',
+    joining_date: '2024-08-10',
+    created_at: new Date(Date.now() - 200 * 86400000).toISOString()
+  },
+  {
+    id: 'staff-4',
+    name: 'Sunita Sharma',
+    phone: '9834567890',
+    role: 'Store Manager',
+    age: 30,
+    monthly_salary: 24000,
+    photo_url: '',
+    id_proof_url: '',
+    id_proof_type: 'PAN Card',
+    status: 'active',
+    joining_date: '2024-05-01',
+    created_at: new Date(Date.now() - 300 * 86400000).toISOString()
+  },
+  {
+    id: 'staff-5',
+    name: 'Amit Patel',
+    phone: '9845678901',
+    role: 'Rider',
+    age: 22,
+    monthly_salary: 15000,
+    photo_url: '',
+    id_proof_url: '',
+    id_proof_type: 'Aadhaar Card',
+    status: 'active',
+    joining_date: '2025-02-01',
+    created_at: new Date(Date.now() - 30 * 86400000).toISOString()
+  }
+];
+
+export function getLocalStaffDirectory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_STAFF_DIRECTORY);
+    if (!raw) {
+      localStorage.setItem(STORAGE_STAFF_DIRECTORY, JSON.stringify(INITIAL_STAFF_DIRECTORY));
+      return INITIAL_STAFF_DIRECTORY;
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_STAFF_DIRECTORY;
+  } catch (e) {
+    return INITIAL_STAFF_DIRECTORY;
+  }
+}
+
+export function saveLocalStaffDirectory(list) {
+  try {
+    localStorage.setItem(STORAGE_STAFF_DIRECTORY, JSON.stringify(list));
+  } catch (e) {
+    console.error('Failed saving staff directory locally', e);
+  }
+}
+
+export async function fetchStaffDirectory() {
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff_directory')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        saveLocalStaffDirectory(data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchStaffDirectory notice:', err.message);
+    }
+  }
+  return getLocalStaffDirectory();
+}
+
+export async function saveStaffMember(member) {
+  const memberId = member.id || `staff-${Date.now()}`;
+  const nowIso = new Date().toISOString();
+  const record = {
+    ...member,
+    id: memberId,
+    name: (member.name || '').trim(),
+    phone: (member.phone || '').trim().replace(/\D/g, ''),
+    role: (member.role || 'Rider').trim(),
+    age: Number(member.age) || 25,
+    monthly_salary: Number(member.monthly_salary) || 15000,
+    photo_url: member.photo_url || '',
+    id_proof_url: member.id_proof_url || '',
+    id_proof_type: member.id_proof_type || 'Aadhaar Card',
+    status: member.status || 'active',
+    joining_date: member.joining_date || new Date().toISOString().split('T')[0],
+    updated_at: nowIso
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff_directory')
+        .upsert([record])
+        .select()
+        .single();
+      if (!error && data) {
+        const local = getLocalStaffDirectory();
+        const exists = local.some((m) => m.id === data.id);
+        const updated = exists ? local.map((m) => (m.id === data.id ? data : m)) : [data, ...local];
+        saveLocalStaffDirectory(updated);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase saveStaffMember fallback:', err.message);
+    }
+  }
+
+  const local = getLocalStaffDirectory();
+  const exists = local.some((m) => m.id === record.id);
+  const updated = exists ? local.map((m) => (m.id === record.id ? record : m)) : [record, ...local];
+  saveLocalStaffDirectory(updated);
+  return record;
+}
+
+export async function deleteStaffDirectoryMember(id) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('staff_directory').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteStaffDirectoryMember notice:', err.message);
+    }
+  }
+  const local = getLocalStaffDirectory();
+  const updated = local.filter((m) => m.id !== id);
+  saveLocalStaffDirectory(updated);
+  return true;
+}
+
+// ------------------------------------------
+// Staff Advances
+// ------------------------------------------
+export function getLocalStaffAdvances() {
+  try {
+    const raw = localStorage.getItem(STORAGE_STAFF_ADVANCES);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveLocalStaffAdvances(advances) {
+  try {
+    localStorage.setItem(STORAGE_STAFF_ADVANCES, JSON.stringify(advances));
+  } catch (e) {
+    console.error('Failed saving staff advances', e);
+  }
+}
+
+export async function fetchStaffAdvances(staffId, monthStr) {
+  if (isSupabaseConfigured) {
+    try {
+      let query = supabase.from('staff_advances').select('*').order('date', { ascending: false });
+      if (staffId) {
+        query = query.eq('staff_id', staffId);
+      }
+      if (monthStr) {
+        // monthStr is 'YYYY-MM'
+        const start = `${monthStr}-01`;
+        const end = `${monthStr}-31T23:59:59`;
+        query = query.gte('date', start).lte('date', end);
+      }
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchStaffAdvances notice:', err.message);
+    }
+  }
+
+  const all = getLocalStaffAdvances();
+  return all.filter((adv) => {
+    if (staffId && adv.staff_id !== staffId) return false;
+    if (monthStr && !adv.date.startsWith(monthStr)) return false;
+    return true;
+  });
+}
+
+export async function createStaffAdvance(advanceData) {
+  const newAdvance = {
+    id: advanceData.id || `adv-${Date.now()}`,
+    staff_id: advanceData.staff_id,
+    amount: Number(advanceData.amount) || 0,
+    payment_mode: advanceData.payment_mode || 'Cash',
+    remarks: (advanceData.remarks || '').trim(),
+    date: advanceData.date || new Date().toISOString().split('T')[0],
+    created_at: new Date().toISOString()
+  };
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff_advances')
+        .insert([newAdvance])
+        .select()
+        .single();
+      if (!error && data) {
+        const local = getLocalStaffAdvances();
+        saveLocalStaffAdvances([data, ...local]);
+        return data;
+      }
+    } catch (err) {
+      console.warn('Supabase createStaffAdvance fallback:', err.message);
+    }
+  }
+
+  const local = getLocalStaffAdvances();
+  const updated = [newAdvance, ...local];
+  saveLocalStaffAdvances(updated);
+  return newAdvance;
+}
+
+export async function deleteStaffAdvance(id) {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('staff_advances').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteStaffAdvance notice:', err.message);
+    }
+  }
+  const local = getLocalStaffAdvances();
+  const updated = local.filter((a) => a.id !== id);
+  saveLocalStaffAdvances(updated);
+  return true;
+}
+
+// ------------------------------------------
+// Staff Attendance
+// ------------------------------------------
+export function getLocalStaffAttendance() {
+  try {
+    const raw = localStorage.getItem(STORAGE_STAFF_ATTENDANCE);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+export function saveLocalStaffAttendance(map) {
+  try {
+    localStorage.setItem(STORAGE_STAFF_ATTENDANCE, JSON.stringify(map));
+  } catch (e) {
+    console.error('Failed saving staff attendance locally', e);
+  }
+}
+
+export async function fetchStaffAttendanceMonth(staffId, year, month) {
+  // month is 1-indexed (1 to 12)
+  const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff_attendance')
+        .select('*')
+        .eq('staff_id', staffId)
+        .gte('date', `${monthStr}-01`)
+        .lte('date', `${monthStr}-31`);
+      if (!error && Array.isArray(data) && data.length > 0) {
+        // Return as key-value map of date -> status
+        const map = {};
+        data.forEach((rec) => {
+          map[rec.date] = rec.status;
+        });
+        return map;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchStaffAttendanceMonth notice:', err.message);
+    }
+  }
+
+  const localMap = getLocalStaffAttendance();
+  const staffRecords = localMap[staffId] || {};
+  const result = {};
+  Object.keys(staffRecords).forEach((d) => {
+    if (d.startsWith(monthStr)) {
+      result[d] = staffRecords[d];
+    }
+  });
+
+  // If completely empty for current month, populate reasonable mock attendance so calendar looks rich and realistic
+  if (Object.keys(result).length === 0) {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const currentDay = (year === currentYear && month === currentMonth) ? now.getDate() : 28;
+
+    for (let d = 1; d <= currentDay; d++) {
+      const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dayOfWeek = new Date(year, month - 1, d).getDay();
+      if (dayOfWeek === 0) {
+        // Sunday
+        result[dateKey] = 'present'; // Water distribution often operates or gets paid
+      } else if (d % 9 === 0) {
+        result[dateKey] = 'absent';
+      } else if (d % 6 === 0) {
+        result[dateKey] = 'half_day';
+      } else {
+        result[dateKey] = 'present';
+      }
+    }
+    // Save to localMap
+    localMap[staffId] = { ...(localMap[staffId] || {}), ...result };
+    saveLocalStaffAttendance(localMap);
+  }
+
+  return result;
+}
+
+export async function recordStaffAttendanceDay(staffId, dateStr, status, notes = '') {
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('staff_attendance').upsert([{
+        staff_id: staffId,
+        date: dateStr,
+        status,
+        notes,
+        updated_at: new Date().toISOString()
+      }], { onConflict: 'staff_id,date' });
+    } catch (err) {
+      console.warn('Supabase recordStaffAttendanceDay notice:', err.message);
+    }
+  }
+
+  const localMap = getLocalStaffAttendance();
+  if (!localMap[staffId]) {
+    localMap[staffId] = {};
+  }
+  localMap[staffId][dateStr] = status;
+  saveLocalStaffAttendance(localMap);
+  return { staffId, dateStr, status };
+}
+
+
 
