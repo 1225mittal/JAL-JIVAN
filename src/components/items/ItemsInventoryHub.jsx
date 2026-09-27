@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Package,
   Search,
@@ -19,12 +19,16 @@ import {
   Save,
   Scan,
   Download,
-  ArrowLeft
+  ArrowLeft,
+  FolderEdit,
+  CheckSquare
 } from 'lucide-react';
 import {
   fetchInventoryItems,
   saveInventoryItem,
   deleteInventoryItem,
+  bulkDeleteInventoryItems,
+  bulkUpdateInventoryCategory,
   isSupabaseConfigured
 } from '../../lib/supabase';
 import BarcodeScannerModal from '../BarcodeScannerModal';
@@ -43,6 +47,14 @@ export default function ItemsInventoryHub({
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortField, setSortField] = useState('item_name');
   const [sortOrder, setSortOrder] = useState('asc'); // 'asc' | 'desc'
+
+  // Multi-Select & Bulk Actions
+  const [selectedItemIds, setSelectedItemIds] = useState(new Set());
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [bulkCategoryInput, setBulkCategoryInput] = useState('');
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const masterCheckboxRef = useRef(null);
 
   // Edit / Create Drawer Modal State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -235,6 +247,111 @@ export default function ItemsInventoryHub({
     }
   };
 
+  // Multi-Select Visible IDs & Indeterminate State
+  const visibleIds = useMemo(() => (filteredItems || []).map((i) => i.id), [filteredItems]);
+  const selectedVisibleCount = useMemo(() => {
+    return visibleIds.filter((id) => selectedItemIds.has(id)).length;
+  }, [visibleIds, selectedItemIds]);
+
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+  const isIndeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length;
+
+  useEffect(() => {
+    if (masterCheckboxRef.current) {
+      masterCheckboxRef.current.indeterminate = isIndeterminate;
+    }
+  }, [isIndeterminate]);
+
+  // Toggle all visible rows
+  const handleToggleSelectAll = () => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  // Toggle single row
+  const handleToggleRow = (id) => {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  // Deselect All
+  const handleDeselectAll = () => {
+    setSelectedItemIds(new Set());
+  };
+
+  // Bulk Delete
+  const handleBulkDelete = async () => {
+    const count = selectedItemIds.size;
+    if (count === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${count} selected item(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from(selectedItemIds);
+      await bulkDeleteInventoryItems(ids);
+      setItems((prev) => prev.filter((i) => !selectedItemIds.has(i.id)));
+      setSelectedItemIds(new Set());
+      showToast(`Deleted ${count} item(s) successfully`, 'success');
+    } catch (err) {
+      console.error('Failed to bulk delete items:', err);
+      showToast(err.message || 'Failed to bulk delete items', 'error');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  // Open Bulk Category Modal
+  const handleOpenCategoryModal = () => {
+    if (selectedItemIds.size === 0) return;
+    setBulkCategoryInput(categories[0] || 'General');
+    setCustomCategoryInput('');
+    setIsCategoryModalOpen(true);
+  };
+
+  // Apply Bulk Category Update
+  const handleApplyBulkCategory = async (e) => {
+    e?.preventDefault();
+    const targetCategory = (bulkCategoryInput === '__custom__' ? customCategoryInput : bulkCategoryInput).trim();
+    if (!targetCategory) {
+      showToast('Please enter or select a category', 'error');
+      return;
+    }
+
+    const count = selectedItemIds.size;
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from(selectedItemIds);
+      await bulkUpdateInventoryCategory(ids, targetCategory);
+      setItems((prev) =>
+        prev.map((i) => (selectedItemIds.has(i.id) ? { ...i, category: targetCategory } : i))
+      );
+      setSelectedItemIds(new Set());
+      setIsCategoryModalOpen(false);
+      showToast(`Category updated to "${targetCategory}" for ${count} item(s)`, 'success');
+    } catch (err) {
+      console.error('Failed to update category:', err);
+      showToast(err.message || 'Failed to update category', 'error');
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Top Header */}
@@ -413,12 +530,69 @@ export default function ItemsInventoryHub({
         </div>
       </div>
 
+      {/* Sticky Bulk Actions Bar */}
+      {selectedItemIds.size > 0 && (
+        <div className="sticky top-2 z-20 p-3 rounded-2xl bg-indigo-950/95 border-2 border-indigo-500/60 shadow-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-7 h-7 rounded-xl bg-indigo-500/30 text-indigo-300 font-black text-xs border border-indigo-400/40">
+              {selectedItemIds.size}
+            </span>
+            <span className="text-sm font-bold text-white tracking-wide">
+              {selectedItemIds.size} {selectedItemIds.size === 1 ? 'Item' : 'Items'} Selected
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={handleOpenCategoryModal}
+              disabled={isBulkProcessing}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-200 hover:text-white font-bold text-xs border border-indigo-500/30 transition shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <FolderEdit className="w-4 h-4 text-indigo-400" />
+              <span>Change Category</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={isBulkProcessing}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 hover:text-white font-bold text-xs border border-rose-500/30 transition shadow-sm cursor-pointer disabled:opacity-50"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Bulk Delete</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDeselectAll}
+              disabled={isBulkProcessing}
+              className="flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 font-semibold text-xs border border-slate-700 transition cursor-pointer"
+              title="Deselect all items"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Deselect All</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Items Table */}
       <div className="rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden shadow-xl">
         <div className="w-full overflow-x-auto">
           <table className="w-full text-left text-xs whitespace-nowrap">
             <thead>
               <tr className="bg-slate-950 border-b border-slate-800 text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                <th className="py-3 px-3 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    ref={masterCheckboxRef}
+                    checked={allVisibleSelected}
+                    onChange={handleToggleSelectAll}
+                    className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-slate-700 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                    title="Select / Deselect all visible items"
+                  />
+                </th>
                 <th
                   onClick={() => handleSort('barcode')}
                   className="py-3 px-3 cursor-pointer hover:text-white transition"
@@ -465,6 +639,7 @@ export default function ItemsInventoryHub({
             </thead>
             <tbody className="divide-y divide-slate-800/80">
               {(filteredItems || []).map((item) => {
+                const isSelected = selectedItemIds.has(item.id);
                 const qty = Number(item?.stock_qty) || 0;
                 const isOut = qty <= 0;
                 const isLow = qty > 0 && qty < 10;
@@ -473,13 +648,25 @@ export default function ItemsInventoryHub({
                   <tr
                     key={item.id}
                     className={`transition-colors ${
-                      isOut
+                      isSelected
+                        ? 'bg-indigo-950/40 ring-1 ring-inset ring-indigo-500/40'
+                        : isOut
                         ? 'bg-rose-950/10 hover:bg-rose-950/20'
                         : isLow
                         ? 'bg-amber-950/10 hover:bg-amber-950/20'
                         : 'hover:bg-slate-800/40'
                     }`}
                   >
+                    {/* Row Selection Checkbox */}
+                    <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleRow(item.id)}
+                        className="w-4 h-4 rounded text-indigo-600 bg-slate-950 border-slate-700 focus:ring-indigo-500 cursor-pointer accent-indigo-600"
+                      />
+                    </td>
+
                     {/* Barcode */}
                     <td className="py-2.5 px-3">
                       {item.barcode ? (
@@ -584,7 +771,7 @@ export default function ItemsInventoryHub({
 
               {filteredItems.length === 0 && (
                 <tr>
-                  <td colSpan="10" className="py-12 text-center text-slate-500">
+                  <td colSpan="11" className="py-12 text-center text-slate-500">
                     <Package className="w-8 h-8 mx-auto text-slate-600 mb-2" />
                     <p className="font-semibold">No items match your filter criteria.</p>
                     <button
@@ -793,6 +980,86 @@ export default function ItemsInventoryHub({
           onClose={() => setIsBarcodeScannerOpen(false)}
           onScan={handleBarcodeScanned}
         />
+      )}
+
+      {/* Bulk Change Category Modal */}
+      {isCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <FolderEdit className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-white text-base">Bulk Change Category</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Apply a new category to all <strong className="text-white font-mono">{selectedItemIds.size}</strong> selected items:
+            </p>
+
+            <form onSubmit={handleApplyBulkCategory} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Select Category
+                </label>
+                <select
+                  value={bulkCategoryInput}
+                  onChange={(e) => setBulkCategoryInput(e.target.value)}
+                  className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
+                >
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Enter Custom Category Name...</option>
+                </select>
+              </div>
+
+              {bulkCategoryInput === '__custom__' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Custom Category Name
+                  </label>
+                  <input
+                    type="text"
+                    value={customCategoryInput}
+                    onChange={(e) => setCustomCategoryInput(e.target.value)}
+                    placeholder="e.g. Beverages, Dairy, Snacks..."
+                    autoFocus
+                    required
+                    className="w-full h-9 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isBulkProcessing}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-lg shadow-indigo-600/20 disabled:opacity-50 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{isBulkProcessing ? 'Updating...' : `Update (${selectedItemIds.size}) Items`}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

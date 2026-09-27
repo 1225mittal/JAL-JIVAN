@@ -2802,6 +2802,7 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       barcode: (item.barcode || '').toString().trim() || null,
       item_name: (item.item_name || 'Item').toString().trim(),
       hsn_code: (item.hsn_code || '').toString().trim() || null,
+      unit: (item.unit || 'PCS').toString().trim(),
       quantity: qty,
       purchase_price: purchasePrice,
       price_before_gst: purchasePrice,
@@ -2818,6 +2819,7 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       discount: Number(item.discount) || 0,
       price_after_gst: Number(total.toFixed(2)),
       total_amount: Number(total.toFixed(2)),
+      landed_cost_per_unit: qty > 0 ? Number((total / qty).toFixed(2)) : total,
       mrp: Number(item.mrp) || 0
     };
   });
@@ -3925,7 +3927,7 @@ export async function saveInventoryItem(item) {
     min_stock_level: Number(item.min_stock_level) || 10,
     hsn_code: (item.hsn_code || '').toString().trim() || null,
     gst_pct: Number(item.gst_pct) || 18,
-    unit: item.unit || 'Unit',
+    unit: item.unit || 'PCS',
     updated_at: new Date().toISOString()
   };
 
@@ -3980,6 +3982,43 @@ export async function deleteInventoryItem(id) {
   return true;
 }
 
+export async function bulkDeleteInventoryItems(ids = []) {
+  if (!Array.isArray(ids) || ids.length === 0) return true;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('inventory_items').delete().in('id', ids);
+    } catch (e) {
+      console.warn('bulkDeleteInventoryItems supabase warning:', e);
+    }
+  }
+  const idSet = new Set(ids);
+  const existing = getLocalInventoryItems();
+  saveLocalInventoryItems(existing.filter((it) => !idSet.has(it.id)));
+  return true;
+}
+
+export async function bulkUpdateInventoryCategory(ids = [], category) {
+  if (!Array.isArray(ids) || ids.length === 0 || !category) return true;
+  const trimmedCategory = category.trim();
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('inventory_items')
+        .update({ category: trimmedCategory, updated_at: new Date().toISOString() })
+        .in('id', ids);
+    } catch (e) {
+      console.warn('bulkUpdateInventoryCategory supabase warning:', e);
+    }
+  }
+  const idSet = new Set(ids);
+  const existing = getLocalInventoryItems();
+  const updated = existing.map((it) =>
+    idSet.has(it.id) ? { ...it, category: trimmedCategory, updated_at: new Date().toISOString() } : it
+  );
+  saveLocalInventoryItems(updated);
+  return true;
+}
+
 // Automatic stock sync on purchase invoice commit (Requirements 5 & 6)
 export async function syncInventoryFromPurchaseItems(itemsData = []) {
   if (!Array.isArray(itemsData) || itemsData.length === 0) return [];
@@ -3994,6 +4033,7 @@ export async function syncInventoryFromPurchaseItems(itemsData = []) {
     const mrp = Number(inwardItem.mrp) || 0;
     const gstPct = Number(inwardItem.gst_pct ?? inwardItem.gst_rate) || 18;
     const hsn = (inwardItem.hsn_code || '').toString().trim();
+    const unit = (inwardItem.unit || 'PCS').toString().trim();
 
     // Match by barcode, or fallback to exact/fuzzy name match
     let matchIndex = -1;
@@ -4013,6 +4053,7 @@ export async function syncInventoryFromPurchaseItems(itemsData = []) {
       const updatedItem = {
         ...existing,
         stock_qty: newStock,
+        unit: inwardItem.unit || existing.unit || 'PCS',
         cost_price: purchaseRate > 0 ? purchaseRate : existing.cost_price,
         mrp: mrp > 0 ? mrp : existing.mrp,
         barcode: existing.barcode || rawBarcode || null,
@@ -4029,6 +4070,7 @@ export async function syncInventoryFromPurchaseItems(itemsData = []) {
             .from('inventory_items')
             .update({
               stock_qty: updatedItem.stock_qty,
+              unit: updatedItem.unit,
               cost_price: updatedItem.cost_price,
               mrp: updatedItem.mrp,
               barcode: updatedItem.barcode,
@@ -4051,7 +4093,7 @@ export async function syncInventoryFromPurchaseItems(itemsData = []) {
         min_stock_level: 10,
         hsn_code: hsn || null,
         gst_pct: gstPct,
-        unit: 'Unit',
+        unit: unit || 'PCS',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

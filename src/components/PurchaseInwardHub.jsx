@@ -64,6 +64,8 @@ import {
   isSupabaseConfigured
 } from '../lib/supabase';
 
+export const PURCHASE_UNITS = ['PCS', 'KG', 'GM', 'LTR', 'ML', 'BAG', 'BOX', 'PACK', 'TIN'];
+
 export default function PurchaseInwardHub({
   onBackToHub,
   showToast = () => {}
@@ -615,6 +617,7 @@ export default function PurchaseInwardHub({
               barcode: it.barcode || '',
               item_name: it.item_name || `Item ${idx + 1}`,
               hsn_code: it.hsn_code || '',
+              unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
               quantity: qty,
               mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
               rate: rate,
@@ -642,6 +645,7 @@ export default function PurchaseInwardHub({
             barcode: '',
             item_name: 'New Product Item',
             hsn_code: '2201',
+            unit: 'PCS',
             quantity: 1,
             mrp: 100,
             rate: 70,
@@ -731,6 +735,7 @@ export default function PurchaseInwardHub({
         barcode: '',
         item_name: '',
         hsn_code: '',
+        unit: 'PCS',
         quantity: 1,
         mrp: 0,
         rate: 0,
@@ -778,12 +783,13 @@ export default function PurchaseInwardHub({
     }
   };
 
-  // Calculations for Totals Card
-  const { totalTaxable, totalCgst, totalSgst, totalCess, totalTax, grandTotal } = useMemo(() => {
+  // Calculations for Totals Card & Indian GST Invoice Round-Off Matching
+  const { totalTaxable, totalCgst, totalSgst, totalCess, totalTax, subtotal, roundOff, grandTotal } = useMemo(() => {
     let taxable = 0;
     let cgst = 0;
     let sgst = 0;
     let cess = 0;
+    let rowSubtotal = 0;
 
     (items || []).forEach((it) => {
       if (!it) return;
@@ -791,10 +797,13 @@ export default function PurchaseInwardHub({
       cgst += Number(it.cgst_amount) || 0;
       sgst += Number(it.sgst_amount) || 0;
       cess += Number(it.cess_amount || it.cess) || 0;
+      rowSubtotal += Number(it.total_amount ?? it.price_after_gst) || 0;
     });
 
     const tax = cgst + sgst + cess;
-    const total = taxable + tax;
+    const cleanSubtotal = +rowSubtotal.toFixed(2);
+    const roundedNetTotal = Math.round(cleanSubtotal);
+    const roundOffAmt = +(roundedNetTotal - cleanSubtotal).toFixed(2);
 
     return {
       totalTaxable: +taxable.toFixed(2),
@@ -802,7 +811,9 @@ export default function PurchaseInwardHub({
       totalSgst: +sgst.toFixed(2),
       totalCess: +cess.toFixed(2),
       totalTax: +tax.toFixed(2),
-      grandTotal: +total.toFixed(2)
+      subtotal: cleanSubtotal,
+      roundOff: roundOffAmt,
+      grandTotal: roundedNetTotal
     };
   }, [items]);
 
@@ -847,6 +858,9 @@ export default function PurchaseInwardHub({
         bank_ifsc: bankIfsc || null,
         account_no: bankAccountNo || null,
         ifsc: bankIfsc || null,
+        subtotal: subtotal,
+        round_off_amount: roundOff,
+        round_off: roundOff,
         total_taxable_amount: totalTaxable,
         total_tax_amount: totalTax,
         grand_total: grandTotal,
@@ -859,6 +873,8 @@ export default function PurchaseInwardHub({
           total_sgst: totalSgst,
           total_cess: totalCess,
           total_tax: totalTax,
+          subtotal: subtotal,
+          round_off: roundOff,
           grand_total: grandTotal
         },
         status: 'verified'
@@ -869,21 +885,29 @@ export default function PurchaseInwardHub({
         invoicePayload.extracted_json = rawOcrData;
       }
 
-      // Format items with detailed GST fields for purchase_items & inventory sync
-      const formattedItems = (items || []).map((it) => ({
-        ...it,
-        purchase_price: Number(it.rate ?? it.price_before_gst) || 0,
-        rate: Number(it.rate ?? it.price_before_gst) || 0,
-        taxable_amount: Number(it.taxable_amount) || 0,
-        gst_pct: Number(it.gst_pct ?? it.gst_rate) || 0,
-        cgst_pct: Number(it.cgst_pct) || 0,
-        cgst_amount: Number(it.cgst_amount) || 0,
-        sgst_pct: Number(it.sgst_pct) || 0,
-        sgst_amount: Number(it.sgst_amount) || 0,
-        cess_pct: Number(it.cess_pct) || 0,
-        cess_amount: Number(it.cess_amount ?? it.cess) || 0,
-        total_amount: Number(it.total_amount ?? it.price_after_gst) || 0
-      }));
+      // Format items with detailed GST fields & unit for purchase_items & inventory sync
+      const formattedItems = (items || []).map((it) => {
+        const qty = Number(it.quantity) || 1;
+        const total = Number(it.total_amount ?? it.price_after_gst) || 0;
+        const landedCost = qty > 0 ? Number((total / qty).toFixed(2)) : total;
+        return {
+          ...it,
+          unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
+          quantity: qty,
+          landed_cost_per_unit: landedCost,
+          purchase_price: Number(it.rate ?? it.price_before_gst) || 0,
+          rate: Number(it.rate ?? it.price_before_gst) || 0,
+          taxable_amount: Number(it.taxable_amount) || 0,
+          gst_pct: Number(it.gst_pct ?? it.gst_rate) || 0,
+          cgst_pct: Number(it.cgst_pct) || 0,
+          cgst_amount: Number(it.cgst_amount) || 0,
+          sgst_pct: Number(it.sgst_pct) || 0,
+          sgst_amount: Number(it.sgst_amount) || 0,
+          cess_pct: Number(it.cess_pct) || 0,
+          cess_amount: Number(it.cess_amount ?? it.cess) || 0,
+          total_amount: total
+        };
+      });
 
       // 1. Commit to purchase_invoices and purchase_items + auto-sync to inventory_items
       const saved = await savePurchaseInvoice(invoicePayload, formattedItems);
@@ -1622,6 +1646,7 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2.5 min-w-[200px]">Item Name</th>
                           <th className="py-2.5 px-2 min-w-[75px]">HSN</th>
                           <th className="py-2.5 px-2 min-w-[65px] text-right">Qty</th>
+                          <th className="py-2.5 px-2 min-w-[75px]">Unit</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">MRP (₹)</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">Rate (₹)</th>
                           <th className="py-2.5 px-2 min-w-[90px] text-right">Taxable (₹)</th>
@@ -1629,6 +1654,7 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2 min-w-[80px] text-right">CGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">SGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">CESS (₹)</th>
+                          <th className="py-2.5 px-2 min-w-[110px] text-right">Cost/Unit (Tax Incl.)</th>
                           <th className="py-2.5 px-2 min-w-[95px] text-right">Total (₹)</th>
                           <th className="py-2.5 px-2 min-w-[45px] text-center">Action</th>
                         </tr>
@@ -1704,6 +1730,21 @@ export default function PurchaseInwardHub({
                                 />
                               </td>
 
+                              {/* Unit */}
+                              <td className="py-2 px-2 min-w-[75px]">
+                                <select
+                                  value={it.unit || 'PCS'}
+                                  onChange={(e) => handleItemFieldChange(idx, 'unit', e.target.value)}
+                                  className="w-full h-8 px-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-semibold text-xs focus:outline-none cursor-pointer"
+                                >
+                                  {PURCHASE_UNITS.map((u) => (
+                                    <option key={u} value={u}>
+                                      {u}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+
                               {/* MRP */}
                               <td className="py-2 px-2 min-w-[75px]">
                                 <input
@@ -1773,6 +1814,23 @@ export default function PurchaseInwardHub({
                                 />
                               </td>
 
+                              {/* Effective Landed Cost / Unit (After Tax) */}
+                              <td className="py-2 px-2 min-w-[110px] text-right font-mono">
+                                {(() => {
+                                  const rowQty = Number(it.quantity) || 1;
+                                  const rowTotal = Number(it.total_amount ?? it.price_after_gst ?? 0);
+                                  const effectiveCost = rowQty > 0 ? (rowTotal / rowQty) : rowTotal;
+                                  return (
+                                    <span
+                                      className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] shadow-sm"
+                                      title="Effective Landed Cost per unit including all taxes & cess"
+                                    >
+                                      ₹{effectiveCost.toFixed(2)}
+                                    </span>
+                                  );
+                                })()}
+                              </td>
+
                               {/* Total */}
                               <td className="py-2 px-2 min-w-[95px] text-right font-mono font-bold text-emerald-400">
                                 ₹{Number(it.total_amount ?? it.price_after_gst ?? 0).toFixed(2)}
@@ -1795,7 +1853,7 @@ export default function PurchaseInwardHub({
 
                         {items.length === 0 && (
                           <tr>
-                            <td colSpan="13" className="py-8 text-center text-slate-500">
+                            <td colSpan="15" className="py-8 text-center text-slate-500">
                               No line items entered yet. Click "Add Line Item" or click "⚡ Process This Bill" from the queue above.
                             </td>
                           </tr>
@@ -1825,6 +1883,12 @@ export default function PurchaseInwardHub({
                           <span className="font-mono font-bold text-cyan-400">₹{totalCess.toFixed(2)}</span>
                         </div>
                       )}
+                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
+                        <span className="text-slate-400">Round Off: </span>
+                        <span className={`font-mono font-bold ${roundOff === 0 ? 'text-slate-400' : roundOff > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {roundOff >= 0 ? `+₹${roundOff.toFixed(2)}` : `-₹${Math.abs(roundOff).toFixed(2)}`}
+                        </span>
+                      </div>
                       <div className="px-3.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
                         <span className="font-semibold text-emerald-400">Grand Total: </span>
                         <span className="font-mono font-black text-emerald-300 text-sm">₹{grandTotal.toFixed(2)}</span>
@@ -2263,7 +2327,7 @@ export default function PurchaseInwardHub({
                             </td>
 
                             <td className="py-2 px-2 text-right font-bold text-emerald-400">
-                              {item.quantity}
+                              {item.quantity} {item.unit ? <span className="text-[10px] text-slate-400 font-normal">{item.unit}</span> : ''}
                             </td>
 
                             <td className="py-2 px-2 text-right font-mono text-slate-300">
@@ -2285,13 +2349,21 @@ export default function PurchaseInwardHub({
                 </div>
 
                 {/* Footer Tax Summary */}
-                <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs">
+                <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2">
                   <span className="text-slate-400">
                     Total Taxable: <strong className="text-white">₹{Number(selectedLedgerInvoice.total_taxable_amount || 0).toFixed(2)}</strong>
                   </span>
                   <span className="text-slate-400">
                     Total Tax: <strong className="text-amber-400">₹{Number(selectedLedgerInvoice.total_tax_amount || 0).toFixed(2)}</strong>
                   </span>
+                  {Boolean(selectedLedgerInvoice.round_off_amount ?? selectedLedgerInvoice.round_off) && (
+                    <span className="text-slate-400">
+                      Round Off: <strong className="font-mono text-slate-300">
+                        {Number(selectedLedgerInvoice.round_off_amount ?? selectedLedgerInvoice.round_off) >= 0 ? '+' : ''}
+                        ₹{Number(selectedLedgerInvoice.round_off_amount ?? selectedLedgerInvoice.round_off ?? 0).toFixed(2)}
+                      </strong>
+                    </span>
+                  )}
                   <span className="text-emerald-400 font-bold">
                     Grand Total: <strong className="font-mono text-sm">₹{Number(selectedLedgerInvoice.grand_total || 0).toFixed(2)}</strong>
                   </span>
