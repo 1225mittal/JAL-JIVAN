@@ -34,7 +34,8 @@ import {
   Package,
   Banknote,
   Radio,
-  Camera
+  Camera,
+  LogOut
 } from 'lucide-react';
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
@@ -114,6 +115,19 @@ export default function DriverPortal({
   onAcceptOrder
 }) {
   const todayStr = new Date().toISOString().split('T')[0];
+
+  // Logout / Exit Handler to return to /staff
+  const handleLogoutExit = () => {
+    try {
+      localStorage.removeItem('active_module');
+      localStorage.removeItem('driver_session');
+      localStorage.removeItem('jal_jivan_current_driver');
+      if (typeof onLogout === 'function') {
+        onLogout();
+      }
+    } catch (e) {}
+    window.location.href = '/staff';
+  };
 
   // Login Form State
   const [phone, setPhone] = useState('');
@@ -1009,6 +1023,22 @@ export default function DriverPortal({
   if (!currentDriver) {
     return (
       <div className="max-w-md mx-auto py-4 sm:py-8 px-2">
+        <div className="flex justify-between items-center mb-3 px-1">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Staff & Delivery Portal</span>
+          </div>
+          <button
+            type="button"
+            id="driver-login-exit-btn"
+            onClick={handleLogoutExit}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold transition shadow-sm"
+            title="Logout / Exit"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Logout / Exit</span>
+          </button>
+        </div>
         <div className="glass-panel p-6 sm:p-8 rounded-3xl border border-slate-800 shadow-2xl space-y-6">
           {/* Logo & Welcome */}
           <div className="text-center space-y-2">
@@ -1126,6 +1156,30 @@ export default function DriverPortal({
 
   return (
     <div className="max-w-2xl mx-auto space-y-4 pb-16 pt-2">
+      {/* Top Header Bar with Clean Logout / Exit */}
+      <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-md">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white shadow-md shadow-emerald-600/20 shrink-0">
+            <Truck className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="font-extrabold text-white text-xs sm:text-sm tracking-tight truncate">
+              JAL-JIVAN Delivery Console
+            </h1>
+            <p className="text-[10px] text-slate-400 truncate">Driver Duty & Task Console</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          id="driver-top-logout-exit-btn"
+          onClick={handleLogoutExit}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold transition shadow-sm shrink-0"
+          title="Logout / Exit"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          <span>Logout / Exit</span>
+        </button>
+      </div>
       {/* Geoguard Alert Overlay if Internet or GPS lost */}
       {(!isOnline || !hasGps) && !guardDismissed && (
         <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-fade-in select-none">
@@ -1204,7 +1258,7 @@ export default function DriverPortal({
           </div>
 
           {/* THE ONLY PUNCH OUT / PUNCH IN BUTTON ON THE ENTIRE SCREEN */}
-          <div className="sm:self-center shrink-0">
+          <div className="flex items-center gap-2 sm:self-center shrink-0">
             {isPunchedIn ? (
               <button
                 type="button"
@@ -1239,6 +1293,17 @@ export default function DriverPortal({
                 )}
               </button>
             )}
+
+            <button
+              type="button"
+              id="driver-profile-logout-exit-btn"
+              onClick={handleLogoutExit}
+              className="px-3 py-2.5 rounded-xl bg-slate-800/90 hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-500/30 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 shrink-0"
+              title="Logout and Exit to Staff"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Logout / Exit</span>
+            </button>
           </div>
         </div>
       </div>

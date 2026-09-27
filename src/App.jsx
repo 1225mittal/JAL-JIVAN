@@ -707,6 +707,37 @@ export default function App() {
   };
 
   // Determine which sub-view is active
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname.toLowerCase() : '';
+  const isDriverOrStaff =
+    currentModule === 'driver' ||
+    currentPath.includes('/staff') ||
+    currentPath.includes('/driver');
+
+  // 1. When currentModule === 'driver' OR pathname includes '/staff', render ONLY DriverPortal
+  // It completely bypasses the Admin Hub, the Admin header (Navbar), and any Admin navigation bars.
+  if (isDriverOrStaff) {
+    return (
+      <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
+        <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
+          <ErrorBoundary title="Staff & Delivery Portal">
+            <DriverPortal
+              currentDriver={currentDriver}
+              drivers={drivers}
+              orders={orders}
+              onLogin={handleDriverLogin}
+              onLogout={handleDriverLogout}
+              onPinLocation={handlePinLocation}
+              onCompleteDelivery={handleCompleteDelivery}
+              onAcceptOrder={handleAcceptOrder}
+            />
+          </ErrorBoundary>
+        </main>
+        {/* Toast Feedback */}
+        <Toast toast={toast} onClose={() => setToast(null)} />
+      </div>
+    );
+  }
+
   const isViewAdmin = routeState.type.startsWith('admin');
   const isViewStaff = routeState.type === 'staff';
 
@@ -828,12 +859,12 @@ export default function App() {
                     title={
                       staffSession && !isAdminLoggedIn
                         ? 'Return to Staff Workspace'
-                        : 'Return to Master Hub'
+                        : 'Switch to Admin Hub'
                     }
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
                     <span>
-                      {staffSession && !isAdminLoggedIn ? '← Back to Workspace' : '← Back to Hub'}
+                      {staffSession && !isAdminLoggedIn ? '← Back to Workspace' : '← Switch to Admin Hub'}
                     </span>
                   </button>
                   <span className="text-slate-600 font-bold">/</span>
