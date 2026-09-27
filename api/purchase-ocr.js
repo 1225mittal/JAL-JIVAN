@@ -1,7 +1,7 @@
 /**
  * Backend Vision OCR Route for Indian GST B2B Wholesale / FMCG Tax Invoices
- * Uses Groq Vision LPU (llama-3.2-11b-vision-preview / llama-3.2-90b-vision-preview)
- * with automatic fallback to Gemini 1.5 Flash and intelligent sanitization.
+ * Uses Groq Vision LPU (qwen/qwen3.8-27b) and Gemini Vision (gemini-2.5-flash / gemini-1.5-flash)
+ * with dual OCR pipeline, graceful error tolerance, and intelligent sanitization.
  */
 
 // Helper to normalize Indian DD/MM/YYYY dates to ISO YYYY-MM-DD
@@ -407,121 +407,160 @@ Return ONLY a valid JSON object matching EXACTLY this structure with no markdown
       return res.status(200).json(postProcessInvoiceJson(demoData));
     }
 
-    let parsedResult = null;
-    let lastError = null;
+    // -------------------------------------------------------------
+    // DUAL OCR PIPELINE: GROQ VISION + GEMINI FLASH
+    // -------------------------------------------------------------
+    let groqData = null;
+    let groqError = null;
 
-    // -------------------------------------------------------------
-    // ATTEMPT 1: GROQ VISION LPU MODELS
-    // -------------------------------------------------------------
     if (groqApiKey) {
-      const groqVisionModels = [
-        'llama-3.2-11b-vision-preview',
-        'llama-3.2-90b-vision-preview'
-      ];
+      try {
+        const groqModel = 'qwen/qwen3.8-27b';
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${groqApiKey}`
+          },
+          body: JSON.stringify({
+            model: groqModel,
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: promptText },
+                  { type: 'image_url', image_url: { url: cleanImage } }
+                ]
+              }
+            ],
+            temperature: 0.1,
+            max_tokens: 3000
+          })
+        });
 
-      for (const model of groqVisionModels) {
-        try {
-          const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${groqApiKey}`
-            },
-            body: JSON.stringify({
-              model,
-              response_format: { type: 'json_object' },
-              messages: [
-                {
-                  role: 'user',
-                  content: [
-                    { type: 'text', text: promptText },
-                    { type: 'image_url', image_url: { url: cleanImage } }
-                  ]
-                }
-              ],
-              temperature: 0.1,
-              max_tokens: 3000
-            })
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            console.warn(`Groq Vision model ${model} error (${response.status}):`, errText);
-            lastError = new Error(`Groq ${model} status ${response.status}: ${errText}`);
-            continue;
-          }
-
+        if (response.ok) {
           const data = await response.json();
           const content = data?.choices?.[0]?.message?.content;
           if (content) {
             const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
-            parsedResult = JSON.parse(cleanJson);
-            break;
-          }
-        } catch (groqErr) {
-          console.warn(`Groq model ${model} exception:`, groqErr.message || groqErr);
-          lastError = groqErr;
-        }
-      }
-    }
-
-    // -------------------------------------------------------------
-    // ATTEMPT 2: GEMINI 1.5 FLASH VISION FALLBACK
-    // -------------------------------------------------------------
-    if (!parsedResult && geminiApiKey) {
-      try {
-        console.info('Switching to Gemini 1.5 Flash Vision OCR fallback...');
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
-        const geminiPayload = {
-          contents: [
-            {
-              parts: [
-                { text: `${promptText}\n\nIMPORTANT: Return ONLY raw JSON without markdown formatting.` },
-                {
-                  inline_data: {
-                    mime_type: mimeType || 'image/jpeg',
-                    data: base64Only
-                  }
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: 'application/json'
-          }
-        };
-
-        const geminiRes = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(geminiPayload)
-        });
-
-        if (geminiRes.ok) {
-          const geminiData = await geminiRes.json();
-          const geminiText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (geminiText) {
-            const cleanJson = geminiText.replace(/```json/g, '').replace(/```/g, '').trim();
-            parsedResult = JSON.parse(cleanJson);
+            groqData = JSON.parse(cleanJson);
           }
         } else {
-          const geminiErr = await geminiRes.text();
-          console.warn('Gemini OCR fallback error:', geminiErr);
+          const errText = await response.text();
+          groqError = new Error(`Groq status ${response.status}: ${errText}`);
+          console.warn('Groq OCR failed, falling back purely to Gemini:', groqError.message);
         }
-      } catch (geminiException) {
-        console.warn('Gemini OCR fallback exception:', geminiException.message || geminiException);
+      } catch (err) {
+        groqError = err;
+        console.warn('Groq OCR failed, falling back purely to Gemini:', err.message || err);
       }
     }
 
-    if (!parsedResult) {
+    let geminiData = null;
+    let geminiError = null;
+
+    if (geminiApiKey) {
+      const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+      for (const gModel of geminiModels) {
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${geminiApiKey}`;
+          const geminiPayload = {
+            contents: [
+              {
+                parts: [
+                  { text: `${promptText}\n\nIMPORTANT: Return ONLY raw JSON without markdown formatting.` },
+                  {
+                    inline_data: {
+                      mime_type: mimeType || 'image/jpeg',
+                      data: base64Only
+                    }
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: 'application/json'
+            }
+          };
+
+          const geminiRes = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(geminiPayload)
+          });
+
+          if (geminiRes.ok) {
+            const gData = await geminiRes.json();
+            const gText = gData?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (gText) {
+              const cleanJson = gText.replace(/```json/g, '').replace(/```/g, '').trim();
+              geminiData = JSON.parse(cleanJson);
+              break;
+            }
+          } else {
+            const gErr = await geminiRes.text();
+            geminiError = new Error(`Gemini ${gModel} status ${geminiRes.status}: ${gErr}`);
+            console.warn(`Gemini OCR failed on ${gModel}:`, gErr);
+          }
+        } catch (gEx) {
+          geminiError = gEx;
+          console.warn(`Gemini OCR exception on ${gModel}:`, gEx.message || gEx);
+        }
+      }
+    }
+
+    // Reconcile or Fallback:
+    // If both succeed, reconcile and pick the best math match.
+    // If only Gemini succeeds, use Gemini directly.
+    // If only Groq succeeds, use Groq directly.
+    let finalRaw = null;
+    if (geminiData && groqData) {
+      // Score mathematical consistency and item completeness
+      const evalAccuracy = (d) => {
+        let score = 0;
+        const itms = Array.isArray(d?.items) ? d.items : [];
+        const grandTot = Number(d?.grand_total || d?.totals?.grand_total) || 0;
+        let sum = 0;
+        itms.forEach((it) => {
+          sum += Number(it.total_amount ?? it.price_after_gst) || 0;
+        });
+        const diff = Math.abs(sum - grandTot);
+        if (diff < 0.05) score += 50;
+        else if (diff < 1.05) score += 40;
+        else if (diff < 5.0) score += 20;
+
+        score += Math.min(itms.length * 3, 30);
+        if (d?.vendor_gstin && d.vendor_gstin.length === 15) score += 10;
+        if (d?.invoice_no) score += 10;
+        return score;
+      };
+
+      const groqScore = evalAccuracy(groqData);
+      const geminiScore = evalAccuracy(geminiData);
+      finalRaw = groqScore >= geminiScore ? { ...groqData } : { ...geminiData };
+      const secondary = groqScore >= geminiScore ? geminiData : groqData;
+
+      // Fill in any missing vendor/invoice fields from secondary model
+      if (!finalRaw.vendor_gstin && secondary?.vendor_gstin) finalRaw.vendor_gstin = secondary.vendor_gstin;
+      if (!finalRaw.vendor_phone && secondary?.vendor_phone) finalRaw.vendor_phone = secondary.vendor_phone;
+      if (!finalRaw.vendor_address && secondary?.vendor_address) finalRaw.vendor_address = secondary.vendor_address;
+      if (!finalRaw.invoice_no && secondary?.invoice_no) finalRaw.invoice_no = secondary.invoice_no;
+    } else if (geminiData) {
+      finalRaw = geminiData;
+    } else if (groqData) {
+      finalRaw = groqData;
+    }
+
+    if (!finalRaw) {
       return res.status(502).json({
-        error: lastError?.message || 'Failed to extract invoice data using Groq Vision or fallback models.'
+        error: groqError?.message || geminiError?.message || 'Failed to extract invoice data using Groq Vision or Gemini Vision models.'
       });
     }
 
-    // Sanitize and normalize with domain rules
-    const finalSanitized = postProcessInvoiceJson(parsedResult);
+    // Sanitize and normalize with strict Indian GST domain rules
+    const finalSanitized = postProcessInvoiceJson(finalRaw);
     return res.status(200).json(finalSanitized);
   } catch (err) {
     console.error('purchase-ocr handler error:', err);

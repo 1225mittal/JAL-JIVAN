@@ -249,25 +249,37 @@ export function sanitizeIndianInvoiceOcr(raw) {
  * Call the backend vision route to parse an invoice with Groq Vision
  */
 export async function parseInvoiceWithGroq({ imageBase64, imageUrl, mimeType = 'image/jpeg', groqApiKey = '' }) {
-  const response = await fetch('/api/purchase-ocr', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      imageBase64,
-      imageUrl,
-      mimeType,
-      groqApiKey
-    })
-  });
+  try {
+    const response = await fetch('/api/purchase-ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64,
+        imageUrl,
+        mimeType,
+        groqApiKey
+      })
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `Server OCR Error (${response.status})`);
+    if (response.ok) {
+      const rawData = await response.json();
+      return sanitizeIndianInvoiceOcr(rawData);
+    }
+  } catch (apiErr) {
+    console.warn('API purchase-ocr route fetch error, trying direct dualOcrPipeline:', apiErr);
   }
 
-  const rawData = await response.json();
-  return sanitizeIndianInvoiceOcr(rawData);
+  // Graceful client-side fallback via dualOcrPipeline
+  const { runDualOcrPipeline } = await import('./dualOcrPipeline.js');
+  return runDualOcrPipeline(imageBase64 || imageUrl, { apiKey: groqApiKey, mimeType });
 }
+
+export {
+  callGroqVision,
+  callGeminiVision,
+  reconcileOrFallback,
+  runDualOcrPipeline
+} from './dualOcrPipeline.js';
 
 export default {
   normalizeIndianDate,

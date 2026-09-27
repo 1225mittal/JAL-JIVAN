@@ -26,8 +26,6 @@ If no product packaging or dates are clearly visible, return {"detected":false}.
 
     // Prioritize ultra-fast Groq LPU Vision models
     const visionModels = [
-      'llama-3.2-11b-vision-preview',
-      'llama-3.2-90b-vision-preview',
       'qwen/qwen3.8-27b'
     ];
     let lastError = null;
