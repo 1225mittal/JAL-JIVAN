@@ -54,7 +54,9 @@ import {
   updateDriverLocation,
   defaultStoreSettings,
   updateDriverHeartbeat,
-  createDamageExpiryItem
+  createDamageExpiryItem,
+  updateOrderLocation,
+  completeDelivery
 } from '../lib/supabase';
 import {
   calculateDistanceMeters,
@@ -106,15 +108,15 @@ import {
 } from '../lib/soundEffects';
 
 export default function DriverPortal({
-  currentDriver: propDriver,
+  currentDriver: propDriver = null,
   drivers = [],
   orders = [],
-  onLogin,
-  onLogout,
-  onBack,
-  onPinLocation,
-  onCompleteDelivery,
-  onAcceptOrder
+  onLogin = null,
+  onLogout = () => {},
+  onBack = () => {},
+  onPinLocation = () => {},
+  onCompleteDelivery = () => {},
+  onAcceptOrder = () => {}
 }) {
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -962,7 +964,11 @@ export default function DriverPortal({
         setOrdersList((prev) =>
           prev.map((o) => (o.id === orderId ? { ...o, latitude, longitude } : o))
         );
-        onPinLocation(orderId, latitude, longitude);
+        if (typeof onPinLocation === 'function') {
+          onPinLocation(orderId, latitude, longitude);
+        } else {
+          updateOrderLocation(orderId, latitude, longitude).catch(console.error);
+        }
         setPinningOrderId(null);
         fetchOrders();
       },
@@ -2421,8 +2427,10 @@ export default function DriverPortal({
                   : o
               )
             );
-            if (onCompleteDelivery) {
+            if (typeof onCompleteDelivery === 'function') {
               await onCompleteDelivery(orderId, podData);
+            } else {
+              await completeDelivery(orderId, podData);
             }
             fetchOrders();
           }}

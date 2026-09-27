@@ -710,7 +710,7 @@ export default function App() {
     }
   };
 
-  // Enforce strict role-based separation:
+  // Simple, resilient path checking for staff/driver route
   const isStaffRoute =
     typeof window !== 'undefined' &&
     (window.location.pathname.toLowerCase().includes('/staff') ||
@@ -718,31 +718,21 @@ export default function App() {
 
   const activeRole = typeof window !== 'undefined' ? localStorage.getItem('active_role') : null;
 
-  // If isStaffRoute is true OR active_role === 'driver':
-  // - Render ONLY <DriverPortal />.
-  // - DO NOT render <Navbar />, <AdminPanel />, <AdminHub />, or any Admin dispatch tabs.
-  // - Keep the driver completely contained inside the Driver app screen.
+  // When isStaffRoute is true OR activeRole === 'driver':
+  // Render ONLY the <DriverPortal /> component without ErrorBoundary, Navbar, or Admin panels.
   if (isStaffRoute || activeRole === 'driver') {
     return (
-      <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
-        <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
-          <ErrorBoundary title="Staff & Delivery Portal">
-            <DriverPortal
-              currentDriver={currentDriver}
-              drivers={drivers}
-              orders={orders}
-              onLogin={handleDriverLogin}
-              onLogout={handleDriverLogout}
-              onBack={handleBackToHub}
-              onPinLocation={handlePinLocation}
-              onCompleteDelivery={handleCompleteDelivery}
-              onAcceptOrder={handleAcceptOrder}
-            />
-          </ErrorBoundary>
-        </main>
-        {/* Toast Feedback */}
-        <Toast toast={toast} onClose={() => setToast(null)} />
-      </div>
+      <DriverPortal
+        currentDriver={currentDriver}
+        drivers={drivers}
+        orders={orders}
+        onLogin={handleDriverLogin}
+        onLogout={handleDriverLogout}
+        onBack={handleBackToHub}
+        onPinLocation={handlePinLocation}
+        onCompleteDelivery={handleCompleteDelivery}
+        onAcceptOrder={handleAcceptOrder}
+      />
     );
   }
 
