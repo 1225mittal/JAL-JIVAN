@@ -54,33 +54,23 @@ export const getInitialModule = () => {
 
   // Explicit path matching takes absolute priority
   if (path.includes('/staff') || path.includes('/driver')) {
-    localStorage.setItem('active_module', 'driver');
     return 'driver';
   }
   if (path.includes('/admin/purchase') || queryModule === 'purchase') {
-    localStorage.setItem('active_module', 'purchase');
     return 'purchase';
   }
   if (path.includes('/admin/delivery') || queryModule === 'delivery') {
-    localStorage.setItem('active_module', 'delivery');
     return 'delivery';
   }
   if (path.includes('/admin/damage') || queryModule === 'damage') {
-    localStorage.setItem('active_module', 'damage');
     return 'damage';
   }
-  if (path === '/admin' || path === '/admin/' || path === '/admin/hub' || path.startsWith('/admin/login') || queryModule === 'hub') {
-    localStorage.setItem('active_module', 'hub');
-    return 'hub';
-  }
-
-  // If root '/' or unrecognized, use saved localStorage or fallback to 'hub'
-  return localStorage.getItem('active_module') || 'hub';
+  return 'hub';
 };
 
 export function parseRoute() {
   if (typeof window === 'undefined') {
-    return { type: 'driver', module: null, pathname: '/' };
+    return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
   }
 
   let pathname = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
@@ -99,12 +89,17 @@ export function parseRoute() {
     return { type: 'staff', module: null, pathname: '/staff' };
   }
 
-  // Route 2: Dedicated Admin Login (/admin/login)
+  // Route 2: Dedicated Driver Portal (/driver)
+  if (pathname === '/driver') {
+    return { type: 'driver', module: null, pathname: '/driver' };
+  }
+
+  // Route 3: Dedicated Admin Login (/admin/login)
   if (pathname === '/admin/login') {
     return { type: 'admin-login', module: null, pathname: '/admin/login' };
   }
 
-  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
+  // Route 4: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/sales, etc.)
   const adminModMatch = pathname.match(
     /^\/admin\/(delivery|damage|purchase|sales|marketing|finance|staff|settings|config)$/
   );
@@ -114,14 +109,9 @@ export function parseRoute() {
     return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
   }
 
-  // Route 4: Master Executive Hub (/admin or /admin/hub)
+  // Route 5: Master Executive Hub (/admin or /admin/hub)
   if (pathname === '/admin' || pathname === '/admin/hub' || pathname === '/hub') {
     return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
-  }
-
-  // Route 5: Dedicated Driver Portal (/driver)
-  if (pathname === '/driver') {
-    return { type: 'driver', module: null, pathname: '/driver' };
   }
 
   // Handle legacy query params (?module=...) only for root '/' or fallback
@@ -133,8 +123,8 @@ export function parseRoute() {
     return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
   }
 
-  // Route 6: Default Driver Portal (/)
-  return { type: 'driver', module: null, pathname: '/' };
+  // Route 6: Root (/) defaults to Master Executive Hub (/admin)
+  return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
 }
 
 function getModuleTitle(moduleKey) {
@@ -711,16 +701,16 @@ export default function App() {
   };
 
   // Simple, resilient path checking for staff/driver route
+  // ONLY URLs explicitly containing /staff or /driver render DriverPortal
   const isStaffRoute =
     typeof window !== 'undefined' &&
     (window.location.pathname.toLowerCase().includes('/staff') ||
-     window.location.pathname.toLowerCase().includes('/driver'));
+     window.location.pathname.toLowerCase().includes('/driver') ||
+     (window.location.hash && (window.location.hash.toLowerCase().includes('/staff') || window.location.hash.toLowerCase().includes('/driver'))));
 
-  const activeRole = typeof window !== 'undefined' ? localStorage.getItem('active_role') : null;
-
-  // When isStaffRoute is true OR activeRole === 'driver':
+  // When isStaffRoute is true:
   // Render ONLY the <DriverPortal /> component without ErrorBoundary, Navbar, or Admin panels.
-  if (isStaffRoute || activeRole === 'driver') {
+  if (isStaffRoute) {
     return (
       <DriverPortal
         currentDriver={currentDriver}
@@ -747,8 +737,6 @@ export default function App() {
         isAdminView={isViewAdmin}
         adminSubView={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : '')}
         onNavigateToAdminHub={() => navigate('/admin')}
-        currentDriver={currentDriver}
-        onDriverLogout={handleDriverLogout}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
@@ -918,19 +906,16 @@ export default function App() {
           )
         ) : (
           /* ======================================================== */
-          /* ROUTE 5: / (EXCLUSIVELY DRIVER PORTAL) */
+          /* ROOT / OR DEFAULT EXECUTIVE ADMIN HUB */
           /* ======================================================== */
-          <DriverPortal
-            currentDriver={currentDriver}
-            drivers={drivers}
-            orders={orders}
-            onLogin={handleDriverLogin}
-            onLogout={handleDriverLogout}
-            onBack={handleBackToHub}
-            onPinLocation={handlePinLocation}
-            onCompleteDelivery={handleCompleteDelivery}
-            onAcceptOrder={handleAcceptOrder}
-          />
+          isAdminLoggedIn ? (
+            <AdminHub onNavigate={(path) => navigate(path)} />
+          ) : (
+            <AdminLogin
+              onLoginSuccess={handleAdminLoginSuccess}
+              onNavigateToStaffLogin={() => navigate('/staff')}
+            />
+          )
         )}
       </main>
 
