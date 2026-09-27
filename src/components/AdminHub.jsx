@@ -120,11 +120,11 @@ export default function AdminHub({ onNavigate }) {
       icon: PackageX,
       accentColor: 'from-rose-600 to-pink-600',
       tagColor: 'bg-rose-500/15 text-rose-300 border-rose-500/40 shadow-sm shadow-rose-500/20',
-      description: 'Loss Tracker, Expiry Returns, Bottle Write-Offs',
+      description: 'Dual-Photo OCR, Godown Racks, 3-Stage Pipeline & Workflow Rules',
       features: [
-        'Damaged Jar Logging with Photo Camera Proof',
-        'Route Rider Defect & Leakage Accountability',
-        'Financial Leakage & Inventory Loss Valuation (₹)'
+        'Dual-Photo Groq Vision AI OCR & Expiry Camera',
+        'Godown Rack Allocation & Weekly Salesman Schedules',
+        '3-Stage Pipeline & Admin Return Workflow Toggles'
       ]
     },
     {

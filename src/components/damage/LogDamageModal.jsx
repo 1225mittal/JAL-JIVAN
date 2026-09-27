@@ -19,6 +19,7 @@ import {
 import { extractPackageDetails } from '../../lib/damageOcr';
 import { createDamageExpiryItem, uploadDamagePhoto } from '../../lib/supabase';
 import { compressImage } from '../../lib/imageCompressor';
+import { useAppSettings } from '../../context/AppSettingsContext';
 
 const DAMAGE_TYPES = [
   { id: 'Damage', labelEn: 'Physical Damage (Broken/Cracked)', labelHi: 'टूटा-फूटा / डैमेज' },
@@ -35,6 +36,20 @@ export default function LogDamageModal({
   onItemLogged,
   initialData = null
 }) {
+  const { isConfigEnabled } = useAppSettings();
+
+  // Workflow toggles & rules
+  const reqFrontPhoto = isConfigEnabled('intake', 'require_front_photo', true);
+  const reqBackPhoto = isConfigEnabled('intake', 'require_back_photo', true);
+  const allowGroqOcr = isConfigEnabled('intake', 'allow_groq_ocr_autofill', true);
+  const reqMrp = isConfigEnabled('intake', 'require_mrp', true);
+  const reqExpiry = isConfigEnabled('intake', 'require_expiry', true);
+  const reqBatch = isConfigEnabled('intake', 'require_batch', false);
+  const reqNetWeight = isConfigEnabled('intake', 'require_net_weight', false);
+  const enableRack = isConfigEnabled('rack', 'enable_rack_allocation', true);
+  const reqRack = isConfigEnabled('rack', 'require_rack_selection', false);
+  const reqCompanyAndDist = isConfigEnabled('rules', 'require_company_and_distributor', true);
+
   const [frontFile, setFrontFile] = useState(null);
   const [frontPreview, setFrontPreview] = useState(null);
 
@@ -241,12 +256,63 @@ export default function LogDamageModal({
     e.preventDefault();
     setError('');
 
+    // Product name is always required
     if (!productName.trim()) {
       setError('Product Name is required / उत्पाद का नाम भरें');
       return;
     }
-    if (!rackNumber.trim()) {
-      setError('Rack Number is required (e.g. Rack A1, Shelf B2, Floor) / रैक नंबर भरें');
+
+    // Company & Distributor rule
+    if (reqCompanyAndDist) {
+      if (!companyName.trim()) {
+        setError('Company/Brand name is required by admin policy / कंपनी का नाम अनिवार्य है');
+        return;
+      }
+      if (!distributorId && !distributorName.trim()) {
+        setError('Distributor selection is required by admin policy / डिस्ट्रीब्यूटर चुनना अनिवार्य है');
+        return;
+      }
+    }
+
+    // Photo validations
+    if (reqFrontPhoto && !frontFile && !frontPreview) {
+      setError('Front packaging photo is mandatory / सामने की फोटो अनिवार्य है');
+      return;
+    }
+    if (reqBackPhoto && !backFile && !backPreview) {
+      setError('Back packaging / MRP photo is mandatory / पीछे की लेबल फोटो अनिवार्य है');
+      return;
+    }
+
+    // Godown rack rule
+    let finalRack = rackNumber.trim();
+    if (enableRack) {
+      if (reqRack && !finalRack) {
+        setError('Godown Rack selection is mandatory by admin policy / रैक नंबर चुनना अनिवार्य है');
+        return;
+      }
+      if (!finalRack) {
+        finalRack = 'General Storage';
+      }
+    } else {
+      finalRack = 'General Storage';
+    }
+
+    // Product spec mandatory rules
+    if (reqMrp && (!mrp || parseFloat(mrp) <= 0)) {
+      setError('Valid MRP is mandatory by admin policy / MRP मूल्य भरना अनिवार्य है');
+      return;
+    }
+    if (reqExpiry && !expiryDate.trim()) {
+      setError('Expiry Date is mandatory by admin policy / समाप्ति तिथि (Expiry) अनिवार्य है');
+      return;
+    }
+    if (reqBatch && !batchNo.trim()) {
+      setError('Batch Number is mandatory by admin policy / बैच नंबर अनिवार्य है');
+      return;
+    }
+    if (reqNetWeight && !netWeightVolume.trim()) {
+      setError('Net Weight / Volume is mandatory by admin policy / वज़न अथवा मात्रा अनिवार्य है');
       return;
     }
 
@@ -286,7 +352,7 @@ export default function LogDamageModal({
         mfg_date: mfgDate.trim(),
         expiry_date: expiryDate.trim(),
         quantity_pcs: parseInt(quantityPcs, 10) || 1,
-        rack_number: rackNumber.trim(),
+        rack_number: finalRack,
         damage_type: damageType,
         front_photo_url: frontPhotoUrl,
         back_photo_url: backPhotoUrl,
@@ -362,24 +428,30 @@ export default function LogDamageModal({
               </div>
 
               {/* AI Auto-Fill Action */}
-              <button
-                type="button"
-                onClick={handleAiScan}
-                disabled={scanning || (!frontFile && !backFile && !frontPreview && !backPreview)}
-                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {scanning ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>AI Scanning...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Auto-Fill with AI</span>
-                  </>
-                )}
-              </button>
+              {allowGroqOcr ? (
+                <button
+                  type="button"
+                  onClick={handleAiScan}
+                  disabled={scanning || (!frontFile && !backFile && !frontPreview && !backPreview)}
+                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {scanning ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>AI Scanning...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Auto-Fill with AI</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <div className="px-2.5 py-1 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-[11px] font-semibold">
+                  Manual Entry Only (OCR Off)
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -415,8 +487,12 @@ export default function LogDamageModal({
                   ) : (
                     <>
                       <Camera className="w-6 h-6 text-slate-500 mb-1" />
-                      <span className="text-[11px] font-bold text-slate-300">Front Photo</span>
-                      <span className="text-[10px] text-slate-500">सामने की फ़ोटो (नाम/ब्रांड)</span>
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                        Front Photo {reqFrontPhoto && <span className="text-rose-400">*</span>}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        सामने की फ़ोटो {reqFrontPhoto ? '(अनिवार्य)' : '(वैकल्पिक)'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -454,8 +530,12 @@ export default function LogDamageModal({
                   ) : (
                     <>
                       <Camera className="w-6 h-6 text-slate-500 mb-1" />
-                      <span className="text-[11px] font-bold text-slate-300">Back Photo</span>
-                      <span className="text-[10px] text-slate-500">पीछे की फ़ोटो (MRP/बैच)</span>
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                        Back Photo {reqBackPhoto && <span className="text-rose-400">*</span>}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        पीछे की फ़ोटो {reqBackPhoto ? '(अनिवार्य)' : '(वैकल्पिक)'}
+                      </span>
                     </>
                   )}
                 </div>
@@ -481,28 +561,30 @@ export default function LogDamageModal({
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Company / Brand / कंपनी का नाम
+                Company / Brand / कंपनी का नाम {reqCompanyAndDist && <span className="text-rose-400">*</span>}
               </label>
               <input
                 type="text"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
                 placeholder="e.g. Parle, Britannia, Bisleri, Tata"
+                required={reqCompanyAndDist}
                 className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
               />
             </div>
           </div>
 
           {/* DISTRIBUTOR & RACK NUMBER */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={`grid gap-4 ${enableRack ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Distributor / डिस्ट्रीब्यूटर
+                Distributor / डिस्ट्रीब्यूटर {reqCompanyAndDist && <span className="text-rose-400">*</span>}
               </label>
               {distributors.length > 0 ? (
                 <select
                   value={distributorId}
                   onChange={handleDistributorSelect}
+                  required={reqCompanyAndDist}
                   className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
                 >
                   <option value="">Select Registered Distributor / चुनें</option>
@@ -518,34 +600,39 @@ export default function LogDamageModal({
                   value={distributorName}
                   onChange={(e) => setDistributorName(e.target.value)}
                   placeholder="e.g. Shree Balaji Agencies"
+                  required={reqCompanyAndDist}
                   className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
                 />
               )}
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Godown Rack Number / रैक नंबर <span className="text-rose-400">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={rackNumber}
-                  onChange={(e) => setRackNumber(e.target.value)}
-                  placeholder="e.g. Rack A1, Shelf B2, Floor"
-                  required
-                  className="w-full pl-9 pr-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
-                />
-                <Layers className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+            {enableRack && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>
+                    Godown Rack Number / रैक नंबर {reqRack ? <span className="text-rose-400">*</span> : <span className="text-slate-500 font-normal text-[10px]">(वैकल्पिक)</span>}
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={rackNumber}
+                    onChange={(e) => setRackNumber(e.target.value)}
+                    placeholder="e.g. Rack A1, Shelf B2, Floor"
+                    required={reqRack}
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
+                  />
+                  <Layers className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* PRICING, WEIGHT & QUANTITY */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                MRP (₹) / मूल्य
+                MRP (₹) / मूल्य {reqMrp && <span className="text-rose-400">*</span>}
               </label>
               <div className="relative">
                 <input
@@ -554,6 +641,7 @@ export default function LogDamageModal({
                   value={mrp}
                   onChange={(e) => setMrp(e.target.value)}
                   placeholder="50"
+                  required={reqMrp}
                   className="w-full pl-8 pr-2.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
                 />
                 <IndianRupee className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-3.5 pointer-events-none" />
@@ -562,13 +650,14 @@ export default function LogDamageModal({
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Weight/Vol / वज़न
+                Weight/Vol / वज़न {reqNetWeight && <span className="text-rose-400">*</span>}
               </label>
               <input
                 type="text"
                 value={netWeightVolume}
                 onChange={(e) => setNetWeightVolume(e.target.value)}
                 placeholder="20L / 100g"
+                required={reqNetWeight}
                 className="w-full px-3 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
               />
             </div>
@@ -591,13 +680,14 @@ export default function LogDamageModal({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Batch No / बैच नंबर
+                Batch No / बैच नंबर {reqBatch && <span className="text-rose-400">*</span>}
               </label>
               <input
                 type="text"
                 value={batchNo}
                 onChange={(e) => setBatchNo(e.target.value)}
                 placeholder="e.g. B24A"
+                required={reqBatch}
                 className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
               />
             </div>
@@ -617,13 +707,14 @@ export default function LogDamageModal({
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Expiry Date / समाप्ति तिथि
+                Expiry Date / समाप्ति तिथि {reqExpiry && <span className="text-rose-400">*</span>}
               </label>
               <input
                 type="text"
                 value={expiryDate}
                 onChange={(e) => setExpiryDate(e.target.value)}
                 placeholder="e.g. 08/2024"
+                required={reqExpiry}
                 className="w-full px-3.5 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 text-xs sm:text-sm"
               />
             </div>

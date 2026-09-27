@@ -23,12 +23,15 @@ import {
   Sparkles,
   Check,
   X,
-  ShieldCheck
+  ShieldCheck,
+  Sliders
 } from 'lucide-react';
 import LogDamageModal from './LogDamageModal';
 import DistributorMaster from './DistributorMaster';
 import LiveExpiryScanner from './LiveExpiryScanner';
+import DamageWorkflowToggles from '../admin/DamageWorkflowToggles';
 import DamageManagement from '../DamageManagement'; // Legacy water jar view for full compatibility
+import { useAppSettings } from '../../context/AppSettingsContext';
 import {
   fetchDamageExpiryItems,
   updateDamageExpiryItem,
@@ -42,7 +45,20 @@ import {
 } from '../../lib/distributorVoiceParser';
 
 export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
-  // Navigation View: 'inventory' | 'distributors' | 'legacy_jars'
+  const { isConfigEnabled } = useAppSettings();
+
+  // Workflow toggles from admin settings
+  const enableStep1Slip = isConfigEnabled('pipeline', 'enable_step1_return_slip', true);
+  const reqSlipPhoto = isConfigEnabled('pipeline', 'require_slip_photo', true);
+  const enableStep2Pickup = isConfigEnabled('pipeline', 'enable_step2_driver_pickup', true);
+  const enableStep3Credit = isConfigEnabled('pipeline', 'enable_step3_credit_received', true);
+  const enableRack = isConfigEnabled('rack', 'enable_rack_allocation', true);
+  const showRackInList = isConfigEnabled('rack', 'show_rack_in_salesman_list', true);
+  const enableVisitDaySchedule = isConfigEnabled('rules', 'enable_visit_day_schedule', true);
+  const enableReturnWindowRules = isConfigEnabled('rules', 'enable_return_window_rules', true);
+  const filterTodayVisitsDefault = isConfigEnabled('rules', 'filter_today_visits_by_default', false);
+
+  // Navigation View: 'inventory' | 'distributors' | 'legacy_jars' | 'workflow_config'
   const [activeView, setActiveView] = useState('inventory');
 
   // Data State
@@ -55,6 +71,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [distributorFilter, setDistributorFilter] = useState('All');
+  const [filterTodayVisitsOnly, setFilterTodayVisitsOnly] = useState(filterTodayVisitsDefault);
 
   // Modals
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
@@ -115,34 +132,10 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
   }, []);
 
   // Filtered Items
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const q = search.toLowerCase();
-      const matchesSearch =
-        !search ||
-        (item.product_name || '').toLowerCase().includes(q) ||
-        (item.company_name || '').toLowerCase().includes(q) ||
-        (item.distributor_name || '').toLowerCase().includes(q) ||
-        (item.batch_no || '').toLowerCase().includes(q) ||
-        (item.rack_number || '').toLowerCase().includes(q);
-
-      const matchesStatus =
-        statusFilter === 'All' ||
-        (statusFilter === 'in_godown' && item.current_status === 'in_godown') ||
-        (statusFilter === 'slip_made' && item.is_slip_made && !item.is_pickup_done) ||
-        (statusFilter === 'picked_up' && item.is_pickup_done && !item.is_credit_received) ||
-        (statusFilter === 'credit_received' && item.is_credit_received);
-
-      const matchesType = typeFilter === 'All' || item.damage_type === typeFilter;
-
-      const matchesDistributor =
-        distributorFilter === 'All' || item.distributor_id === distributorFilter;
-
-      return matchesSearch && matchesStatus && matchesType && matchesDistributor;
-    });
-  }, [items, search, statusFilter, typeFilter, distributorFilter]);
-
   const todayDate = new Date().getDate();
+  const todayDayName = useMemo(() => {
+    return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date().getDay()];
+  }, []);
 
   // Helper to match an item to its distributor and specific division
   const getDistributorForItem = (item) => {
@@ -171,6 +164,43 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
     }
     return null;
   };
+
+  // Filtered Items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      const q = search.toLowerCase();
+      const matchesSearch =
+        !search ||
+        (item.product_name || '').toLowerCase().includes(q) ||
+        (item.company_name || '').toLowerCase().includes(q) ||
+        (item.distributor_name || '').toLowerCase().includes(q) ||
+        (item.batch_no || '').toLowerCase().includes(q) ||
+        (item.rack_number || '').toLowerCase().includes(q);
+
+      const matchesStatus =
+        statusFilter === 'All' ||
+        (statusFilter === 'in_godown' && item.current_status === 'in_godown') ||
+        (statusFilter === 'slip_made' && item.is_slip_made && !item.is_pickup_done) ||
+        (statusFilter === 'picked_up' && item.is_pickup_done && !item.is_credit_received) ||
+        (statusFilter === 'credit_received' && item.is_credit_received);
+
+      const matchesType = typeFilter === 'All' || item.damage_type === typeFilter;
+
+      const matchesDistributor =
+        distributorFilter === 'All' || item.distributor_id === distributorFilter;
+
+      const matchesTodayVisit =
+        !enableVisitDaySchedule ||
+        !filterTodayVisitsOnly ||
+        (() => {
+          const d = getDistributorForItem(item);
+          if (!d || !d.visit_day) return false;
+          return d.visit_day.toLowerCase().includes(todayDayName.toLowerCase());
+        })();
+
+      return matchesSearch && matchesStatus && matchesType && matchesDistributor && matchesTodayVisit;
+    });
+  }, [items, search, statusFilter, typeFilter, distributorFilter, filterTodayVisitsOnly, enableVisitDaySchedule, todayDayName]);
 
   // KPIs
   const stats = useMemo(() => {
@@ -213,6 +243,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
       };
     } else if (nextAction === 'mark_pickup') {
       updates = {
+        is_slip_made: true, // auto-mark slip as made if Stage 1 was bypassed
         is_pickup_done: true,
         pickup_done_at: nowIso,
         current_status: 'picked_up'
@@ -356,6 +387,18 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
           <Layers className="w-4 h-4 shrink-0" />
           <span>Water Jar Transit Damages</span>
         </button>
+
+        <button
+          onClick={() => setActiveView('workflow_config')}
+          className={`py-2 px-3 sm:px-4 rounded-xl text-xs font-bold flex items-center gap-1.5 sm:gap-2 transition whitespace-nowrap shrink-0 ${
+            activeView === 'workflow_config'
+              ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+              : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          <Sliders className="w-4 h-4 shrink-0" />
+          <span>Return & Damage Config (कंट्रोल / टॉगल)</span>
+        </button>
       </div>
 
       {/* TAB 1: DAMAGE & EXPIRY INVENTORY */}
@@ -481,6 +524,23 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                   ))}
                 </select>
               )}
+
+              {/* Today's Salesman Visit Quick Filter */}
+              {enableVisitDaySchedule && (
+                <button
+                  type="button"
+                  onClick={() => setFilterTodayVisitsOnly(!filterTodayVisitsOnly)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                    filterTodayVisitsOnly
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md shadow-amber-500/10'
+                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
+                  }`}
+                  title="Filter salesmen scheduled to visit today"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Today ({todayDayName})</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -558,7 +618,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">
                               {item.damage_type || 'Damage'}
                             </span>
-                            {item.rack_number && (
+                            {enableRack && showRackInList && item.rack_number && (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 border border-amber-500/30">
                                 📍 {item.rack_number}
                               </span>
@@ -588,20 +648,22 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                         </div>
 
                         {/* FMCG Monthly Claim Window Live Badge */}
-                        <div
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${
-                            windowStatus.isOpen
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                              : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                              windowStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                        {enableReturnWindowRules && (
+                          <div
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${
+                              windowStatus.isOpen
+                                ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                                : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                             }`}
-                          />
-                          <span className="truncate">{windowStatus.badgeText}</span>
-                        </div>
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                windowStatus.isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                              }`}
+                            />
+                            <span className="truncate">{windowStatus.badgeText}</span>
+                          </div>
+                        )}
 
                         {dist?.salesman_name && (
                           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
@@ -654,7 +716,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                             <Truck className="w-3 h-3" />
                             <span>Picked Up</span>
                           </span>
-                        ) : item.is_slip_made ? (
+                        ) : (enableStep1Slip && item.is_slip_made) ? (
                           <span className="inline-flex items-center gap-1 font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20 text-[11px]">
                             <FileText className="w-3 h-3" />
                             <span>Slip Made</span>
@@ -671,7 +733,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                     {/* Actions Workflow Bar */}
                     <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 text-xs">
                       {/* Workflow advance button */}
-                      {!item.is_slip_made ? (
+                      {enableStep1Slip && !item.is_slip_made ? (
                         <button
                           type="button"
                           onClick={() => handleTransitionStatus(item, 'make_slip')}
@@ -680,7 +742,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                           <FileText className="w-3 h-3" />
                           <span>Make Slip 📝</span>
                         </button>
-                      ) : !item.is_pickup_done ? (
+                      ) : enableStep2Pickup && !item.is_pickup_done ? (
                         <button
                           type="button"
                           onClick={() => handleTransitionStatus(item, 'mark_pickup')}
@@ -689,7 +751,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                           <Truck className="w-3 h-3" />
                           <span>Mark Picked Up 🚚</span>
                         </button>
-                      ) : !item.is_credit_received ? (
+                      ) : enableStep3Credit && !item.is_credit_received ? (
                         <button
                           type="button"
                           onClick={() => handleTransitionStatus(item, 'confirm_credit')}
@@ -759,6 +821,13 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
             </button>
           </div>
           <DamageManagement drivers={drivers} />
+        </div>
+      )}
+
+      {/* TAB 4: WORKFLOW RULES & MODULE TOGGLES */}
+      {activeView === 'workflow_config' && (
+        <div className="space-y-4">
+          <DamageWorkflowToggles />
         </div>
       )}
 
@@ -864,7 +933,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                       <th className="py-1">Item</th>
                       <th className="py-1">Batch</th>
                       <th className="py-1">Exp</th>
-                      <th className="py-1">Rack</th>
+                      {showRackInList && <th className="py-1">Rack</th>}
                       <th className="py-1">Qty</th>
                       <th className="py-1 text-right">MRP</th>
                     </tr>
@@ -875,7 +944,7 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
                         <td className="py-1">{item.product_name}</td>
                         <td className="py-1">{item.batch_no || '-'}</td>
                         <td className="py-1">{item.expiry_date || '-'}</td>
-                        <td className="py-1">{item.rack_number || '-'}</td>
+                        {showRackInList && <td className="py-1">{item.rack_number || '-'}</td>}
                         <td className="py-1 font-bold">{item.quantity_pcs || 1}</td>
                         <td className="py-1 text-right">₹{((Number(item.mrp) || 0) * (item.quantity_pcs || 1)).toFixed(2)}</td>
                       </tr>

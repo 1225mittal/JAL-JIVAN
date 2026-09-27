@@ -35,7 +35,8 @@ import {
   X,
   FileText,
   Calendar,
-  ArrowLeft
+  ArrowLeft,
+  Sliders
 } from 'lucide-react';
 import {
   fetchRewardSettings,
@@ -62,6 +63,7 @@ import ProductCatalog from './ProductCatalog';
 import SlipViewerModal from './SlipViewerModal';
 import StaffAttendanceModal from './StaffAttendanceModal';
 import RiderMiniMap from './RiderMiniMap';
+import DamageWorkflowToggles from './admin/DamageWorkflowToggles';
 
 // Lightweight URL search params hook adhering to useSearchParams standard without react-router-dom dependency
 export function useSearchParams() {
@@ -144,6 +146,7 @@ export function AdminPanel({
     if (raw === 'fleet' || raw === 'radar' || raw === 'live-fleet-radar') return 'fleet';
     if (raw === 'addresses') return 'addresses';
     if (raw === 'products') return 'products';
+    if (raw === 'damage-config' || raw === 'damage_config' || raw === 'return-config' || raw === 'damage-toggles' || raw === 'damage-rules') return 'damage-config';
     if (raw === 'analytics' || raw === 'settings') return 'analytics';
     return raw || 'deliveries';
   }, [currentTab]);
@@ -852,6 +855,19 @@ export function AdminPanel({
             >
               <BarChart3 className="w-4 h-4" />
               <span>Settings & Analytics</span>
+            </button>
+
+            <button
+              id="admin-damage-config-tab"
+              onClick={() => handleTabChange('damage-config')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'damage-config'
+                  ? 'border-rose-500 text-rose-400 font-bold'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span>Return & Damage Config (कंट्रोल / टॉगल)</span>
             </button>
           </div>
         </div>
@@ -1719,6 +1735,13 @@ export function AdminPanel({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* TAB 7: RETURN & DAMAGE WORKFLOW CONFIG */}
+      {activeTab === 'damage-config' && (
+        <div className="space-y-4">
+          <DamageWorkflowToggles />
         </div>
       )}
 
