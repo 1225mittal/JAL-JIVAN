@@ -2726,9 +2726,21 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     total_taxable_amount: Number(invoiceData.total_taxable_amount ?? invoiceData.taxable_amount) || 0,
     total_tax_amount: Number(invoiceData.total_tax_amount ?? invoiceData.total_tax) || 0,
     grand_total: Number(invoiceData.grand_total) || 0,
-    bill_image_url: invoiceData.bill_image_url || '',
+    bill_image_url: invoiceData.bill_image_url || (Array.isArray(invoiceData.bill_image_urls) ? invoiceData.bill_image_urls[0] : '') || '',
+    bill_image_urls: Array.isArray(invoiceData.bill_image_urls) ? invoiceData.bill_image_urls : (invoiceData.bill_image_url ? [invoiceData.bill_image_url] : []),
     status: invoiceData.status || 'verified'
   };
+
+  // Attach extracted_json, vendor_details, tax_summary if present
+  if (invoiceData.extracted_json && typeof invoiceData.extracted_json === 'object') {
+    invoicePayload.extracted_json = invoiceData.extracted_json;
+  }
+  if (invoiceData.vendor_details && typeof invoiceData.vendor_details === 'object') {
+    invoicePayload.vendor_details = invoiceData.vendor_details;
+  }
+  if (invoiceData.tax_summary && typeof invoiceData.tax_summary === 'object') {
+    invoicePayload.tax_summary = invoiceData.tax_summary;
+  }
 
   // 2. Ensure raw_ocr_data is saved as valid JSON (or stringified JSON), or if null/undefined, omit it from the payload
   let validOcr = null;
@@ -2754,6 +2766,9 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   // Only include raw_ocr_data if valid JSON exists; omit if null, undefined, or empty
   if (validOcr !== null && validOcr !== undefined) {
     invoicePayload.raw_ocr_data = validOcr;
+    if (!invoicePayload.extracted_json) {
+      invoicePayload.extracted_json = validOcr;
+    }
   }
 
   // Only pass id if it is an existing valid UUID (e.g. for update). Otherwise omit to let DB generate UUID / primary key
@@ -2768,6 +2783,45 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   let savedRecord = null;
   let savedItems = [];
 
+  // Format line items with detailed GST breakdown
+  const formattedItems = (itemsData || []).map((item) => {
+    const qty = Number(item.quantity) || 1;
+    const purchasePrice = Number(item.purchase_price ?? item.price_before_gst) || 0;
+    const taxable = Number(item.taxable_amount ?? (qty * purchasePrice - (Number(item.discount) || 0))) || 0;
+    const gstRate = Number(item.gst_pct ?? item.gst_rate) || 0;
+    const cgstPct = Number(item.cgst_pct ?? (gstRate / 2)) || 0;
+    const sgstPct = Number(item.sgst_pct ?? (gstRate / 2)) || 0;
+    const cgstAmt = Number(item.cgst_amount ?? ((taxable * cgstPct) / 100)) || 0;
+    const sgstAmt = Number(item.sgst_amount ?? ((taxable * sgstPct) / 100)) || 0;
+    const cessAmt = Number(item.cess_amount ?? item.cess) || 0;
+    const cessPct = Number(item.cess_pct) || 0;
+    const total = Number(item.total_amount ?? item.price_after_gst ?? (taxable + cgstAmt + sgstAmt + cessAmt)) || 0;
+
+    return {
+      purchase_invoice_id: savedInvoiceId,
+      barcode: (item.barcode || '').toString().trim() || null,
+      item_name: (item.item_name || 'Item').toString().trim(),
+      hsn_code: (item.hsn_code || '').toString().trim() || null,
+      quantity: qty,
+      purchase_price: purchasePrice,
+      price_before_gst: purchasePrice,
+      taxable_amount: Number(taxable.toFixed(2)),
+      gst_pct: gstRate,
+      gst_rate: gstRate,
+      cgst_pct: cgstPct,
+      cgst_amount: Number(cgstAmt.toFixed(2)),
+      sgst_pct: sgstPct,
+      sgst_amount: Number(sgstAmt.toFixed(2)),
+      cess_pct: cessPct,
+      cess_amount: Number(cessAmt.toFixed(2)),
+      cess: Number(cessAmt.toFixed(2)),
+      discount: Number(item.discount) || 0,
+      price_after_gst: Number(total.toFixed(2)),
+      total_amount: Number(total.toFixed(2)),
+      mrp: Number(item.mrp) || 0
+    };
+  });
+
   // Write to Supabase if configured
   if (isSupabaseConfigured) {
     // Step 2.1: Write to purchase_invoices first, obtain generated invoice id
@@ -2777,11 +2831,16 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       .select()
       .single();
 
-    // If PostgREST schema cache complains about raw_ocr_data, retry cleanly without it
-    if (invErr && invErr.message?.includes('raw_ocr_data') && 'raw_ocr_data' in invoicePayload) {
-      console.warn('Retrying purchase_invoices insert without raw_ocr_data due to schema cache...');
+    // If PostgREST schema cache complains about extra columns, retry cleanly without them
+    if (invErr) {
+      console.warn('Initial insert note, trying fallback payload:', invErr.message);
       const fallbackPayload = { ...invoicePayload };
+      delete fallbackPayload.bill_image_urls;
+      delete fallbackPayload.extracted_json;
+      delete fallbackPayload.vendor_details;
+      delete fallbackPayload.tax_summary;
       delete fallbackPayload.raw_ocr_data;
+
       const retryResult = await supabase
         .from('purchase_invoices')
         .insert(fallbackPayload)
@@ -2804,23 +2863,37 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     savedRecord = invRow;
 
     // Step 2.2: Insert line items into purchase_items with purchase_invoice_id: id
-    // Only pass known columns matching purchase_items:
-    // purchase_invoice_id, barcode, item_name, hsn_code, quantity, purchase_price, mrp
-    if (Array.isArray(itemsData) && itemsData.length > 0) {
-      const formattedItems = itemsData.map((item) => ({
-        purchase_invoice_id: savedInvoiceId,
-        barcode: (item.barcode || '').toString().trim(),
-        item_name: (item.item_name || 'Item').toString().trim(),
-        hsn_code: (item.hsn_code || '').toString().trim(),
-        quantity: Number(item.quantity) || 1,
-        purchase_price: Number(item.purchase_price ?? item.price_before_gst) || 0,
-        mrp: Number(item.mrp) || 0
+    if (formattedItems.length > 0) {
+      // Set the real database invoice id
+      const dbItems = formattedItems.map((it) => ({
+        ...it,
+        purchase_invoice_id: savedInvoiceId
       }));
 
-      const { data: itemsRows, error: itemsErr } = await supabase
+      let { data: itemsRows, error: itemsErr } = await supabase
         .from('purchase_items')
-        .insert(formattedItems)
+        .insert(dbItems)
         .select();
+
+      // If schema cache complains about detailed GST columns, retry with base columns
+      if (itemsErr) {
+        console.warn('Items detailed insert notice, retrying with core columns:', itemsErr.message);
+        const baseItems = dbItems.map((item) => ({
+          purchase_invoice_id: savedInvoiceId,
+          barcode: item.barcode,
+          item_name: item.item_name,
+          hsn_code: item.hsn_code,
+          quantity: item.quantity,
+          purchase_price: item.purchase_price,
+          mrp: item.mrp
+        }));
+        const retryItems = await supabase
+          .from('purchase_items')
+          .insert(baseItems)
+          .select();
+        itemsRows = retryItems.data;
+        itemsErr = retryItems.error;
+      }
 
       if (itemsErr) {
         console.error('Supabase purchase_items insert error:', itemsErr);
@@ -2829,6 +2902,13 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
 
       savedItems = itemsRows || formattedItems;
     }
+  }
+
+  // Step 2.3: Automatic Inventory Stock Syncing (Requirements 5 & 6)
+  try {
+    await syncInventoryFromPurchaseItems(formattedItems);
+  } catch (syncErr) {
+    console.warn('Inventory auto-sync notice on invoice commit:', syncErr);
   }
 
   // 3. Local Storage Sync (Fallback or Cache)
@@ -3626,5 +3706,431 @@ export async function recordStaffAttendanceDay(staffId, dateStr, status, notes =
   return { staffId, dateStr, status };
 }
 
+// ==========================================
+// INVENTORY & STOCK MASTER (inventory_items)
+// ==========================================
+export const STORAGE_INVENTORY_ITEMS = 'jal_jivan_inventory_items';
 
+export const INITIAL_INVENTORY_ITEMS = [
+  {
+    id: 'inv_item_1',
+    barcode: '8901234001015',
+    item_name: 'Bisleri 20L Polycarbonate Water Can (Refill)',
+    category: 'Packaged Water',
+    mrp: 90,
+    cost_price: 45,
+    selling_price: 80,
+    stock_qty: 150,
+    min_stock_level: 25,
+    hsn_code: '2201',
+    gst_pct: 18,
+    unit: '20L Can'
+  },
+  {
+    id: 'inv_item_2',
+    barcode: '8901234002029',
+    item_name: 'Aquafina 1L Mineral Water Bottle (Pack of 12)',
+    category: 'Packaged Water',
+    mrp: 240,
+    cost_price: 130,
+    selling_price: 210,
+    stock_qty: 40,
+    min_stock_level: 15,
+    hsn_code: '2201',
+    gst_pct: 18,
+    unit: 'Box'
+  },
+  {
+    id: 'inv_item_3',
+    barcode: '8901234003033',
+    item_name: 'Dispenser Manual Hand Pump Tap',
+    category: 'Accessories',
+    mrp: 120,
+    cost_price: 65,
+    selling_price: 100,
+    stock_qty: 8,
+    min_stock_level: 10,
+    hsn_code: '3926',
+    gst_pct: 18,
+    unit: 'Piece'
+  },
+  {
+    id: 'inv_item_4',
+    barcode: '8901234004047',
+    item_name: 'Kinley 500ml Soda (Pack of 24)',
+    category: 'Beverages',
+    mrp: 360,
+    cost_price: 220,
+    selling_price: 320,
+    stock_qty: 0,
+    min_stock_level: 12,
+    hsn_code: '2202',
+    gst_pct: 28,
+    unit: 'Crate'
+  }
+];
 
+export function getLocalInventoryItems() {
+  try {
+    const saved = localStorage.getItem(STORAGE_INVENTORY_ITEMS);
+    if (!saved) {
+      localStorage.setItem(STORAGE_INVENTORY_ITEMS, JSON.stringify(INITIAL_INVENTORY_ITEMS));
+      return INITIAL_INVENTORY_ITEMS;
+    }
+    return JSON.parse(saved);
+  } catch (e) {
+    return INITIAL_INVENTORY_ITEMS;
+  }
+}
+
+export function saveLocalInventoryItems(items) {
+  try {
+    localStorage.setItem(STORAGE_INVENTORY_ITEMS, JSON.stringify(items || []));
+  } catch (e) {
+    console.error('Failed to save inventory items locally:', e);
+  }
+}
+
+export async function fetchInventoryItems() {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('*')
+        .order('item_name', { ascending: true });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        saveLocalInventoryItems(data);
+        return data;
+      }
+      if (error) {
+        console.warn('Supabase fetchInventoryItems notice:', error.message);
+      }
+    } catch (err) {
+      console.warn('fetchInventoryItems exception:', err.message);
+    }
+  }
+  return getLocalInventoryItems();
+}
+
+export async function saveInventoryItem(item) {
+  const isUuid = item.id && /^[0-9a-f-]{36}$/i.test(item.id);
+  const payload = {
+    barcode: (item.barcode || '').toString().trim() || null,
+    item_name: (item.item_name || 'New Item').toString().trim(),
+    category: (item.category || 'General FMCG').toString().trim(),
+    mrp: Number(item.mrp) || 0,
+    cost_price: Number(item.cost_price ?? item.purchase_price) || 0,
+    selling_price: Number(item.selling_price) || 0,
+    stock_qty: Number(item.stock_qty) || 0,
+    min_stock_level: Number(item.min_stock_level) || 10,
+    hsn_code: (item.hsn_code || '').toString().trim() || null,
+    gst_pct: Number(item.gst_pct) || 18,
+    unit: item.unit || 'Unit',
+    updated_at: new Date().toISOString()
+  };
+
+  let savedRecord = null;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      if (isUuid) {
+        const { data, error } = await supabase
+          .from('inventory_items')
+          .update(payload)
+          .eq('id', item.id)
+          .select()
+          .maybeSingle();
+        if (!error && data) savedRecord = data;
+      } else {
+        const { data, error } = await supabase
+          .from('inventory_items')
+          .insert(payload)
+          .select()
+          .single();
+        if (!error && data) savedRecord = data;
+      }
+    } catch (e) {
+      console.warn('saveInventoryItem supabase exception:', e.message);
+    }
+  }
+
+  if (!savedRecord) {
+    savedRecord = {
+      ...payload,
+      id: item.id || `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      created_at: new Date().toISOString()
+    };
+  }
+
+  const existing = getLocalInventoryItems();
+  const filtered = existing.filter((it) => it.id !== savedRecord.id);
+  saveLocalInventoryItems([savedRecord, ...filtered]);
+  return savedRecord;
+}
+
+export async function deleteInventoryItem(id) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('inventory_items').delete().eq('id', id);
+    } catch (e) {
+      console.warn('deleteInventoryItem supabase warning:', e);
+    }
+  }
+  const existing = getLocalInventoryItems();
+  saveLocalInventoryItems(existing.filter((it) => it.id !== id));
+  return true;
+}
+
+// Automatic stock sync on purchase invoice commit (Requirements 5 & 6)
+export async function syncInventoryFromPurchaseItems(itemsData = []) {
+  if (!Array.isArray(itemsData) || itemsData.length === 0) return [];
+  const currentInventory = await fetchInventoryItems();
+  const updatedList = [...currentInventory];
+
+  for (const inwardItem of itemsData) {
+    const rawBarcode = (inwardItem.barcode || '').toString().trim();
+    const rawName = (inwardItem.item_name || '').toString().trim();
+    const inwardQty = Number(inwardItem.quantity) || 0;
+    const purchaseRate = Number(inwardItem.purchase_price ?? inwardItem.price_before_gst) || 0;
+    const mrp = Number(inwardItem.mrp) || 0;
+    const gstPct = Number(inwardItem.gst_pct ?? inwardItem.gst_rate) || 18;
+    const hsn = (inwardItem.hsn_code || '').toString().trim();
+
+    // Match by barcode, or fallback to exact/fuzzy name match
+    let matchIndex = -1;
+    if (rawBarcode) {
+      matchIndex = updatedList.findIndex((it) => it.barcode && it.barcode.trim() === rawBarcode);
+    }
+    if (matchIndex === -1 && rawName) {
+      matchIndex = updatedList.findIndex(
+        (it) => it.item_name.toLowerCase().trim() === rawName.toLowerCase()
+      );
+    }
+
+    if (matchIndex >= 0) {
+      // Increment stock, update latest purchase rate & mrp
+      const existing = updatedList[matchIndex];
+      const newStock = Number((Number(existing.stock_qty || 0) + inwardQty).toFixed(2));
+      const updatedItem = {
+        ...existing,
+        stock_qty: newStock,
+        cost_price: purchaseRate > 0 ? purchaseRate : existing.cost_price,
+        mrp: mrp > 0 ? mrp : existing.mrp,
+        barcode: existing.barcode || rawBarcode || null,
+        hsn_code: existing.hsn_code || hsn || null,
+        gst_pct: gstPct || existing.gst_pct,
+        updated_at: new Date().toISOString()
+      };
+      updatedList[matchIndex] = updatedItem;
+
+      // Update in Supabase
+      if (isSupabaseConfigured && supabase && existing.id && !existing.id.startsWith('item_')) {
+        try {
+          await supabase
+            .from('inventory_items')
+            .update({
+              stock_qty: updatedItem.stock_qty,
+              cost_price: updatedItem.cost_price,
+              mrp: updatedItem.mrp,
+              barcode: updatedItem.barcode,
+              updated_at: updatedItem.updated_at
+            })
+            .eq('id', existing.id);
+        } catch (e) {}
+      }
+    } else {
+      // Create new inventory item
+      const newItem = {
+        id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        barcode: rawBarcode || null,
+        item_name: rawName || 'Inward Item',
+        category: 'General FMCG',
+        mrp: mrp || Number((purchaseRate * 1.25).toFixed(2)),
+        cost_price: purchaseRate,
+        selling_price: mrp || Number((purchaseRate * 1.2).toFixed(2)),
+        stock_qty: inwardQty,
+        min_stock_level: 10,
+        hsn_code: hsn || null,
+        gst_pct: gstPct,
+        unit: 'Unit',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data } = await supabase
+            .from('inventory_items')
+            .insert({
+              barcode: newItem.barcode,
+              item_name: newItem.item_name,
+              category: newItem.category,
+              mrp: newItem.mrp,
+              cost_price: newItem.cost_price,
+              selling_price: newItem.selling_price,
+              stock_qty: newItem.stock_qty,
+              min_stock_level: newItem.min_stock_level,
+              hsn_code: newItem.hsn_code,
+              gst_pct: newItem.gst_pct,
+              unit: newItem.unit
+            })
+            .select()
+            .single();
+          if (data) newItem.id = data.id;
+        } catch (e) {}
+      }
+
+      updatedList.push(newItem);
+    }
+  }
+
+  saveLocalInventoryItems(updatedList);
+  return updatedList;
+}
+
+// Decrement inventory stock on checkout/billing
+export async function decrementInventoryStock(soldItems = []) {
+  if (!Array.isArray(soldItems) || soldItems.length === 0) return;
+  const currentInventory = await fetchInventoryItems();
+  const updatedList = [...currentInventory];
+
+  for (const sold of soldItems) {
+    const rawBarcode = (sold.barcode || '').toString().trim();
+    const rawName = (sold.item_name || sold.name || '').toString().trim();
+    const qtySold = Number(sold.quantity ?? sold.qty) || 1;
+
+    let matchIndex = -1;
+    if (rawBarcode) {
+      matchIndex = updatedList.findIndex((it) => it.barcode && it.barcode.trim() === rawBarcode);
+    }
+    if (matchIndex === -1 && rawName) {
+      matchIndex = updatedList.findIndex((it) => it.item_name.toLowerCase().trim() === rawName.toLowerCase());
+    }
+
+    if (matchIndex >= 0) {
+      const existing = updatedList[matchIndex];
+      const newStock = Math.max(0, Number((Number(existing.stock_qty || 0) - qtySold).toFixed(2)));
+      existing.stock_qty = newStock;
+      existing.updated_at = new Date().toISOString();
+
+      if (isSupabaseConfigured && supabase && existing.id && !existing.id.startsWith('item_')) {
+        try {
+          await supabase.from('inventory_items').update({ stock_qty: newStock }).eq('id', existing.id);
+        } catch (e) {}
+      }
+    }
+  }
+
+  saveLocalInventoryItems(updatedList);
+}
+
+// Universal Barcode Assignment & Quick Commit (Requirement 4)
+export async function assignItemBarcode(barcode, purchaseItemId = null, inventoryItemId = null) {
+  const cleanBarcode = (barcode || '').toString().trim();
+  if (!cleanBarcode) return false;
+
+  // 1. Update purchase_items table if purchaseItemId provided
+  if (purchaseItemId && isSupabaseConfigured && supabase) {
+    try {
+      await supabase
+        .from('purchase_items')
+        .update({ barcode: cleanBarcode })
+        .eq('id', purchaseItemId);
+    } catch (e) {
+      console.warn('Failed to update purchase_item barcode in Supabase:', e);
+    }
+  }
+
+  // 2. Update inventory_items if inventoryItemId provided
+  if (inventoryItemId) {
+    await saveInventoryItem({ id: inventoryItemId, barcode: cleanBarcode });
+  }
+
+  // Update local purchase history cache if matched
+  try {
+    const invoices = getLocalPurchaseInvoices();
+    let changed = false;
+    for (const inv of invoices) {
+      if (Array.isArray(inv.purchase_items)) {
+        for (const it of inv.purchase_items) {
+          if (it.id === purchaseItemId) {
+            it.barcode = cleanBarcode;
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed) saveLocalPurchaseInvoices(invoices);
+  } catch (e) {}
+
+  return true;
+}
+
+// ==========================================
+// DEBIT NOTES / SALE RETURN (debit_notes)
+// ==========================================
+const STORAGE_DEBIT_NOTES = 'jal_jivan_debit_notes';
+
+export function getLocalDebitNotes() {
+  try {
+    const saved = localStorage.getItem(STORAGE_DEBIT_NOTES);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveLocalDebitNotes(notes) {
+  try {
+    localStorage.setItem(STORAGE_DEBIT_NOTES, JSON.stringify(notes || []));
+  } catch (e) {
+    console.error('Failed to save debit notes locally:', e);
+  }
+}
+
+export async function fetchDebitNotes() {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('debit_notes')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalDebitNotes(data);
+        return data;
+      }
+    } catch (e) {}
+  }
+  return getLocalDebitNotes();
+}
+
+export async function saveDebitNote(debitNote) {
+  const noteId = debitNote.id || `DN-${Date.now().toString().slice(-6)}`;
+  const payload = {
+    id: noteId,
+    vendor_id: debitNote.vendor_id || null,
+    vendor_name: debitNote.vendor_name || 'Vendor',
+    original_invoice_no: debitNote.original_invoice_no || '',
+    return_reason: debitNote.return_reason || 'Expiry Return',
+    items: debitNote.items || [],
+    total_taxable: Number(debitNote.total_taxable) || 0,
+    total_tax: Number(debitNote.total_tax) || 0,
+    grand_total: Number(debitNote.grand_total) || 0,
+    status: debitNote.status || 'issued',
+    notes: debitNote.notes || ''
+  };
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      await supabase.from('debit_notes').insert(payload);
+    } catch (e) {
+      console.warn('saveDebitNote supabase exception:', e);
+    }
+  }
+
+  const existing = getLocalDebitNotes();
+  const updated = [payload, ...existing.filter((n) => n.id !== noteId)];
+  saveLocalDebitNotes(updated);
+  return payload;
+}

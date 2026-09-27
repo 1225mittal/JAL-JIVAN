@@ -395,4 +395,69 @@ DROP POLICY IF EXISTS "Allow public select on purchase-bills" ON storage.objects
 CREATE POLICY "Allow public select on purchase-bills" ON storage.objects 
 FOR SELECT USING (bucket_id = 'purchase-bills');
 
+-- Upgrade purchase_invoices and purchase_items with permanent bill archival & detailed GST breakdown
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS bill_image_urls TEXT[] DEFAULT '{}'::text[];
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS extracted_json JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS vendor_details JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE public.purchase_invoices ADD COLUMN IF NOT EXISTS tax_summary JSONB DEFAULT '{}'::jsonb;
+
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS taxable_amount NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS gst_pct NUMERIC(5, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cgst_pct NUMERIC(5, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cgst_amount NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS sgst_pct NUMERIC(5, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS sgst_amount NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cess_pct NUMERIC(5, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cess_amount NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) DEFAULT 0.00;
+
+-- 22. Inventory & Stock Master (inventory_items)
+CREATE TABLE IF NOT EXISTS public.inventory_items (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    barcode TEXT UNIQUE,
+    item_name TEXT NOT NULL,
+    category TEXT DEFAULT 'General FMCG',
+    mrp NUMERIC(10, 2) DEFAULT 0.00,
+    cost_price NUMERIC(10, 2) DEFAULT 0.00,
+    selling_price NUMERIC(10, 2) DEFAULT 0.00,
+    stock_qty NUMERIC(10, 2) DEFAULT 0.00,
+    min_stock_level NUMERIC(10, 2) DEFAULT 10.00,
+    hsn_code TEXT,
+    gst_pct NUMERIC(5, 2) DEFAULT 18.00,
+    unit TEXT DEFAULT 'Unit'
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_items_barcode ON public.inventory_items(barcode);
+CREATE INDEX IF NOT EXISTS idx_inventory_items_name ON public.inventory_items(item_name);
+
+ALTER TABLE public.inventory_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access inventory_items" ON public.inventory_items;
+CREATE POLICY "Public access inventory_items" ON public.inventory_items FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable Realtime publication on inventory_items
+ALTER PUBLICATION supabase_realtime ADD TABLE public.inventory_items;
+
+-- 23. Debit Notes / Sale Return to Vendors (debit_notes)
+CREATE TABLE IF NOT EXISTS public.debit_notes (
+    id TEXT PRIMARY KEY DEFAULT ('DN-' || to_char(now(), 'YYYYMMDD') || '-' || substr(md5(random()::text), 1, 4)),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    vendor_id TEXT,
+    vendor_name TEXT NOT NULL,
+    original_invoice_no TEXT,
+    return_reason TEXT NOT NULL CHECK (return_reason IN ('Expiry Return', 'Transit Damage', 'Defective Goods', 'Rate Difference', 'Other')),
+    items JSONB DEFAULT '[]'::jsonb,
+    total_taxable NUMERIC(12, 2) DEFAULT 0.00,
+    total_tax NUMERIC(12, 2) DEFAULT 0.00,
+    grand_total NUMERIC(12, 2) DEFAULT 0.00,
+    status TEXT DEFAULT 'issued' CHECK (status IN ('draft', 'issued', 'settled', 'cancelled')),
+    notes TEXT
+);
+
+ALTER TABLE public.debit_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access debit_notes" ON public.debit_notes;
+CREATE POLICY "Public access debit_notes" ON public.debit_notes FOR ALL USING (true) WITH CHECK (true);
+
+
 

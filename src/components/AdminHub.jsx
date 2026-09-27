@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Truck,
+  Package,
   PackageX,
   FileSpreadsheet,
   Receipt,
@@ -91,6 +92,23 @@ export default function AdminHub({ onNavigate }) {
         'Groq Vision LPU OCR Extraction from Bills',
         'PDF Multi-Page & Camera Upload Drop-Zone',
         'GST Breakdown, HSN & Landed Cost Computation'
+      ]
+    },
+    {
+      id: 'items',
+      path: '/admin/items',
+      title: 'Item & Stock Master',
+      category: 'Inventory & Catalog',
+      tag: 'Active / Live',
+      isLive: true,
+      icon: Package,
+      accentColor: 'from-indigo-600 to-violet-600',
+      tagColor: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/40 shadow-sm shadow-indigo-500/20',
+      description: 'Universal Barcode Catalog, Live Stock Levels & Purchase Auto-Sync',
+      features: [
+        'Universal Barcode / EAN SKU Mapping & Quick Fill',
+        'Automatic Inward Stock Increments on Bill Commit',
+        'Out-of-Stock & Low Stock Real-Time Alert Filters'
       ]
     },
     {

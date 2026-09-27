@@ -6,6 +6,7 @@ import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
+import ItemsInventoryHub from './components/items/ItemsInventoryHub';
 import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
 import MobileInwardCapture from './components/purchase/MobileInwardCapture';
@@ -58,6 +59,9 @@ export const getInitialModule = () => {
   if (path.includes('/admin/staff') || queryModule === 'staff') {
     return 'staff';
   }
+  if (path.includes('/admin/items') || path.includes('/admin/inventory') || queryModule === 'items' || queryModule === 'inventory') {
+    return 'items';
+  }
   if (path.includes('/admin/purchase') || queryModule === 'purchase') {
     return 'purchase';
   }
@@ -102,13 +106,13 @@ export function parseRoute() {
     return { type: 'admin-login', module: null, pathname: '/admin/login' };
   }
 
-  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/staff, etc.)
+  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/items, /admin/staff, etc.)
   const adminModMatch = pathname.match(
-    /^\/admin\/(delivery|damage|purchase|staff|sales|marketing|finance|settings|config)$/
+    /^\/admin\/(delivery|damage|purchase|items|inventory|staff|sales|marketing|finance|settings|config)$/
   );
   if (adminModMatch) {
     const rawMod = adminModMatch[1];
-    const mod = rawMod === 'config' ? 'settings' : rawMod;
+    const mod = rawMod === 'config' ? 'settings' : rawMod === 'inventory' ? 'items' : rawMod;
     return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
   }
 
@@ -716,7 +720,7 @@ export default function App() {
       />
 
       {/* Main Routing Container */}
-      <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
+      <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
         {routeState.type === 'admin-login' ? (
           /* ======================================================== */
           /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
@@ -776,6 +780,11 @@ export default function App() {
             </ErrorBoundary>
           ) : routeState.module === 'purchase' ? (
             <PurchaseInwardHub
+              onBackToHub={handleBackToHub}
+              showToast={showToast}
+            />
+          ) : routeState.module === 'items' ? (
+            <ItemsInventoryHub
               onBackToHub={handleBackToHub}
               showToast={showToast}
             />

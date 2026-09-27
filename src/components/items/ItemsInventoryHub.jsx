@@ -1,0 +1,799 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Package,
+  Search,
+  Plus,
+  Edit2,
+  Trash2,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Barcode as BarcodeIcon,
+  IndianRupee,
+  Layers,
+  TrendingDown,
+  ArrowUpDown,
+  Filter,
+  X,
+  Save,
+  Scan,
+  Download,
+  ArrowLeft
+} from 'lucide-react';
+import {
+  fetchInventoryItems,
+  saveInventoryItem,
+  deleteInventoryItem,
+  isSupabaseConfigured
+} from '../../lib/supabase';
+import BarcodeScannerModal from '../BarcodeScannerModal';
+
+export default function ItemsInventoryHub({
+  onBackToHub = null,
+  showToast = () => {}
+}) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Filters & Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [stockFilter, setStockFilter] = useState('all'); // 'all' | 'low' | 'out'
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [sortField, setSortField] = useState('item_name');
+  const [sortOrder, setSortOrder] = useState('asc'); // 'asc' | 'desc'
+
+  // Edit / Create Drawer Modal State
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Barcode Scanner Modal State
+  const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
+
+  // Load Inventory Data
+  const loadData = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const data = await fetchInventoryItems();
+      setItems(data || []);
+    } catch (err) {
+      console.error('Failed to load inventory items:', err);
+      setErrorMsg(err.message || 'Failed to load inventory data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Unique categories list
+  const categories = useMemo(() => {
+    const set = new Set();
+    items.forEach((item) => {
+      if (item.category) set.add(item.category);
+    });
+    return Array.from(set).sort();
+  }, [items]);
+
+  // Filtered & Sorted items
+  const filteredItems = useMemo(() => {
+    let result = [...items];
+
+    // Stock Filter
+    if (stockFilter === 'low') {
+      result = result.filter((i) => Number(i.stock_qty || 0) > 0 && Number(i.stock_qty || 0) < 10);
+    } else if (stockFilter === 'out') {
+      result = result.filter((i) => Number(i.stock_qty || 0) <= 0);
+    }
+
+    // Category Filter
+    if (selectedCategory !== 'all') {
+      result = result.filter((i) => i.category === selectedCategory);
+    }
+
+    // Search Query (name, barcode, hsn, category)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      result = result.filter(
+        (i) =>
+          (i.item_name && i.item_name.toLowerCase().includes(q)) ||
+          (i.barcode && i.barcode.toLowerCase().includes(q)) ||
+          (i.hsn_code && i.hsn_code.toLowerCase().includes(q)) ||
+          (i.category && i.category.toLowerCase().includes(q))
+      );
+    }
+
+    // Sorting
+    result.sort((a, b) => {
+      let aVal = a[sortField] ?? '';
+      let bVal = b[sortField] ?? '';
+
+      if (typeof aVal === 'number' || typeof bVal === 'number') {
+        aVal = Number(aVal) || 0;
+        bVal = Number(bVal) || 0;
+      } else {
+        aVal = String(aVal).toLowerCase();
+        bVal = String(bVal).toLowerCase();
+      }
+
+      if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [items, stockFilter, selectedCategory, searchQuery, sortField, sortOrder]);
+
+  // Inventory KPI Metrics
+  const metrics = useMemo(() => {
+    const totalSkus = items.length;
+    let totalStockUnits = 0;
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+    let totalValuation = 0;
+
+    items.forEach((item) => {
+      const qty = Number(item.stock_qty) || 0;
+      const cost = Number(item.cost_price) || 0;
+
+      totalStockUnits += qty;
+      if (qty <= 0) {
+        outOfStockCount++;
+      } else if (qty < 10) {
+        lowStockCount++;
+      }
+      totalValuation += qty * cost;
+    });
+
+    return {
+      totalSkus,
+      totalStockUnits,
+      lowStockCount,
+      outOfStockCount,
+      totalValuation
+    };
+  }, [items]);
+
+  // Open Drawer for Add New Item
+  const handleAddNew = () => {
+    setEditingItem({
+      barcode: '',
+      item_name: '',
+      category: 'General',
+      mrp: 0,
+      cost_price: 0,
+      selling_price: 0,
+      stock_qty: 0,
+      hsn_code: '',
+      gst_pct: 18
+    });
+    setIsDrawerOpen(true);
+  };
+
+  // Open Drawer for Edit
+  const handleEdit = (item) => {
+    setEditingItem({ ...item });
+    setIsDrawerOpen(true);
+  };
+
+  // Save Item
+  const handleSave = async (e) => {
+    e?.preventDefault();
+    if (!editingItem?.item_name?.trim()) {
+      showToast('Item name is required', 'error');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const saved = await saveInventoryItem(editingItem);
+      showToast('Inventory item saved successfully!', 'success');
+      setIsDrawerOpen(false);
+      setEditingItem(null);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to save item:', err);
+      showToast(err.message || 'Failed to save inventory item', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Delete Item
+  const handleDelete = async (item) => {
+    if (!window.confirm(`Are you sure you want to delete "${item.item_name}"?`)) return;
+    try {
+      await deleteInventoryItem(item.id);
+      showToast('Item deleted successfully', 'success');
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch (err) {
+      console.error('Failed to delete item:', err);
+      showToast(err.message || 'Failed to delete item', 'error');
+    }
+  };
+
+  // Barcode scanned callback
+  const handleBarcodeScanned = (scannedCode) => {
+    if (editingItem) {
+      setEditingItem((prev) => ({ ...prev, barcode: scannedCode }));
+      showToast(`Scanned barcode: ${scannedCode}`, 'success');
+    }
+    setIsBarcodeScannerOpen(false);
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          {onBackToHub && (
+            <button
+              type="button"
+              onClick={onBackToHub}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back</span>
+            </button>
+          )}
+          <div>
+            <h2 className="text-lg font-black text-white flex items-center gap-2">
+              <Package className="w-5 h-5 text-indigo-400" />
+              <span>Item & Stock Master</span>
+            </h2>
+            <p className="text-xs text-slate-400">
+              Universal SKU catalog with live inventory tracking and auto-syncing from purchase bills.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
+            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+            title="Refresh Inventory"
+          >
+            <RefreshCw className={`w-4 h-4 text-amber-400 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAddNew}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Item</span>
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+        {/* Total SKUs */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+            <Package className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400">Total Catalog SKUs</div>
+            <div className="text-lg font-black text-white">{metrics.totalSkus}</div>
+          </div>
+        </div>
+
+        {/* Total Stock Units */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400">Units in Stock</div>
+            <div className="text-lg font-black text-emerald-400">{metrics.totalStockUnits}</div>
+          </div>
+        </div>
+
+        {/* Low Stock Alerts */}
+        <div
+          onClick={() => setStockFilter(stockFilter === 'low' ? 'all' : 'low')}
+          className={`p-3.5 rounded-2xl border transition cursor-pointer ${
+            stockFilter === 'low'
+              ? 'bg-amber-500/20 border-amber-500/50 shadow-md shadow-amber-500/10'
+              : 'bg-slate-900/90 border-slate-800 hover:border-amber-500/30'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                <span>Low Stock (&lt;10)</span>
+              </div>
+              <div className="text-lg font-black text-amber-300">{metrics.lowStockCount}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Inventory Valuation */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+            <IndianRupee className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[11px] font-semibold text-slate-400">Stock Valuation (Cost)</div>
+            <div className="text-lg font-black text-cyan-300">
+              ₹{metrics.totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter and Search Bar */}
+      <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        {/* Search Input */}
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by SKU name, barcode, HSN, category..."
+            className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => setStockFilter('all')}
+              className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                stockFilter === 'all'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All ({items.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter('low')}
+              className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                stockFilter === 'low'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'text-amber-400 hover:text-amber-300'
+              }`}
+            >
+              Low Stock ({metrics.lowStockCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStockFilter('out')}
+              className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                stockFilter === 'out'
+                  ? 'bg-rose-500 text-white shadow-sm'
+                  : 'text-rose-400 hover:text-rose-300'
+              }`}
+            >
+              Out of Stock ({metrics.outOfStockCount})
+            </button>
+          </div>
+
+          {/* Category Dropdown */}
+          {categories.length > 0 && (
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="all">All Categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Items Table */}
+      <div className="rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden shadow-xl">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-left text-xs whitespace-nowrap">
+            <thead>
+              <tr className="bg-slate-950 border-b border-slate-800 text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                <th
+                  onClick={() => handleSort('barcode')}
+                  className="py-3 px-3 cursor-pointer hover:text-white transition"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Barcode / EAN</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('item_name')}
+                  className="py-3 px-3 cursor-pointer hover:text-white transition min-w-[200px]"
+                >
+                  <div className="flex items-center gap-1">
+                    <span>Product Name</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                  </div>
+                </th>
+                <th className="py-3 px-2">Category</th>
+                <th className="py-3 px-2">HSN</th>
+                <th
+                  onClick={() => handleSort('stock_qty')}
+                  className="py-3 px-3 text-right cursor-pointer hover:text-white transition"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Current Stock</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                  </div>
+                </th>
+                <th
+                  onClick={() => handleSort('cost_price')}
+                  className="py-3 px-2 text-right cursor-pointer hover:text-white transition"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Cost (₹)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                  </div>
+                </th>
+                <th className="py-3 px-2 text-right">MRP (₹)</th>
+                <th className="py-3 px-2 text-right">Selling Price</th>
+                <th className="py-3 px-2 text-right">GST %</th>
+                <th className="py-3 px-3 text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/80">
+              {filteredItems.map((item) => {
+                const qty = Number(item.stock_qty) || 0;
+                const isOut = qty <= 0;
+                const isLow = qty > 0 && qty < 10;
+
+                return (
+                  <tr
+                    key={item.id}
+                    className={`transition-colors ${
+                      isOut
+                        ? 'bg-rose-950/10 hover:bg-rose-950/20'
+                        : isLow
+                        ? 'bg-amber-950/10 hover:bg-amber-950/20'
+                        : 'hover:bg-slate-800/40'
+                    }`}
+                  >
+                    {/* Barcode */}
+                    <td className="py-2.5 px-3">
+                      {item.barcode ? (
+                        <span className="font-mono text-[11px] font-bold text-indigo-300 px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/25">
+                          {item.barcode}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(item)}
+                          className="px-2 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>Assign Barcode</span>
+                        </button>
+                      )}
+                    </td>
+
+                    {/* Name */}
+                    <td className="py-2.5 px-3">
+                      <div className="font-bold text-white max-w-xs truncate" title={item.item_name}>
+                        {item.item_name}
+                      </div>
+                    </td>
+
+                    {/* Category */}
+                    <td className="py-2.5 px-2 text-slate-400">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px]">
+                        {item.category || 'General'}
+                      </span>
+                    </td>
+
+                    {/* HSN */}
+                    <td className="py-2.5 px-2 font-mono text-slate-400 text-[11px]">
+                      {item.hsn_code || '—'}
+                    </td>
+
+                    {/* Stock Qty */}
+                    <td className="py-2.5 px-3 text-right">
+                      {isOut ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-300 font-mono font-bold text-xs">
+                          <XCircle className="w-3 h-3" />
+                          <span>0 Out of Stock</span>
+                        </span>
+                      ) : isLow ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300 font-mono font-bold text-xs">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>{qty} Low</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-mono font-bold text-xs">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>{qty} Units</span>
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Cost Price */}
+                    <td className="py-2.5 px-2 text-right font-mono text-slate-300 font-medium">
+                      ₹{Number(item.cost_price || 0).toFixed(2)}
+                    </td>
+
+                    {/* MRP */}
+                    <td className="py-2.5 px-2 text-right font-mono text-slate-400">
+                      ₹{Number(item.mrp || 0).toFixed(2)}
+                    </td>
+
+                    {/* Selling Price */}
+                    <td className="py-2.5 px-2 text-right font-mono text-emerald-400 font-bold">
+                      ₹{Number(item.selling_price || item.mrp || 0).toFixed(2)}
+                    </td>
+
+                    {/* GST % */}
+                    <td className="py-2.5 px-2 text-right font-mono text-slate-400">
+                      {item.gst_pct || 0}%
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-2.5 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleEdit(item)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                          title="Edit Item"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(item)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 transition cursor-pointer"
+                          title="Delete Item"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {filteredItems.length === 0 && (
+                <tr>
+                  <td colSpan="10" className="py-12 text-center text-slate-500">
+                    <Package className="w-8 h-8 mx-auto text-slate-600 mb-2" />
+                    <p className="font-semibold">No items match your filter criteria.</p>
+                    <button
+                      type="button"
+                      onClick={handleAddNew}
+                      className="mt-2 text-xs text-indigo-400 hover:underline font-bold"
+                    >
+                      + Add a new inventory item now
+                    </button>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Quick Edit / Create Drawer Modal */}
+      {isDrawerOpen && editingItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <Package className="w-5 h-5 text-indigo-400" />
+                  <span>{editingItem.id ? 'Edit Inventory Item' : 'New Inventory Item'}</span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Update SKU details, stock levels, and barcode mapping.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDrawerOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSave} className="space-y-3.5 text-xs">
+              {/* Product Name */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Product / Item Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editingItem.item_name || ''}
+                  onChange={(e) => setEditingItem({ ...editingItem, item_name: e.target.value })}
+                  placeholder="e.g. Bisleri 20L Water Can"
+                  className="w-full h-9 px-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-medium focus:outline-none"
+                />
+              </div>
+
+              {/* Barcode & Scanner button */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Universal Barcode / EAN</label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <BarcodeIcon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      value={editingItem.barcode || ''}
+                      onChange={(e) => setEditingItem({ ...editingItem, barcode: e.target.value })}
+                      placeholder="e.g. 8901030000000"
+                      className="w-full h-9 pl-9 pr-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsBarcodeScannerOpen(true)}
+                    className="h-9 px-3 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Scan className="w-4 h-4" />
+                    <span>Scan</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Category & HSN Code */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Category</label>
+                  <input
+                    type="text"
+                    value={editingItem.category || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
+                    placeholder="e.g. Water / Beverages"
+                    className="w-full h-9 px-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">HSN Code</label>
+                  <input
+                    type="text"
+                    value={editingItem.hsn_code || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, hsn_code: e.target.value })}
+                    placeholder="e.g. 2201"
+                    className="w-full h-9 px-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Stock Quantity & GST % */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Current Stock Qty</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingItem.stock_qty ?? 0}
+                    onChange={(e) => setEditingItem({ ...editingItem, stock_qty: Number(e.target.value) })}
+                    className="w-full h-9 px-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">GST Rate (%)</label>
+                  <select
+                    value={editingItem.gst_pct ?? 18}
+                    onChange={(e) => setEditingItem({ ...editingItem, gst_pct: Number(e.target.value) })}
+                    className="w-full h-9 px-3 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="0">0%</option>
+                    <option value="5">5%</option>
+                    <option value="12">12%</option>
+                    <option value="18">18%</option>
+                    <option value="28">28%</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Cost Price, MRP, Selling Price */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Cost Rate (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingItem.cost_price ?? 0}
+                    onChange={(e) => setEditingItem({ ...editingItem, cost_price: Number(e.target.value) })}
+                    className="w-full h-9 px-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">MRP (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingItem.mrp ?? 0}
+                    onChange={(e) => setEditingItem({ ...editingItem, mrp: Number(e.target.value) })}
+                    className="w-full h-9 px-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Selling (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingItem.selling_price ?? 0}
+                    onChange={(e) => setEditingItem({ ...editingItem, selling_price: Number(e.target.value) })}
+                    className="w-full h-9 px-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Profit Margin Info */}
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                <span>Estimated Margin:</span>
+                <span className="font-mono font-bold text-emerald-400">
+                  ₹{(Number(editingItem.selling_price || 0) - Number(editingItem.cost_price || 0)).toFixed(2)}
+                  {' '}(
+                  {Number(editingItem.cost_price) > 0
+                    ? (((Number(editingItem.selling_price || 0) - Number(editingItem.cost_price || 0)) / Number(editingItem.cost_price)) * 100).toFixed(1)
+                    : 0}
+                  %)
+                </span>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsDrawerOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-400 hover:to-cyan-400 text-white font-black transition shadow-lg shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSaving ? 'Saving...' : 'Save Item'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Barcode Scanner Modal */}
+      {isBarcodeScannerOpen && (
+        <BarcodeScannerModal
+          isOpen={isBarcodeScannerOpen}
+          onClose={() => setIsBarcodeScannerOpen(false)}
+          onScan={handleBarcodeScanned}
+        />
+      )}
+    </div>
+  );
+}

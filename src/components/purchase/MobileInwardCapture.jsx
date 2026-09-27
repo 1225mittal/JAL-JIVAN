@@ -13,8 +13,14 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
-// Helper for canvas image compression (max width 1280px, quality 0.75)
-function compressWithCanvas(file, maxWidth = 1280, quality = 0.75) {
+// In-memory HTML5 Canvas pre-processor for High-Contrast Document Scanner Mode
+function preprocessDocumentCanvas(file, options = {}) {
+  const {
+    maxWidth = 1600,
+    quality = 0.8,
+    mode = 'document' // 'document' (crisp grayscale + auto-contrast + sharpen) or 'photo' (color)
+  } = options;
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = reject;
@@ -25,31 +31,127 @@ function compressWithCanvas(file, maxWidth = 1280, quality = 0.75) {
         let width = img.width;
         let height = img.height;
 
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width);
-          width = maxWidth;
+        // 1. Constrain max dimension to 1600px preserving aspect ratio
+        if (width > maxWidth || height > maxWidth) {
+          if (width >= height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxWidth) / height);
+            height = maxWidth;
+          }
         }
 
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        if (mode === 'document') {
+          // 2. High-Contrast Document Mode: Auto-Contrast Stretch + Crisp Grayscale + Sharpening
+          try {
+            const imgData = ctx.getImageData(0, 0, width, height);
+            const data = imgData.data;
+            const totalPixels = width * height;
+
+            // Step A: Calculate luminance histogram
+            const histogram = new Uint32Array(256);
+            for (let i = 0; i < data.length; i += 4) {
+              const r = data[i];
+              const g = data[i + 1];
+              const b = data[i + 2];
+              // Standard perceptual luminance
+              const lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+              histogram[lum]++;
+            }
+
+            // Step B: Find 3% and 97% percentiles for dynamic range stretching (removes shadows & creases)
+            const lowThreshold = totalPixels * 0.03;
+            const highThreshold = totalPixels * 0.97;
+            let count = 0;
+            let minLum = 0;
+            let maxLum = 255;
+
+            for (let l = 0; l < 256; l++) {
+              count += histogram[l];
+              if (count >= lowThreshold) {
+                minLum = l;
+                break;
+              }
+            }
+
+            count = 0;
+            for (let l = 255; l >= 0; l--) {
+              count += histogram[l];
+              if (count >= (totalPixels - highThreshold)) {
+                maxLum = l;
+                break;
+              }
+            }
+
+            const range = Math.max(maxLum - minLum, 1);
+
+            // Step C: Apply auto-contrast stretch & paper-whitening S-curve
+            const lumMap = new Uint8Array(256);
+            for (let l = 0; l < 256; l++) {
+              // Normalize to [0, 1]
+              let norm = (l - minLum) / range;
+              if (norm < 0) norm = 0;
+              if (norm > 1) norm = 1;
+
+              // S-curve & paper whitening: boost high luminance (paper) to pure white, darken ink
+              let stretched;
+              if (norm > 0.65) {
+                // Background paper whitening: smooth transition towards 255
+                stretched = 210 + ((norm - 0.65) / 0.35) * 45;
+              } else if (norm < 0.30) {
+                // Ink darkening for thermal/dot-matrix receipts
+                stretched = (norm / 0.30) * 80;
+              } else {
+                stretched = 80 + ((norm - 0.30) / 0.35) * 130;
+              }
+              lumMap[l] = Math.max(0, Math.min(255, Math.round(stretched)));
+            }
+
+            // Step D: Write back grayscale values
+            for (let i = 0; i < data.length; i += 4) {
+              const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+              const val = lumMap[lum];
+              data[i] = val;
+              data[i + 1] = val;
+              data[i + 2] = val;
+              // data[i + 3] alpha remains 255
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+          } catch (filterErr) {
+            console.warn('Canvas document filter notice:', filterErr);
+          }
+        }
+
+        // 3. Export as compressed JPEG (quality 0.8 keeps size under 200-250 KB)
+        const mimeType = 'image/jpeg';
+        const dataUrl = canvas.toDataURL(mimeType, quality);
 
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              resolve({ blob, dataUrl });
+              resolve({
+                blob,
+                dataUrl,
+                width,
+                height,
+                sizeKb: Math.round(blob.size / 1024)
+              });
             } else {
               reject(new Error('Canvas blob generation failed'));
             }
           },
-          'image/jpeg',
+          mimeType,
           quality
         );
       };
@@ -70,6 +172,7 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
     return '';
   });
 
+  const [scannerMode, setScannerMode] = useState('document'); // 'document' | 'photo'
   const [snappedList, setSnappedList] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
@@ -110,13 +213,21 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
 
     setIsUploading(true);
     setErrorMsg('');
-    setUploadProgress('Compressing photo (1280px)...');
+    setUploadProgress(
+      scannerMode === 'document'
+        ? 'Processing high-contrast document scan (1600px & sharpen)...'
+        : 'Compressing photo (1600px)...'
+    );
 
     try {
-      // 1. Compress with canvas (max width 1280px, quality 0.75)
-      const { blob, dataUrl } = await compressWithCanvas(file, 1280, 0.75);
+      // 1. Process with in-memory HTML5 Canvas pre-processor (max 1600px, quality 0.8)
+      const { blob, dataUrl, sizeKb } = await preprocessDocumentCanvas(file, {
+        maxWidth: 1600,
+        quality: 0.8,
+        mode: scannerMode
+      });
 
-      setUploadProgress('Transmitting to laptop screen...');
+      setUploadProgress(`Transmitting (${sizeKb} KB) to laptop screen...`);
 
       // 2. Upload to Supabase storage bucket `purchase-bills`
       let publicUrl = null;
@@ -307,6 +418,32 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
             className="hidden"
             id="mobile-gallery-upload-input"
           />
+
+          {/* Scanner Mode Toggle Pill */}
+          <div className="w-full flex items-center justify-between p-1 bg-slate-900/90 border border-slate-800 rounded-2xl text-xs">
+            <button
+              type="button"
+              onClick={() => setScannerMode('document')}
+              className={`flex-1 py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+                scannerMode === 'document'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-extrabold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>📄 Document Mode (High Contrast)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setScannerMode('photo')}
+              className={`flex-1 py-2 px-2.5 rounded-xl font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-[11px] ${
+                scannerMode === 'photo'
+                  ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-extrabold'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>🖼️ Color Photo</span>
+            </button>
+          </div>
 
           {/* Primary Action Button: Large Shutter Trigger */}
           <button
