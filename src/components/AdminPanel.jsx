@@ -129,6 +129,13 @@ export function AdminPanel({
   const currentTab = searchParams.get('tab') || 'deliveries';
 
   const handleTabChange = useCallback((newTab) => {
+    if (newTab === 'staff') {
+      if (typeof window !== 'undefined') {
+        window.history.pushState(null, '', '/admin/staff');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
+      return;
+    }
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('tab', newTab);
@@ -667,25 +674,36 @@ export function AdminPanel({
     }
   };
 
+  const handleBack = () => {
+    if (typeof onBackToHub === 'function') {
+      onBackToHub();
+    } else {
+      window.location.href = '/admin';
+    }
+  };
+
+  if (activeTab === 'staff') {
+    return <StaffDirectoryHub onBackToHub={handleBack} />;
+  }
+
   return (
     <div className="space-y-5 pb-12 w-full max-w-full overflow-x-hidden">
       {/* Top Action Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
         <div className="flex items-center gap-3">
-          {onBackToHub && (
-            <button
-              type="button"
-              onClick={onBackToHub}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm"
-              title="Switch to Admin Hub"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Switch to Admin Hub</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
+            title="Return to Admin Hub"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>← Admin Hub</span>
+          </button>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Delivery & Dispatch Console
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+              <Truck className="w-6 h-6 text-emerald-400" />
+              <span>Delivery & Dispatch Console</span>
             </h1>
             <p className="text-xs text-slate-400">
               Monitor real-time deliveries, dispatch drivers, and view live status
@@ -1758,14 +1776,6 @@ export function AdminPanel({
           <DamageWorkflowToggles />
         </div>
       )}
-
-      {/* TAB 8: STAFF & ROLES DIRECTORY */}
-      {activeTab === 'staff' && (
-        <div className="space-y-4">
-          <StaffDirectoryHub onBackToHub={onBackToHub} />
-        </div>
-      )}
-
 
       {/* Address Detail Viewer Modal for Admin */}
       {selectedAddressForDetail && (

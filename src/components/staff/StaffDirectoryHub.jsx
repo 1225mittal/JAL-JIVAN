@@ -433,22 +433,28 @@ export default function StaffDirectoryHub({ onBackToHub, showToast }) {
     return days;
   }, [selectedYear, selectedMonth, attendanceMap, today]);
 
+  const handleBack = () => {
+    if (typeof onBackToHub === 'function') {
+      onBackToHub();
+    } else {
+      window.location.href = '/admin';
+    }
+  };
+
   return (
     <div className="space-y-4 pb-12 w-full max-w-full overflow-x-hidden">
-      {/* Top Breadcrumb & Action Header */}
+      {/* Top Header Card with Single Return Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
         <div className="flex items-center gap-3">
-          {onBackToHub && (
-            <button
-              type="button"
-              onClick={onBackToHub}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm"
-              title="Switch to Admin Hub"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Admin Hub</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
+            title="Return to Admin Hub"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>← Admin Hub</span>
+          </button>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
               <Users className="w-6 h-6 text-emerald-400" />

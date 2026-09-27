@@ -286,20 +286,28 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
     );
   }, [items, slipModalDistributor]);
 
+  const handleBack = () => {
+    if (typeof onBackToHub === 'function') {
+      onBackToHub();
+    } else {
+      window.location.href = '/admin';
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in pb-12 w-full max-w-full overflow-x-hidden">
       {/* TOP HEADER */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 w-full max-w-full">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          {onBackToHub && (
-            <button
-              onClick={onBackToHub}
-              className="p-2 sm:p-2.5 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0"
-              title="Return to Admin Hub"
-            >
-              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleBack}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
+            title="Return to Admin Hub"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>← Admin Hub</span>
+          </button>
 
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">

@@ -13,7 +13,6 @@ import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
 import Toast from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
-import { ArrowLeft } from 'lucide-react';
 import {
   fetchDrivers,
   addDriver,
@@ -730,125 +729,51 @@ export default function App() {
           /* ======================================================== */
           !isAdminLoggedIn ? (
             <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+          ) : routeState.module === 'delivery' ? (
+            <ErrorBoundary title="Delivery & Dispatch Console">
+              <AdminDashboard
+                orders={orders}
+                drivers={drivers}
+                products={products}
+                loading={loading}
+                onOpenAddDriver={() => setIsAddDriverOpen(true)}
+                onOpenCreateTask={() => setIsCreateTaskOpen(true)}
+                onUpdateStatus={handleUpdateStatus}
+                onAssignDriver={handleAssignDriver}
+                onAddProduct={handleAddProduct}
+                onUpdateProduct={handleUpdateProduct}
+                onDeleteProduct={handleDeleteProduct}
+                onUpdateOrder={handleUpdateOrder}
+                onDeleteOrder={handleDeleteOrder}
+                onUpdateDriver={handleUpdateDriver}
+                onDeleteDriver={handleDeleteDriver}
+                onUpdateAddress={handleUpdateAddress}
+                onDeleteAddress={handleDeleteAddress}
+                onRefresh={loadInitialData}
+                onLogout={handleAdminLogout}
+                onBackToHub={handleBackToHub}
+              />
+            </ErrorBoundary>
+          ) : routeState.module === 'purchase' ? (
+            <PurchaseInwardHub
+              onBackToHub={handleBackToHub}
+              showToast={showToast}
+            />
+          ) : routeState.module === 'damage' ? (
+            <DamageReturnHub
+              onBackToHub={handleBackToHub}
+              drivers={drivers}
+            />
+          ) : routeState.module === 'staff' ? (
+            <StaffDirectoryHub
+              onBackToHub={handleBackToHub}
+              showToast={showToast}
+            />
           ) : (
-            <div>
-              {/* Clean Module Top Bar: Back to Hub + Module Title + Direct Navigation Tabs */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    type="button"
-                    onClick={handleBackToHub}
-                    className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1.5 transition-colors shrink-0 px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700/80 shadow-sm"
-                    title="Switch to Admin Hub"
-                  >
-                    <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>← Switch to Admin Hub</span>
-                  </button>
-                  <span className="text-slate-600 font-bold">/</span>
-                  <span className="text-white font-semibold truncate">
-                    {getModuleTitle(routeState.module)}
-                  </span>
-                </div>
-
-                {/* Direct Navigation Tabs in Module Header */}
-                {isAdminLoggedIn && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => navigate('/admin/delivery')}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
-                        routeState.module === 'delivery'
-                          ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
-                      }`}
-                    >
-                      🚚 Deliveries
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/admin/damage')}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
-                        routeState.module === 'damage'
-                          ? 'bg-rose-600 text-white shadow-sm'
-                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
-                      }`}
-                    >
-                      📦 Damage & Returns
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/admin/purchase')}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
-                        routeState.module === 'purchase'
-                          ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
-                      }`}
-                    >
-                      🧾 Purchase Bills
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/admin/staff')}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
-                        routeState.module === 'staff'
-                          ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
-                      }`}
-                    >
-                      👥 Staff & Roles
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Render Selected Module Component */}
-              {routeState.module === 'delivery' ? (
-                <ErrorBoundary title="Delivery & Dispatch Console">
-                  <AdminDashboard
-                    orders={orders}
-                    drivers={drivers}
-                    products={products}
-                    loading={loading}
-                    onOpenAddDriver={() => setIsAddDriverOpen(true)}
-                    onOpenCreateTask={() => setIsCreateTaskOpen(true)}
-                    onUpdateStatus={handleUpdateStatus}
-                    onAssignDriver={handleAssignDriver}
-                    onAddProduct={handleAddProduct}
-                    onUpdateProduct={handleUpdateProduct}
-                    onDeleteProduct={handleDeleteProduct}
-                    onUpdateOrder={handleUpdateOrder}
-                    onDeleteOrder={handleDeleteOrder}
-                    onUpdateDriver={handleUpdateDriver}
-                    onDeleteDriver={handleDeleteDriver}
-                    onUpdateAddress={handleUpdateAddress}
-                    onDeleteAddress={handleDeleteAddress}
-                    onRefresh={loadInitialData}
-                    onLogout={handleAdminLogout}
-                    onBackToHub={handleBackToHub}
-                  />
-                </ErrorBoundary>
-              ) : routeState.module === 'purchase' ? (
-                <PurchaseInwardHub
-                  onBackToHub={handleBackToHub}
-                  showToast={showToast}
-                />
-              ) : routeState.module === 'damage' ? (
-                <DamageReturnHub
-                  onBackToHub={handleBackToHub}
-                  drivers={drivers}
-                />
-              ) : routeState.module === 'staff' ? (
-                <StaffDirectoryHub
-                  onBackToHub={handleBackToHub}
-                  showToast={showToast}
-                />
-              ) : (
-                <PlannedModuleView
-                  moduleId={routeState.module}
-                  onBackToHub={handleBackToHub}
-                />
-              )}
-            </div>
+            <PlannedModuleView
+              moduleId={routeState.module}
+              onBackToHub={handleBackToHub}
+            />
           )
         ) : (
           /* ======================================================== */

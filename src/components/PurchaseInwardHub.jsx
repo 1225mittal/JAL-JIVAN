@@ -438,33 +438,39 @@ export default function PurchaseInwardHub({
     );
   });
 
+  const handleBack = () => {
+    if (typeof onBackToHub === 'function') {
+      onBackToHub();
+    } else {
+      window.location.href = '/admin';
+    }
+  };
+
   return (
     <div className="space-y-6 pb-16 animate-in fade-in duration-300 w-full max-w-full overflow-x-hidden">
       {/* Top Header Card */}
       <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-slate-800 p-6 sm:p-7 shadow-2xl flex flex-col md:flex-row md:items-center md:justify-between gap-5">
         <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
             <button
               type="button"
-              onClick={onBackToHub}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition shadow-sm"
+              onClick={handleBack}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
+              title="Return to Admin Hub"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Hub</span>
+              <span>← Admin Hub</span>
             </button>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-              <Sparkles className="w-3 h-3 animate-spin-slow text-amber-400" />
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+              <FileSpreadsheet className="w-6 h-6 text-amber-400" />
+              <span>Purchase & Inward Management</span>
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+              <Sparkles className="w-3 h-3 text-amber-400" />
               <span>Groq Vision LPU OCR</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-              <Scan className="w-3 h-3 text-emerald-400" />
-              <span>Barcode / Camera Ready</span>
             </span>
           </div>
 
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-3">
-            Purchase & Inward Management
-          </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
             Scan tax invoices and vendor bills using high-speed Groq Vision OCR. Auto-populate HSN, rates, GST tax slabs, and assign EAN barcodes.
           </p>
