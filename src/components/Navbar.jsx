@@ -21,7 +21,7 @@ export default function Navbar({
 
   return (
     <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-md overflow-x-hidden">
-      <div className="w-full max-w-full sm:max-w-6xl mx-auto px-3.5 py-2.5 flex items-center justify-between gap-3">
+      <div className={`w-full ${adminSubView === 'purchase' ? 'max-w-[98vw]' : 'max-w-full sm:max-w-6xl'} mx-auto px-3.5 py-2 flex items-center justify-between gap-3`}>
         {/* Left Section: Logo & Branding */}
         <div
           onClick={handleLogoClick}

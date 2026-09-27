@@ -657,47 +657,47 @@ export default function PurchaseInwardHub({
   };
 
   return (
-    <div className="space-y-6 pb-16 animate-in fade-in duration-300 w-full max-w-full overflow-x-hidden">
+    <div className="space-y-3 pb-12 animate-in fade-in duration-300 w-full max-w-[98vw] mx-auto px-2 md:px-4 py-2 overflow-x-hidden">
       {/* Top Header Card */}
-      <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-slate-800 p-6 sm:p-7 shadow-2xl flex flex-col md:flex-row md:items-center md:justify-between gap-5">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 flex-wrap">
+      <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-slate-800 p-3 sm:p-4 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <button
               type="button"
               onClick={handleBack}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition text-xs font-semibold shrink-0 shadow-sm cursor-pointer"
               title="Return to Admin Hub"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>← Admin Hub</span>
             </button>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-              <FileSpreadsheet className="w-6 h-6 text-amber-400" />
+            <h1 className="text-lg sm:text-xl font-black text-white tracking-tight flex items-center gap-2">
+              <FileSpreadsheet className="w-5 h-5 text-amber-400" />
               <span>Purchase & Inward Management</span>
             </h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
               <Sparkles className="w-3 h-3 text-amber-400" />
               <span>Groq Vision LPU OCR</span>
             </span>
           </div>
 
-          <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+          <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
             Scan tax invoices and vendor bills using high-speed Groq Vision OCR. Auto-populate HSN, rates, GST tax slabs, and assign EAN barcodes.
           </p>
         </div>
 
         {/* Tab Buttons */}
-        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-950/80 border border-slate-800 shrink-0 flex-wrap">
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-950/80 border border-slate-800 shrink-0 flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab('new')}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
               activeTab === 'new'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             <span>New Bill Entry</span>
           </button>
 
@@ -707,13 +707,13 @@ export default function PurchaseInwardHub({
               setActiveTab('history');
               loadHistory();
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
               activeTab === 'history'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <FileSpreadsheet className="w-4 h-4" />
+            <FileSpreadsheet className="w-3.5 h-3.5" />
             <span>Inward Invoices Ledger ({invoicesHistory.length})</span>
           </button>
 
@@ -723,13 +723,13 @@ export default function PurchaseInwardHub({
               setActiveTab('vendors');
               loadVendors();
             }}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
               activeTab === 'vendors'
                 ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Building2 className="w-4 h-4" />
+            <Building2 className="w-3.5 h-3.5" />
             <span>🏢 Vendors Directory ({vendorsList.length})</span>
           </button>
         </div>
@@ -739,10 +739,10 @@ export default function PurchaseInwardHub({
       {/* TAB 1: NEW BILL ENTRY (UPLOAD + GROQ VISION + REVIEW) */}
       {/* ======================================================== */}
       {activeTab === 'new' && (
-        <div className="space-y-6">
+        <div className="space-y-3">
           {/* Upload Dropzone & Queue Hub Card */}
-          <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-2.5">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Upload className="w-5 h-5 text-amber-400" />
@@ -784,24 +784,24 @@ export default function PurchaseInwardHub({
             />
 
             {/* Top Action Triggers: Mobile Scanner Modal & Multi-File Upload */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Trigger 1: Open Mobile Scanner Modal */}
               <button
                 type="button"
                 onClick={() => setIsMobileScannerOpen(true)}
-                className="group relative flex items-center gap-4 p-5 rounded-2xl border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-amber-500/5"
+                className="group relative flex items-center gap-3 p-3.5 rounded-xl border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-amber-500/5"
               >
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 group-hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 transition">
-                  <Camera className="w-6 h-6" />
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 group-hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 transition">
+                  <Camera className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-white text-sm group-hover:text-amber-400 transition flex items-center gap-1.5">
+                  <h3 className="font-bold text-white text-xs sm:text-sm group-hover:text-amber-400 transition flex items-center gap-1.5">
                     <span>📱 Open Mobile Bill Scanner</span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.2 rounded-full border border-amber-500/30">
                       Live Queue
                     </span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-[11px] text-slate-400 mt-0.5">
                     Live camera viewfinder for continuous photo snaps and queue processing
                   </p>
                 </div>
@@ -811,16 +811,16 @@ export default function PurchaseInwardHub({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="group relative flex items-center gap-4 p-5 rounded-2xl border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-cyan-500/5"
+                className="group relative flex items-center gap-3 p-3.5 rounded-xl border-2 border-dashed border-cyan-500/50 hover:border-cyan-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-cyan-500/5"
               >
-                <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 group-hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0 transition">
-                  <Upload className="w-6 h-6" />
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/10 group-hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0 transition">
+                  <Upload className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-white text-sm group-hover:text-cyan-400 transition flex items-center gap-1.5">
+                  <h3 className="font-bold text-white text-xs sm:text-sm group-hover:text-cyan-400 transition flex items-center gap-1.5">
                     <span>📁 Upload Bill Photos / PDF (Multi-File)</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-[11px] text-slate-400 mt-0.5">
                     Upload multiple images or PDFs. Each bill is queued as a separate entry
                   </p>
                 </div>
@@ -830,11 +830,11 @@ export default function PurchaseInwardHub({
             {/* ======================================================== */}
             {/* REQUIREMENT 1: UPLOADED BILLS QUEUE TRAY (INDIVIDUAL CARDS) */}
             {/* ======================================================== */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
+            <div className="space-y-2.5 pt-1">
+              <div className="flex items-center justify-between border-t border-slate-800/80 pt-2.5">
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-400" />
-                  <h3 className="text-sm font-bold text-white">
+                  <h3 className="text-xs sm:text-sm font-bold text-white">
                     Uploaded Bills Queue
                   </h3>
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
@@ -847,15 +847,15 @@ export default function PurchaseInwardHub({
               </div>
 
               {billQueue.length === 0 ? (
-                <div className="rounded-2xl border-2 border-dashed border-slate-800 bg-slate-950/40 p-8 text-center space-y-2">
-                  <FileText className="w-8 h-8 mx-auto text-slate-700" />
+                <div className="rounded-xl border-2 border-dashed border-slate-800 bg-slate-950/40 p-4 sm:p-5 text-center space-y-1.5">
+                  <FileText className="w-7 h-7 mx-auto text-slate-700" />
                   <p className="text-xs font-semibold text-slate-300">No bills currently in queue</p>
                   <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
                     Snap physical bills using "📱 Open Mobile Bill Scanner" or upload images/PDFs above to add them to your queue.
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                   {billQueue.map((item, index) => {
                     const isProcessing = activeProcessingBillId === item.id;
                     const isCurrentlyActive = billPreviewUrl === item.dataUrl;
@@ -867,15 +867,15 @@ export default function PurchaseInwardHub({
                     return (
                       <div
                         key={item.id}
-                        className={`p-4 rounded-2xl border transition-all ${
+                        className={`p-3 rounded-xl border transition-all ${
                           isCurrentlyActive
-                            ? 'bg-slate-950 border-amber-500 shadow-lg shadow-amber-500/10'
+                            ? 'bg-slate-950 border-amber-500 shadow-md shadow-amber-500/10'
                             : item.attachedToPrevious
                             ? 'bg-slate-950/90 border-cyan-500/40'
                             : 'bg-slate-950/80 border-slate-800 hover:border-slate-700'
                         }`}
                       >
-                        <div className="flex items-start gap-3.5">
+                        <div className="flex items-start gap-3">
                           {/* Image Thumbnail with Zoom Preview Button */}
                           <div
                             onClick={() => setZoomedQueueImage(item.dataUrl)}
@@ -999,12 +999,12 @@ export default function PurchaseInwardHub({
           {/* ======================================================== */}
           {/* EDITABLE REVIEW & VERIFICATION UI */}
           {/* ======================================================== */}
-          <div className="space-y-6">
+          <div className="space-y-3">
             {/* 1. Header Card: Seller Details & Bank Details */}
-            <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Building2 className="w-5 h-5 text-indigo-400" />
+            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-2.5">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-indigo-400" />
                   <span>1. Vendor, Tax & Bank Credentials</span>
                 </h3>
                 <span className="text-[11px] text-slate-400">
@@ -1012,10 +1012,11 @@ export default function PurchaseInwardHub({
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+              {/* Responsive Bill Header Grid: 6 cols (lg), 4 cols (md), 2 cols (mobile) */}
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 md:gap-2.5 text-xs">
                 {/* Seller Name */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
+                <div className="col-span-2 md:col-span-2 lg:col-span-2">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
                     Seller / Agency Name *
                   </label>
                   <input
@@ -1023,13 +1024,13 @@ export default function PurchaseInwardHub({
                     value={sellerData.name}
                     onChange={(e) => setSellerData({ ...sellerData, name: e.target.value })}
                     placeholder="e.g. Bisleri Distributors Ltd"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-semibold focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white font-medium text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Seller GSTIN */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
                     GSTIN (15 Digits)
                   </label>
                   <input
@@ -1037,139 +1038,139 @@ export default function PurchaseInwardHub({
                     value={sellerData.gst}
                     onChange={(e) => setSellerData({ ...sellerData, gst: e.target.value.toUpperCase() })}
                     placeholder="07AAAAA0000A1Z5"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono uppercase focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white font-mono uppercase text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* FSSAI License */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
                     FSSAI Lic. No.
                   </label>
                   <input
                     type="text"
                     value={sellerData.fssai}
                     onChange={(e) => setSellerData({ ...sellerData, fssai: e.target.value })}
-                    placeholder="14-digit FSSAI Number"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none transition"
+                    placeholder="14-digit FSSAI"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white font-mono text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Invoice Number */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Bill / Invoice Number
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
+                    Bill / Invoice No.
                   </label>
                   <input
                     type="text"
                     value={invoiceData.invoice_number}
                     onChange={(e) => setInvoiceData({ ...invoiceData, invoice_number: e.target.value })}
                     placeholder="INV-2026-001"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white font-mono text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Invoice Date */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
                     Invoice Date
                   </label>
                   <input
                     type="date"
                     value={invoiceData.invoice_date}
                     onChange={(e) => setInvoiceData({ ...invoiceData, invoice_date: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white font-mono focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white font-mono text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Vendor Contact / Phone */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Vendor Phone / Contact
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
+                    Vendor Contact
                   </label>
                   <input
                     type="text"
                     value={sellerData.contact}
                     onChange={(e) => setSellerData({ ...sellerData, contact: e.target.value })}
                     placeholder="+91 98XXXXXXXX"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Salesman Name */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Salesman / Booking Agent
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
+                    Salesman Name
                   </label>
                   <input
                     type="text"
                     value={sellerData.salesman_name}
                     onChange={(e) => setSellerData({ ...sellerData, salesman_name: e.target.value })}
-                    placeholder="Name of booking salesman"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none transition"
+                    placeholder="Salesman name"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Salesman Mobile */}
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Salesman Mobile
+                <div className="col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
+                    Salesman Phone
                   </label>
                   <input
                     type="text"
                     value={sellerData.salesman_number}
                     onChange={(e) => setSellerData({ ...sellerData, salesman_number: e.target.value })}
                     placeholder="Salesman phone"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
 
                 {/* Full Address */}
-                <div className="sm:col-span-2 lg:col-span-1">
-                  <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-                    Seller Depot / Godown Address
+                <div className="col-span-2 md:col-span-2 lg:col-span-3">
+                  <label className="block text-slate-300 font-semibold mb-1 text-xs truncate">
+                    Depot / Godown Address
                   </label>
                   <input
                     type="text"
                     value={sellerData.address}
                     onChange={(e) => setSellerData({ ...sellerData, address: e.target.value })}
                     placeholder="Full street address & pin code"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl text-white focus:outline-none transition"
+                    className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-white text-xs sm:text-sm focus:outline-none transition"
                   />
                 </div>
               </div>
 
               {/* Bank Details Strip */}
-              <div className="pt-3 border-t border-slate-800/80">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div className="pt-2.5 border-t border-slate-800/80">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-2.5 text-xs">
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Bank Name</label>
+                    <label className="block text-slate-400 font-semibold mb-1 text-xs truncate">Bank Name</label>
                     <input
                       type="text"
                       value={bankDetails.bank_name}
                       onChange={(e) => setBankDetails({ ...bankDetails, bank_name: e.target.value })}
                       placeholder="e.g. HDFC / SBI / ICICI"
-                      className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-white text-xs focus:outline-none"
+                      className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-white text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Account Number</label>
+                    <label className="block text-slate-400 font-semibold mb-1 text-xs truncate">Account Number</label>
                     <input
                       type="text"
                       value={bankDetails.account_no}
                       onChange={(e) => setBankDetails({ ...bankDetails, account_no: e.target.value })}
                       placeholder="Bank A/C number"
-                      className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-white font-mono text-xs focus:outline-none"
+                      className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-white font-mono text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">IFSC Code</label>
+                    <label className="block text-slate-400 font-semibold mb-1 text-xs truncate">IFSC Code</label>
                     <input
                       type="text"
                       value={bankDetails.ifsc}
                       onChange={(e) => setBankDetails({ ...bankDetails, ifsc: e.target.value.toUpperCase() })}
                       placeholder="e.g. HDFC0001234"
-                      className="w-full px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-white font-mono uppercase text-xs focus:outline-none"
+                      className="w-full min-w-0 h-9 px-2.5 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-white font-mono uppercase text-xs sm:text-sm focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                 </div>
@@ -1177,14 +1178,14 @@ export default function PurchaseInwardHub({
             </div>
 
             {/* 2. Line Items Table Card */}
-            <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-2.5">
                 <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Package className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Package className="w-4 h-4 text-emerald-400" />
                     <span>2. Inward Line Items ({items.length})</span>
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-[11px] text-slate-400">
                     Directly edit cell values. Use scanner buttons to capture barcodes via USB gun or back camera.
                   </p>
                 </div>
@@ -1192,28 +1193,28 @@ export default function PurchaseInwardHub({
                 <button
                   type="button"
                   onClick={handleAddItemRow}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs transition"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs transition cursor-pointer self-start sm:self-auto"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Line Item</span>
                 </button>
               </div>
 
-              {/* Responsive Table Container */}
-              <div className="overflow-x-auto w-full rounded-2xl border border-slate-800 bg-slate-950/60">
+              {/* Full-Visibility Line Items Table Container */}
+              <div className="w-full overflow-x-auto border border-slate-800 rounded-lg bg-slate-950/60 shadow-inner">
                 <table className="w-full text-left text-xs whitespace-nowrap">
                   <thead>
                     <tr className="bg-slate-900 border-b border-slate-800 text-[11px] font-bold uppercase text-slate-400 tracking-wider">
-                      <th className="py-3 px-3">Barcode</th>
-                      <th className="py-3 px-3 min-w-[200px]">Item Name</th>
-                      <th className="py-3 px-2 w-20">HSN</th>
-                      <th className="py-3 px-2 w-16 text-right">Qty</th>
-                      <th className="py-3 px-2 w-20 text-right">MRP (₹)</th>
-                      <th className="py-3 px-2 w-24 text-right">Pre-GST (₹)</th>
-                      <th className="py-3 px-2 w-16 text-right">GST %</th>
-                      <th className="py-3 px-2 w-20 text-right">Disc (₹)</th>
-                      <th className="py-3 px-2 w-24 text-right">Final Cost (₹)</th>
-                      <th className="py-3 px-2 w-12 text-center">Action</th>
+                      <th className="py-2.5 px-2.5 min-w-[110px]">Barcode</th>
+                      <th className="py-2.5 px-2.5 min-w-[220px]">Item Name</th>
+                      <th className="py-2.5 px-2 min-w-[80px]">HSN</th>
+                      <th className="py-2.5 px-2 min-w-[65px] text-right">Qty</th>
+                      <th className="py-2.5 px-2 min-w-[75px] text-right">MRP (₹)</th>
+                      <th className="py-2.5 px-2 min-w-[85px] text-right">Pre-GST (₹)</th>
+                      <th className="py-2.5 px-2 min-w-[80px] text-right">GST %</th>
+                      <th className="py-2.5 px-2 min-w-[75px] text-right">Discount (₹)</th>
+                      <th className="py-2.5 px-2 min-w-[90px] text-right">Final Cost (₹)</th>
+                      <th className="py-2.5 px-2 min-w-[45px] text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/80">
@@ -1228,11 +1229,11 @@ export default function PurchaseInwardHub({
                               : 'hover:bg-slate-900/60'
                           }`}
                         >
-                          {/* Barcode Column */}
-                          <td className="py-2 px-3">
+                          {/* Barcode Column: min-w-[110px] */}
+                          <td className="py-1.5 px-2.5 min-w-[110px]">
                             <div className="flex items-center gap-1.5">
                               {hasBarcode ? (
-                                <span className="font-mono text-[11px] font-bold text-emerald-300 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30">
+                                <span className="font-mono text-[11px] font-bold text-emerald-300 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/30 max-w-[80px] truncate" title={it.barcode}>
                                   {it.barcode}
                                 </span>
                               ) : (
@@ -1243,7 +1244,7 @@ export default function PurchaseInwardHub({
                               <button
                                 type="button"
                                 onClick={() => handleOpenScanner(idx)}
-                                className={`p-1.5 rounded-lg border transition ${
+                                className={`p-1.5 rounded-lg border transition cursor-pointer ${
                                   hasBarcode
                                     ? 'bg-slate-800 text-slate-300 hover:text-white border-slate-700'
                                     : 'bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 border-cyan-500/30'
@@ -1255,67 +1256,67 @@ export default function PurchaseInwardHub({
                             </div>
                           </td>
 
-                          {/* Item Name */}
-                          <td className="py-2 px-3">
+                          {/* Item Name: min-w-[220px] flex-1 */}
+                          <td className="py-1.5 px-2.5 min-w-[220px]">
                             <input
                               type="text"
                               value={it.item_name}
                               onChange={(e) => handleItemFieldChange(idx, 'item_name', e.target.value)}
                               placeholder="Product Name"
-                              className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-semibold text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2.5 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-medium text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* HSN Code */}
-                          <td className="py-2 px-2">
+                          {/* HSN Code: min-w-[80px] */}
+                          <td className="py-1.5 px-2 min-w-[80px]">
                             <input
                               type="text"
                               value={it.hsn_code}
                               onChange={(e) => handleItemFieldChange(idx, 'hsn_code', e.target.value)}
                               placeholder="HSN"
-                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-mono text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-mono text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* Quantity */}
-                          <td className="py-2 px-2">
+                          {/* Quantity: min-w-[65px] */}
+                          <td className="py-1.5 px-2 min-w-[65px]">
                             <input
                               type="number"
                               min="1"
                               value={it.quantity}
                               onChange={(e) => handleItemFieldChange(idx, 'quantity', e.target.value)}
-                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* MRP */}
-                          <td className="py-2 px-2">
+                          {/* MRP: min-w-[75px] */}
+                          <td className="py-1.5 px-2 min-w-[75px]">
                             <input
                               type="number"
                               step="0.01"
                               value={it.mrp}
                               onChange={(e) => handleItemFieldChange(idx, 'mrp', e.target.value)}
-                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* Cost (Pre-GST) */}
-                          <td className="py-2 px-2">
+                          {/* Pre-GST: min-w-[85px] */}
+                          <td className="py-1.5 px-2 min-w-[85px]">
                             <input
                               type="number"
                               step="0.01"
                               value={it.price_before_gst}
                               onChange={(e) => handleItemFieldChange(idx, 'price_before_gst', e.target.value)}
-                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* GST % */}
-                          <td className="py-2 px-2">
+                          {/* GST %: min-w-[80px] */}
+                          <td className="py-1.5 px-2 min-w-[80px]">
                             <select
                               value={it.gst_rate}
                               onChange={(e) => handleItemFieldChange(idx, 'gst_rate', e.target.value)}
-                              className="w-full px-1.5 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-1.5 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-xs focus:outline-none cursor-pointer"
                             >
                               <option value="0">0%</option>
                               <option value="5">5%</option>
@@ -1325,28 +1326,28 @@ export default function PurchaseInwardHub({
                             </select>
                           </td>
 
-                          {/* Discount */}
-                          <td className="py-2 px-2">
+                          {/* Discount: min-w-[75px] */}
+                          <td className="py-1.5 px-2 min-w-[75px]">
                             <input
                               type="number"
                               step="0.01"
                               value={it.discount}
                               onChange={(e) => handleItemFieldChange(idx, 'discount', e.target.value)}
-                              className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
+                              className="w-full min-w-0 h-8 px-2 py-1 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                             />
                           </td>
 
-                          {/* Final Cost */}
-                          <td className="py-2 px-2 text-right font-mono font-bold text-emerald-400">
+                          {/* Final Cost: min-w-[90px] */}
+                          <td className="py-1.5 px-2 min-w-[90px] text-right font-mono font-bold text-emerald-400 text-xs">
                             ₹{(Number(it.price_after_gst) || 0).toFixed(2)}
                           </td>
 
-                          {/* Actions */}
-                          <td className="py-2 px-2 text-center">
+                          {/* Action (delete): min-w-[45px] */}
+                          <td className="py-1.5 px-2 min-w-[45px] text-center">
                             <button
                               type="button"
                               onClick={() => handleRemoveItemRow(idx)}
-                              className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition"
+                              className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition cursor-pointer"
                               title="Delete Row"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1367,29 +1368,31 @@ export default function PurchaseInwardHub({
                 </table>
               </div>
 
-              {/* 3. Totals & Commit Action Strip */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-800">
-                <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2">
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>Taxable Base Value:</span>
-                    <span className="font-mono text-slate-200">₹{totalTaxable.toFixed(2)}</span>
+              {/* 3. Compact Footer & Summary Bar */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-2.5 border-t border-slate-800/80 bg-slate-950/60 p-2.5 sm:p-3 rounded-xl">
+                {/* Left side: Inline compact summary badges */}
+                <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap text-xs">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
+                    <span className="text-slate-400">Taxable Base:</span>
+                    <span className="font-mono font-bold text-white">₹{totalTaxable.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-xs text-slate-400">
-                    <span>GST Tax Amount:</span>
-                    <span className="font-mono text-slate-200">₹{totalTax.toFixed(2)}</span>
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
+                    <span className="text-slate-400">GST Amount:</span>
+                    <span className="font-mono font-bold text-amber-400">₹{totalTax.toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between text-sm font-bold text-white pt-2 border-t border-slate-800">
-                    <span>Invoice Grand Total:</span>
-                    <span className="font-mono text-emerald-400 text-base">₹{grandTotal.toFixed(2)}</span>
+                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 shadow-sm">
+                    <span className="font-semibold text-emerald-400">Grand Total:</span>
+                    <span className="font-mono font-black text-emerald-300 text-sm">₹{grandTotal.toFixed(2)}</span>
                   </div>
                 </div>
 
-                <div className="flex flex-col justify-center gap-2.5">
+                {/* Right side: High-contrast Save & Commit Button */}
+                <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
                     disabled={isSaving || items.length === 0}
                     onClick={handleSavePurchaseEntry}
-                    className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm tracking-wide transition shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-[0.99] disabled:opacity-50"
+                    className="w-full sm:w-auto h-10 px-5 sm:px-6 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm tracking-wide transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                   >
                     {isSaving ? (
                       <span>Saving Purchase Inward Entry...</span>
@@ -1400,9 +1403,6 @@ export default function PurchaseInwardHub({
                       </>
                     )}
                   </button>
-                  <p className="text-[11px] text-slate-400 text-center">
-                    Commits inward entry to Supabase `purchase_invoices` and updates warehouse inventory.
-                  </p>
                 </div>
               </div>
             </div>
@@ -1414,8 +1414,8 @@ export default function PurchaseInwardHub({
       {/* TAB 2: PURCHASE INVOICES HISTORY */}
       {/* ======================================================== */}
       {activeTab === 'history' && (
-        <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+        <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950 border border-slate-800">

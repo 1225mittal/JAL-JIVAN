@@ -65,47 +65,47 @@ export default function VendorsDirectory({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
+    <div className="space-y-3 animate-in fade-in duration-200">
       {/* Metrics Ribbon */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-        <div className="glass-card p-4 rounded-2xl border border-slate-800 bg-slate-900/80 shadow-md">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div className="glass-card p-3 rounded-xl border border-slate-800 bg-slate-900/80 shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400">Total Vendors Registered</span>
             <Building2 className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-white">{stats.totalVendors}</span>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black text-white">{stats.totalVendors}</span>
             <span className="text-[11px] text-emerald-400 font-semibold">Active Profiles</span>
           </div>
         </div>
 
-        <div className="glass-card p-4 rounded-2xl border border-slate-800 bg-slate-900/80 shadow-md">
+        <div className="glass-card p-3 rounded-xl border border-slate-800 bg-slate-900/80 shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400">Total Invoices Logged</span>
             <Receipt className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-white">{stats.totalBills}</span>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black text-white">{stats.totalBills}</span>
             <span className="text-[11px] text-cyan-400 font-semibold">Inward Bills</span>
           </div>
         </div>
 
-        <div className="glass-card p-4 rounded-2xl border border-slate-800 bg-slate-900/80 shadow-md">
+        <div className="glass-card p-3 rounded-xl border border-slate-800 bg-slate-900/80 shadow-md">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400">Total Purchased Volume</span>
             <IndianRupee className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-white">₹{stats.totalSpend.toLocaleString('en-IN')}</span>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-xl sm:text-2xl font-black text-white">₹{stats.totalSpend.toLocaleString('en-IN')}</span>
             <span className="text-[11px] text-slate-400">Procurement</span>
           </div>
         </div>
       </div>
 
       {/* Main Vendor Directory Card */}
-      <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-6 sm:p-7 shadow-xl space-y-4">
+      <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-3">
         {/* Header Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-800 pb-2.5">
           <div>
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               <Building2 className="w-5 h-5 text-amber-400" />

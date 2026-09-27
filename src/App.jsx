@@ -696,7 +696,7 @@ export default function App() {
       />
 
       {/* Main Routing Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-3 sm:py-6 overflow-x-hidden">
+      <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
         {routeState.type === 'admin-login' ? (
           /* ======================================================== */
           /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
