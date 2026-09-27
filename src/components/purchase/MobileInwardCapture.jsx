@@ -145,19 +145,52 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
       // If publicUrl is obtained, use it; otherwise fallback to compressed dataUrl
       const finalImageUrl = publicUrl || dataUrl;
 
-      // 3. Broadcast the event to the laptop
+      // 3. Persistent Queue Storage in Supabase:
+      // Insert a record directly into purchase_bill_queue with status: 'pending_ocr'
+      let snappedBill = null;
+      try {
+        const { data, error } = await supabase
+          .from('purchase_bill_queue')
+          .insert([{ image_url: finalImageUrl, status: 'pending_ocr' }])
+          .select()
+          .single();
+
+        if (!error && data) {
+          snappedBill = data;
+        } else if (error) {
+          console.warn('purchase_bill_queue insert notice:', error.message);
+        }
+      } catch (dbErr) {
+        console.warn('Failed to insert into purchase_bill_queue:', dbErr);
+      }
+
+      if (!snappedBill) {
+        snappedBill = {
+          id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+          image_url: finalImageUrl,
+          status: 'pending_ocr',
+          created_at: new Date().toISOString()
+        };
+      }
+
+      // 4. Broadcast the event via Supabase Realtime channel with the inserted record
+      const broadcastPayload = {
+        bill: snappedBill,
+        imageUrl: finalImageUrl
+      };
+
       if (channel) {
         await channel.send({
           type: 'broadcast',
           event: 'BILL_SNAPPED',
-          payload: { imageUrl: finalImageUrl }
+          payload: broadcastPayload
         });
-      } else {
+      } else if (sessionId) {
         const directCh = supabase.channel(`inward_qr_${sessionId}`);
         await directCh.send({
           type: 'broadcast',
           event: 'BILL_SNAPPED',
-          payload: { imageUrl: finalImageUrl }
+          payload: broadcastPayload
         });
       }
 

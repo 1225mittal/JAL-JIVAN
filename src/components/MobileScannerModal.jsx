@@ -56,13 +56,17 @@ export default function MobileScannerModal({
 
     channel
       .on('broadcast', { event: 'BILL_SNAPPED' }, ({ payload }) => {
-        if (payload?.imageUrl) {
+        const rawBill = payload?.bill;
+        const imgUrl = rawBill?.image_url || payload?.imageUrl;
+        if (imgUrl) {
           const newBill = {
-            id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            id: rawBill?.id || ('bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
             name: `Mobile Snap #${(queue?.length || 0) + 1}`,
-            dataUrl: payload.imageUrl,
-            uploadedAt: new Date().toISOString(),
-            status: 'queued',
+            image_url: imgUrl,
+            dataUrl: imgUrl,
+            uploadedAt: rawBill?.created_at || new Date().toISOString(),
+            created_at: rawBill?.created_at || new Date().toISOString(),
+            status: rawBill?.status || 'pending_ocr',
             attachedToPrevious: false
           };
 
@@ -74,7 +78,7 @@ export default function MobileScannerModal({
           setRecentReceivedPhotos((prev) => [
             {
               id: newBill.id,
-              url: payload.imageUrl,
+              url: imgUrl,
               time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             },
             ...prev

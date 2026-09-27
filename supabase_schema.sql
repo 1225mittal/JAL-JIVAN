@@ -365,3 +365,34 @@ ALTER TABLE public.purchase_vendors ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public access purchase_vendors" ON public.purchase_vendors;
 CREATE POLICY "Public access purchase_vendors" ON public.purchase_vendors FOR ALL USING (true) WITH CHECK (true);
 
+-- 21. Purchase Bill Queue (Mobile Live Snapped Bills & Realtime OCR Queue)
+CREATE TABLE IF NOT EXISTS public.purchase_bill_queue (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    image_url TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_ocr' CHECK (status IN ('pending_ocr', 'processed', 'discarded')),
+    ocr_result JSONB DEFAULT '{}'::jsonb
+);
+
+ALTER TABLE public.purchase_bill_queue ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public access purchase_bill_queue" ON public.purchase_bill_queue;
+CREATE POLICY "Public access purchase_bill_queue" ON public.purchase_bill_queue FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable Realtime publication on purchase_bill_queue
+ALTER PUBLICATION supabase_realtime ADD TABLE public.purchase_bill_queue;
+
+-- Storage Bucket for 'purchase-bills'
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('purchase-bills', 'purchase-bills', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Allow public uploads to purchase-bills" ON storage.objects;
+CREATE POLICY "Allow public uploads to purchase-bills" ON storage.objects 
+FOR INSERT WITH CHECK (bucket_id = 'purchase-bills');
+
+DROP POLICY IF EXISTS "Allow public select on purchase-bills" ON storage.objects;
+CREATE POLICY "Allow public select on purchase-bills" ON storage.objects 
+FOR SELECT USING (bucket_id = 'purchase-bills');
+
+

@@ -2904,7 +2904,7 @@ export function saveLocalPurchaseVendors(vendors) {
 }
 
 export async function fetchPurchaseVendors() {
-  if (isSupabaseConfigured() && supabase) {
+  if (isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
         .from('purchase_vendors')
@@ -2978,7 +2978,7 @@ export async function syncPurchaseVendorFromOcr(extractedVendor, billAmount = 0)
 
   let syncedVendor = null;
 
-  if (isSupabaseConfigured() && supabase) {
+  if (isSupabaseConfigured && supabase) {
     try {
       // 1. Check if vendor exists by GSTIN or vendor_name
       let existingVendor = null;
@@ -3102,7 +3102,7 @@ export async function syncPurchaseVendorFromOcr(extractedVendor, billAmount = 0)
 }
 
 export async function deletePurchaseVendor(vendorId) {
-  if (isSupabaseConfigured() && supabase) {
+  if (isSupabaseConfigured && supabase) {
     try {
       await supabase.from('purchase_vendors').delete().eq('id', vendorId);
     } catch (e) {
@@ -3113,6 +3113,134 @@ export async function deletePurchaseVendor(vendorId) {
   saveLocalPurchaseVendors(local);
   return true;
 }
+
+// ==========================================
+// PURCHASE BILL QUEUE (MOBILE LIVE OCR INWARD)
+// ==========================================
+const STORAGE_PURCHASE_BILL_QUEUE = 'jal_jivan_purchase_bill_queue';
+
+export function getLocalBillQueue() {
+  try {
+    const saved = localStorage.getItem(STORAGE_PURCHASE_BILL_QUEUE);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveLocalBillQueue(items) {
+  try {
+    localStorage.setItem(STORAGE_PURCHASE_BILL_QUEUE, JSON.stringify(items || []));
+  } catch (e) {
+    console.warn('saveLocalBillQueue error:', e);
+  }
+}
+
+export async function fetchPurchaseBillQueue() {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_bill_queue')
+        .select('*')
+        .eq('status', 'pending_ocr')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalBillQueue(data);
+        return data;
+      } else if (error) {
+        console.warn('fetchPurchaseBillQueue supabase error:', error.message);
+      }
+    } catch (e) {
+      console.warn('fetchPurchaseBillQueue exception:', e.message);
+    }
+  }
+  return getLocalBillQueue().filter((b) => b.status === 'pending_ocr');
+}
+
+export async function insertPurchaseBillQueue(item) {
+  const imageUrl = item.image_url || item.imageUrl || item.dataUrl;
+  let savedRecord = null;
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_bill_queue')
+        .insert([{ image_url: imageUrl, status: 'pending_ocr' }])
+        .select()
+        .single();
+
+      if (!error && data) {
+        savedRecord = data;
+      } else if (error) {
+        console.warn('insertPurchaseBillQueue supabase error:', error.message);
+      }
+    } catch (e) {
+      console.warn('insertPurchaseBillQueue exception:', e.message);
+    }
+  }
+
+  if (!savedRecord) {
+    savedRecord = {
+      id: 'local_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      image_url: imageUrl,
+      status: 'pending_ocr',
+      created_at: new Date().toISOString()
+    };
+  }
+
+  const existing = getLocalBillQueue();
+  saveLocalBillQueue([savedRecord, ...existing.filter((b) => b.id !== savedRecord.id)]);
+  return savedRecord;
+}
+
+export async function updatePurchaseBillStatus(id, status) {
+  if (isSupabaseConfigured && supabase && id && !id.toString().startsWith('local_')) {
+    try {
+      const { error } = await supabase
+        .from('purchase_bill_queue')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
+
+      if (error) {
+        console.warn('updatePurchaseBillStatus supabase notice:', error.message);
+      }
+    } catch (e) {
+      console.warn('updatePurchaseBillStatus exception:', e.message);
+    }
+  }
+
+  const local = getLocalBillQueue();
+  const updated = local.map((b) => (b.id === id ? { ...b, status } : b));
+  saveLocalBillQueue(updated.filter((b) => b.status === 'pending_ocr'));
+  return true;
+}
+
+export async function deletePurchaseBillQueueItem(id) {
+  if (isSupabaseConfigured && supabase && id && !id.toString().startsWith('local_')) {
+    try {
+      const { error } = await supabase
+        .from('purchase_bill_queue')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.warn('deletePurchaseBillQueueItem notice (falling back to status discarded):', error.message);
+        await supabase
+          .from('purchase_bill_queue')
+          .update({ status: 'discarded', updated_at: new Date().toISOString() })
+          .eq('id', id);
+      }
+    } catch (e) {
+      console.warn('deletePurchaseBillQueueItem exception:', e.message);
+    }
+  }
+
+  const local = getLocalBillQueue().filter((b) => b.id !== id);
+  saveLocalBillQueue(local);
+  return true;
+}
+
 
 
 // ==========================================

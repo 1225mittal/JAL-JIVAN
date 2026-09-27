@@ -6,14 +6,29 @@ export default async function handler(req, res) {
   const apiKey = process.env.GROQ_API_KEY || process.env.VITE_GROQ_API_KEY || req.body?.groqApiKey;
 
   try {
-    const { imageBase64, mimeType } = req.body || {};
-    if (!imageBase64) {
-      return res.status(400).json({ error: 'Missing imageBase64 in request body.' });
+    const { imageBase64, imageUrl, mimeType } = req.body || {};
+    const rawSource = imageBase64 || imageUrl;
+    if (!rawSource) {
+      return res.status(400).json({ error: 'Missing imageBase64 or imageUrl in request body.' });
     }
 
-    const cleanImage = imageBase64.startsWith('data:')
-      ? imageBase64
-      : `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
+    let cleanImage = rawSource;
+    if (!cleanImage.startsWith('data:') && !cleanImage.startsWith('http://') && !cleanImage.startsWith('https://')) {
+      cleanImage = `data:${mimeType || 'image/jpeg'};base64,${cleanImage}`;
+    } else if (cleanImage.startsWith('http://') || cleanImage.startsWith('https://')) {
+      // If a remote URL is provided, pre-fetch to buffer for Groq Vision compatibility
+      try {
+        const fetchRes = await fetch(cleanImage);
+        if (fetchRes.ok) {
+          const arrayBuf = await fetchRes.arrayBuffer();
+          const b64 = Buffer.from(arrayBuf).toString('base64');
+          const contentType = fetchRes.headers.get('content-type') || mimeType || 'image/jpeg';
+          cleanImage = `data:${contentType};base64,${b64}`;
+        }
+      } catch (urlFetchErr) {
+        console.warn('Notice: Remote image URL could not be pre-fetched, passing URL directly to Groq:', urlFetchErr.message);
+      }
+    }
 
     // Schema prompt as requested
     const promptText = `You are an expert Indian GST tax invoice & purchase bill OCR extractor for retail, FMCG, and wholesale businesses.

@@ -48,7 +48,12 @@ import {
   deletePurchaseInvoice,
   fetchPurchaseVendors,
   syncPurchaseVendorFromOcr,
-  deletePurchaseVendor
+  deletePurchaseVendor,
+  fetchPurchaseBillQueue,
+  updatePurchaseBillStatus,
+  deletePurchaseBillQueueItem,
+  supabase,
+  isSupabaseConfigured
 } from '../lib/supabase';
 
 export default function PurchaseInwardHub({
@@ -65,8 +70,10 @@ export default function PurchaseInwardHub({
   // Bill Queue & Upload State (Individual Bill Queue)
   const [billQueue, setBillQueue] = useState([]);
   const [activeProcessingBillId, setActiveProcessingBillId] = useState(null);
+  const [currentQueueBillId, setCurrentQueueBillId] = useState(null);
   const [isMobileScannerOpen, setIsMobileScannerOpen] = useState(false);
   const [zoomedQueueImage, setZoomedQueueImage] = useState(null);
+  const [ocrStatusMessage, setOcrStatusMessage] = useState('');
 
   // Active / Selected Bill Form State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -142,9 +149,151 @@ export default function PurchaseInwardHub({
     }
   };
 
+  // Web Audio API chime for mobile snap notification
+  const playNotificationChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      // Note 1: E5 (659.25 Hz)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(659.25, now);
+      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+      gain1.gain.setValueAtTime(0.001, now);
+      gain1.gain.linearRampToValueAtTime(0.28, now + 0.03);
+      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.45);
+
+      // Note 2: E6 (1318.51 Hz) sparkle
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(1318.51, now + 0.1);
+      gain2.gain.setValueAtTime(0.001, now + 0.1);
+      gain2.gain.linearRampToValueAtTime(0.18, now + 0.13);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.1);
+      osc2.stop(now + 0.55);
+    } catch (e) {
+      // Audio autoplay restrictions handled gracefully
+    }
+  };
+
+  const handleIncomingBill = (newItem) => {
+    if (!newItem) return;
+    const imgUrl = typeof newItem === 'string' ? newItem : (newItem.image_url || newItem.dataUrl);
+    if (!imgUrl) return;
+
+    const itemObj = typeof newItem === 'string' ? {
+      id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      name: `Mobile Snap #${billQueue.length + 1}`,
+      image_url: imgUrl,
+      dataUrl: imgUrl,
+      uploadedAt: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      status: 'pending_ocr',
+      attachedToPrevious: false
+    } : {
+      id: newItem.id || ('bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5)),
+      name: newItem.name || `Mobile Snap #${billQueue.length + 1}`,
+      image_url: imgUrl,
+      dataUrl: imgUrl,
+      uploadedAt: newItem.created_at || newItem.uploadedAt || new Date().toISOString(),
+      created_at: newItem.created_at || new Date().toISOString(),
+      status: newItem.status || 'pending_ocr',
+      attachedToPrevious: false
+    };
+
+    setBillQueue((prev) => {
+      const exists = prev.some(
+        (b) => b.id === itemObj.id || (itemObj.image_url && (b.image_url === itemObj.image_url || b.dataUrl === itemObj.image_url))
+      );
+      if (exists) return prev;
+      return [itemObj, ...prev];
+    });
+
+    playNotificationChime();
+    showToast(`📸 Photo received from mobile (${billQueue.length + 1} total)`, 'success');
+  };
+
+  const handleRemoveBillFromQueue = async (billId) => {
+    try {
+      await deletePurchaseBillQueueItem(billId);
+    } catch (err) {
+      console.warn('Failed to delete bill from queue in supabase:', err);
+    }
+    setBillQueue((prev) => prev.filter((b) => b.id !== billId));
+    if (currentQueueBillId === billId) {
+      setCurrentQueueBillId(null);
+    }
+    if (billPreviewUrl === billQueue.find((b) => b.id === billId)?.dataUrl || billPreviewUrl === billQueue.find((b) => b.id === billId)?.image_url) {
+      resetUploadState();
+    }
+    showToast('Bill removed from queue', 'info');
+  };
+
+  // Load persistent purchase bill queue on page load
+  const loadBillQueue = async () => {
+    try {
+      const pendingBills = await fetchPurchaseBillQueue();
+      if (Array.isArray(pendingBills) && pendingBills.length > 0) {
+        setBillQueue((prev) => {
+          const existingIds = new Set(prev.map((b) => b.id));
+          const existingUrls = new Set(prev.map((b) => b.image_url || b.dataUrl));
+          const formatted = pendingBills.map((b, idx) => ({
+            id: b.id,
+            name: `Mobile Snap #${pendingBills.length - idx}`,
+            image_url: b.image_url,
+            dataUrl: b.image_url,
+            uploadedAt: b.created_at || new Date().toISOString(),
+            created_at: b.created_at || new Date().toISOString(),
+            status: b.status || 'pending_ocr',
+            attachedToPrevious: false
+          }));
+          const newItems = formatted.filter(
+            (b) => !existingIds.has(b.id) && !existingUrls.has(b.image_url)
+          );
+          return [...prev, ...newItems];
+        });
+      }
+    } catch (err) {
+      console.warn('Failed to load purchase bill queue:', err);
+    }
+  };
+
   useEffect(() => {
     loadHistory();
     loadVendors();
+    loadBillQueue();
+
+    // Supabase Realtime subscription on purchase_bill_queue
+    if (isSupabaseConfigured && supabase) {
+      const queueChannel = supabase
+        .channel('realtime_purchase_bill_queue_hub')
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'purchase_bill_queue' },
+          (payload) => {
+            if (payload.new && payload.new.status === 'pending_ocr') {
+              handleIncomingBill(payload.new);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(queueChannel);
+      };
+    }
   }, []);
 
   // Handle Multi-File / Image / PDF Upload
@@ -207,19 +356,57 @@ export default function PurchaseInwardHub({
   // Process an individual bill card via Groq Vision OCR
   const handleProcessIndividualBill = async (billItem) => {
     setActiveProcessingBillId(billItem.id);
+    setCurrentQueueBillId(billItem.id);
     setIsProcessingOcr(true);
     setOcrError('');
-    setSelectedFile({ name: billItem.name, size: billItem.size || Math.round(billItem.base64.length * 0.75), type: billItem.mimeType });
-    setBillPreviewUrl(billItem.dataUrl);
-    setBillBase64(billItem.base64);
+    setOcrStatusMessage('Extracting invoice line items and vendor details...');
+
+    const imgUrl = billItem.image_url || billItem.dataUrl;
+    setSelectedFile({
+      name: billItem.name || 'Mobile Snapped Bill',
+      size: billItem.size || (billItem.base64 ? Math.round(billItem.base64.length * 0.75) : 0),
+      type: billItem.mimeType || 'image/jpeg'
+    });
+    setBillPreviewUrl(imgUrl);
+
+    // Convert to base64 if not already available
+    let base64ToSend = billItem.base64 || null;
+    let mimeTypeToSend = billItem.mimeType || 'image/jpeg';
+
+    if (!base64ToSend && imgUrl) {
+      if (imgUrl.startsWith('data:')) {
+        base64ToSend = imgUrl.replace(/^data:image\/[a-z]+;base64,/, '');
+      } else if (imgUrl.startsWith('http')) {
+        try {
+          const res = await fetch(imgUrl);
+          const blob = await res.blob();
+          mimeTypeToSend = blob.type || 'image/jpeg';
+          base64ToSend = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const d = e.target.result;
+              resolve(typeof d === 'string' ? d.replace(/^data:image\/[a-z]+;base64,/, '') : null);
+            };
+            reader.readAsDataURL(blob);
+          });
+        } catch (fetchErr) {
+          console.warn('Notice: Could not pre-convert image URL to base64, passing URL directly:', fetchErr.message);
+        }
+      }
+    }
+
+    if (base64ToSend) {
+      setBillBase64(base64ToSend);
+    }
 
     try {
       const response = await fetch('/api/purchase-ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          imageBase64: billItem.base64,
-          mimeType: billItem.mimeType || 'image/jpeg'
+          imageUrl: imgUrl,
+          imageBase64: base64ToSend,
+          mimeType: mimeTypeToSend
         })
       });
 
@@ -315,12 +502,12 @@ export default function PurchaseInwardHub({
         ]);
       }
 
-      // Mark this bill item in queue as processed
+      // Mark this bill item as active in queue
       setBillQueue((prev) =>
-        prev.map((b) => (b.id === billItem.id ? { ...b, status: 'processed', extracted: true } : b))
+        prev.map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
       );
 
-      showToast(`⚡ Bill "${billItem.name}" extracted successfully via Groq Vision!`, 'success');
+      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Groq Vision!`, 'success');
 
       // Scroll to review editor
       setTimeout(() => {
@@ -333,6 +520,7 @@ export default function PurchaseInwardHub({
     } finally {
       setIsProcessingOcr(false);
       setActiveProcessingBillId(null);
+      setOcrStatusMessage('');
     }
   };
 
@@ -587,6 +775,17 @@ export default function PurchaseInwardHub({
       }
 
       showToast('🎉 Purchase invoice & inward stock committed successfully!', 'success');
+
+      // Once saved and committed, update the bill's status in purchase_bill_queue to 'processed'
+      if (currentQueueBillId) {
+        try {
+          await updatePurchaseBillStatus(currentQueueBillId, 'processed');
+          setBillQueue((prev) => prev.filter((b) => b.id !== currentQueueBillId));
+        } catch (queueErr) {
+          console.warn('Notice: Queue status update error:', queueErr);
+        }
+        setCurrentQueueBillId(null);
+      }
 
       // Immediately trigger a re-fetch after saving so the new bill appears without a page reload
       await loadHistory();
@@ -859,8 +1058,9 @@ export default function PurchaseInwardHub({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                   {billQueue.map((item, index) => {
                     const isProcessing = activeProcessingBillId === item.id;
-                    const isCurrentlyActive = billPreviewUrl === item.dataUrl;
-                    const formattedTime = new Date(item.uploadedAt).toLocaleTimeString([], {
+                    const itemUrl = item.image_url || item.dataUrl;
+                    const isCurrentlyActive = billPreviewUrl === itemUrl;
+                    const formattedTime = new Date(item.uploadedAt || item.created_at || Date.now()).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit'
                     });
@@ -879,12 +1079,12 @@ export default function PurchaseInwardHub({
                         <div className="flex items-start gap-3">
                           {/* Image Thumbnail with Zoom Preview Button */}
                           <div
-                            onClick={() => setZoomedQueueImage(item.dataUrl)}
+                            onClick={() => setZoomedQueueImage(itemUrl)}
                             className="relative w-20 h-24 rounded-xl bg-slate-900 border border-slate-700 overflow-hidden shrink-0 group cursor-pointer"
                             title="Click to Zoom Preview"
                           >
                             <img
-                              src={item.dataUrl}
+                              src={itemUrl}
                               alt="Thumbnail"
                               className="w-full h-full object-cover group-hover:scale-105 transition"
                             />
@@ -918,20 +1118,18 @@ export default function PurchaseInwardHub({
 
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setBillQueue((prev) => prev.filter((b) => b.id !== item.id));
-                                  if (billPreviewUrl === item.dataUrl) resetUploadState();
-                                }}
-                                title="Delete Image"
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                                onClick={() => handleRemoveBillFromQueue(item.id)}
+                                title="Remove Bill from Queue"
+                                className="px-2 py-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition text-xs font-semibold flex items-center gap-1 cursor-pointer"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                                <span className="text-[11px] text-rose-400">Remove</span>
                               </button>
                             </div>
 
                             {/* Status badge */}
                             <div className="flex items-center gap-1.5">
-                              {item.status === 'processed' ? (
+                              {item.extracted ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                                   <Check className="w-2.5 h-2.5" />
                                   <span>Extracted & Loaded Below</span>
@@ -957,7 +1155,7 @@ export default function PurchaseInwardHub({
                                 className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition active:scale-[0.98] cursor-pointer"
                               >
                                 <Zap className="w-3.5 h-3.5 fill-slate-950" />
-                                <span>{isProcessing ? 'Extracting...' : '⚡ Process This Bill (OCR Entry)'}</span>
+                                <span>{isProcessing ? 'Extracting...' : '⚡ Process This Bill (Groq OCR)'}</span>
                               </button>
 
                               {/* Multi-page linking checkbox */}
@@ -988,6 +1186,33 @@ export default function PurchaseInwardHub({
               )}
             </div>
 
+            {/* Active Groq Vision OCR Scanning Spinner Banner */}
+            {isProcessingOcr && (
+              <div className="rounded-2xl border-2 border-amber-500/50 bg-gradient-to-r from-amber-500/15 via-slate-900/95 to-amber-500/15 p-5 shadow-2xl backdrop-blur-md animate-pulse">
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left">
+                  <div className="relative">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-lg shadow-amber-500/20">
+                      <RefreshCw className="w-7 h-7 animate-spin text-amber-400" />
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-400 animate-ping" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-2">
+                      <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                        ⚡ Groq Vision OCR Active
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-extrabold text-white">
+                      Extracting invoice line items and vendor details...
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      Deep vision extracting supplier particulars, invoice dates, GST tax splits, and line item product details
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Error Message */}
             {ocrError && (
               <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2.5">
@@ -1000,7 +1225,7 @@ export default function PurchaseInwardHub({
           {/* ======================================================== */}
           {/* EDITABLE REVIEW & VERIFICATION UI */}
           {/* ======================================================== */}
-          <div className="space-y-3">
+          <div id="inward-bill-review-section" className="space-y-3">
             {/* 1. Header Card: Seller Details & Bank Details */}
             <div className="rounded-2xl bg-slate-900/90 border border-slate-800 p-3 sm:p-4 shadow-xl space-y-2.5">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -1760,22 +1985,10 @@ export default function PurchaseInwardHub({
         onClose={() => setIsMobileScannerOpen(false)}
         queue={billQueue}
         onAddToQueue={(newItem) => {
-          const itemObj = typeof newItem === 'string' ? {
-            id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-            name: `Mobile Snap #${billQueue.length + 1}`,
-            dataUrl: newItem,
-            uploadedAt: new Date().toISOString(),
-            status: 'queued',
-            attachedToPrevious: false
-          } : newItem;
-          setBillQueue((prev) => [itemObj, ...prev]);
-          showToast(`Photo received from mobile (${billQueue.length + 1} total)`, 'info');
+          handleIncomingBill(newItem);
         }}
         onRemoveFromQueue={(id) => {
-          setBillQueue((prev) => prev.filter((b) => b.id !== id));
-          if (billPreviewUrl === billQueue.find((b) => b.id === id)?.dataUrl) {
-            resetUploadState();
-          }
+          handleRemoveBillFromQueue(id);
         }}
         onToggleAttachToPrevious={(id) => {
           setBillQueue((prev) =>
