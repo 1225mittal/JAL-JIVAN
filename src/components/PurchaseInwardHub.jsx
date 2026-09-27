@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   FileSpreadsheet,
+  QrCode,
   Camera,
   Upload,
   ArrowLeft,
@@ -783,26 +784,26 @@ export default function PurchaseInwardHub({
               className="hidden"
             />
 
-            {/* Top Action Triggers: Mobile Scanner Modal & Multi-File Upload */}
+            {/* Top Action Triggers: Phone QR Code Pairing Modal & Multi-File Upload */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {/* Trigger 1: Open Mobile Scanner Modal */}
+              {/* Trigger 1: Open Phone QR Code Pairing Modal */}
               <button
                 type="button"
                 onClick={() => setIsMobileScannerOpen(true)}
                 className="group relative flex items-center gap-3 p-3.5 rounded-xl border-2 border-dashed border-amber-500/50 hover:border-amber-400 bg-slate-950/70 hover:bg-slate-950 transition-all cursor-pointer text-left shadow-lg shadow-amber-500/5"
               >
                 <div className="w-10 h-10 rounded-xl bg-amber-500/10 group-hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 transition">
-                  <Camera className="w-5 h-5" />
+                  <QrCode className="w-5 h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-white text-xs sm:text-sm group-hover:text-amber-400 transition flex items-center gap-1.5">
-                    <span>📱 Open Mobile Bill Scanner</span>
+                    <span>📱 Scan via Phone QR Code</span>
                     <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-1.5 py-0.2 rounded-full border border-amber-500/30">
-                      Live Queue
+                      Live Sync
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Live camera viewfinder for continuous photo snaps and queue processing
+                    Scan QR with mobile camera to snap and upload bills directly here
                   </p>
                 </div>
               </button>
@@ -1753,14 +1754,22 @@ export default function PurchaseInwardHub({
         </div>
       )}
 
-      {/* Mobile Scanner Modal with Camera Viewfinder & Photo Queue */}
+      {/* Mobile QR Code Pairing Modal */}
       <MobileScannerModal
         isOpen={isMobileScannerOpen}
         onClose={() => setIsMobileScannerOpen(false)}
         queue={billQueue}
         onAddToQueue={(newItem) => {
-          setBillQueue((prev) => [...prev, newItem]);
-          showToast(`Photo added to queue (${billQueue.length + 1} total)`, 'info');
+          const itemObj = typeof newItem === 'string' ? {
+            id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+            name: `Mobile Snap #${billQueue.length + 1}`,
+            dataUrl: newItem,
+            uploadedAt: new Date().toISOString(),
+            status: 'queued',
+            attachedToPrevious: false
+          } : newItem;
+          setBillQueue((prev) => [itemObj, ...prev]);
+          showToast(`Photo received from mobile (${billQueue.length + 1} total)`, 'info');
         }}
         onRemoveFromQueue={(id) => {
           setBillQueue((prev) => prev.filter((b) => b.id !== id));

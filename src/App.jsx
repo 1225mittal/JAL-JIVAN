@@ -8,6 +8,7 @@ import PurchaseInwardHub from './components/PurchaseInwardHub';
 import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
 import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
+import MobileInwardCapture from './components/purchase/MobileInwardCapture';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -82,6 +83,12 @@ export function parseRoute() {
   // Support SPA deep link fallback via hash
   if (pathname === '/' && hash) {
     pathname = '/' + hash;
+  }
+
+  // Route 0: Dedicated Public Mobile Inward Camera (/scan-inward)
+  if (pathname === '/scan-inward' || pathname.startsWith('/scan-inward')) {
+    const sessionId = search.get('session') || '';
+    return { type: 'scan-inward', module: null, pathname: '/scan-inward', sessionId };
   }
 
   // Explicit pathname matching takes absolute priority over legacy query params
@@ -651,6 +658,19 @@ export default function App() {
       showToast(err.message || 'Failed to accept order', 'error');
     }
   };
+
+  // Dedicated Public Route for Mobile Inward Camera (/scan-inward)
+  // Accessible at /scan-inward?session=:sessionId without requiring admin login
+  const isScanInwardRoute =
+    typeof window !== 'undefined' &&
+    (window.location.pathname.toLowerCase().includes('/scan-inward') ||
+     (window.location.hash && window.location.hash.toLowerCase().includes('/scan-inward')));
+
+  if (isScanInwardRoute) {
+    const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const sessionId = searchParams?.get('session') || routeState?.sessionId || '';
+    return <MobileInwardCapture sessionId={sessionId} />;
+  }
 
   // Simple, resilient path checking for rider route (/rider or legacy /driver)
   // ONLY URLs explicitly containing /rider or /driver render DriverPortal
