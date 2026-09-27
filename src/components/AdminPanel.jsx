@@ -64,6 +64,7 @@ import SlipViewerModal from './SlipViewerModal';
 import StaffAttendanceModal from './StaffAttendanceModal';
 import RiderMiniMap from './RiderMiniMap';
 import DamageWorkflowToggles from './admin/DamageWorkflowToggles';
+import StaffPermissions from './admin/StaffPermissions';
 
 // Lightweight URL search params hook adhering to useSearchParams standard without react-router-dom dependency
 export function useSearchParams() {
@@ -146,6 +147,7 @@ export function AdminPanel({
     if (raw === 'fleet' || raw === 'radar' || raw === 'live-fleet-radar') return 'fleet';
     if (raw === 'addresses') return 'addresses';
     if (raw === 'products') return 'products';
+    if (raw === 'staff' || raw === 'staff-permissions' || raw === 'roles' || raw === 'staff-roles' || raw === 'permissions') return 'staff';
     if (raw === 'damage-config' || raw === 'damage_config' || raw === 'return-config' || raw === 'damage-toggles' || raw === 'damage-rules') return 'damage-config';
     if (raw === 'analytics' || raw === 'settings') return 'analytics';
     return raw || 'deliveries';
@@ -692,7 +694,21 @@ export function AdminPanel({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            id="admin-top-staff-btn"
+            onClick={() => handleTabChange('staff')}
+            className={`flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-md ${
+              activeTab === 'staff'
+                ? 'bg-cyan-600 text-white shadow-cyan-600/30'
+                : 'bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 hover:border-cyan-400'
+            }`}
+            title="Open Staff & Permissions (स्टाफ एवं अनुमतियाँ)"
+          >
+            <Users className="w-4 h-4 text-cyan-400" />
+            <span>👥 Staff & Roles (स्टाफ एवं अनुमतियाँ)</span>
+          </button>
+
           <button
             id="admin-create-task-btn"
             onClick={onOpenCreateTask}
@@ -798,6 +814,19 @@ export function AdminPanel({
             </button>
 
             <button
+              id="admin-staff-roles-tab"
+              onClick={() => handleTabChange('staff')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'staff'
+                  ? 'border-cyan-500 text-cyan-400 font-bold bg-cyan-500/10 px-2.5 rounded-t-lg'
+                  : 'border-transparent text-slate-300 hover:text-cyan-300 hover:border-cyan-500/40'
+              }`}
+            >
+              <Users className="w-4 h-4 text-cyan-400" />
+              <span>👥 Staff & Roles (स्टाफ एवं अनुमतियाँ)</span>
+            </button>
+
+            <button
               id="admin-fleet-tab"
               onClick={() => handleTabChange('fleet')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
@@ -845,19 +874,6 @@ export function AdminPanel({
             </button>
 
             <button
-              id="admin-analytics-tab"
-              onClick={() => handleTabChange('analytics')}
-              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'analytics' || activeTab === 'settings'
-                  ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Settings & Analytics</span>
-            </button>
-
-            <button
               id="admin-damage-config-tab"
               onClick={() => handleTabChange('damage-config')}
               className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
@@ -868,6 +884,19 @@ export function AdminPanel({
             >
               <Sliders className="w-4 h-4" />
               <span>Return & Damage Config (कंट्रोल / टॉगल)</span>
+            </button>
+
+            <button
+              id="admin-analytics-tab"
+              onClick={() => handleTabChange('analytics')}
+              className={`pb-3 text-xs sm:text-sm font-semibold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'analytics' || activeTab === 'settings'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Settings & Analytics</span>
             </button>
           </div>
         </div>
@@ -1742,6 +1771,13 @@ export function AdminPanel({
       {activeTab === 'damage-config' && (
         <div className="space-y-4">
           <DamageWorkflowToggles />
+        </div>
+      )}
+
+      {/* TAB 8: STAFF & ROLES (PERMISSIONS) */}
+      {activeTab === 'staff' && (
+        <div className="w-full animate-fade-in">
+          <StaffPermissions />
         </div>
       )}
 

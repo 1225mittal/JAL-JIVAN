@@ -164,18 +164,18 @@ export default function AdminHub({ onNavigate }) {
     {
       id: 'staff',
       path: '/admin/staff',
-      title: 'Staff & Attendance',
+      title: 'Staff & Roles (Permissions)',
       category: 'Human Resources',
-      tag: 'Planned',
-      isLive: false,
+      tag: 'Active / Live',
+      isLive: true,
       icon: UserCheck,
       accentColor: 'from-cyan-600 to-blue-700',
       tagColor: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
-      description: 'Attendance, Biometric Sync, Salary/Payroll, Role Permissions',
+      description: 'Manage staff accounts, assign 4-digit PINs, and grant granular module access',
       features: [
-        'GPS Geofence Hub Attendance Punch Cards',
-        'Monthly Driver Commission & Salary Payroll Calculation',
-        'Staff Permission Grants (Delivery, Sales, Damage)'
+        'Staff Permission Grants (Delivery, Damage, Purchase, Sales)',
+        'Staff PIN Security & 1-Click Module Access Toggles',
+        'Direct Staff Login Portal Integration (/staff)'
       ]
     },
     {

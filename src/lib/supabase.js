@@ -2811,6 +2811,107 @@ export async function staffLogin(mobile, pin) {
   return null;
 }
 
+export async function fetchStaffMembers() {
+  let localStaff = [];
+  try {
+    const saved = localStorage.getItem(STORAGE_STAFF_MEMBERS);
+    localStaff = saved ? JSON.parse(saved) : initialStaffMembers;
+  } catch {
+    localStaff = initialStaffMembers;
+  }
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('*')
+        .order('name', { ascending: true });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const normalized = data.map((item) => {
+          let allowed = item.allowed_modules;
+          if (typeof allowed === 'string') {
+            try { allowed = JSON.parse(allowed); } catch { allowed = [allowed]; }
+          }
+          if (!Array.isArray(allowed)) allowed = ['delivery'];
+          return {
+            ...item,
+            phone: item.phone || item.mobile || '',
+            mobile: item.mobile || item.phone || '',
+            allowed_modules: allowed
+          };
+        });
+        localStorage.setItem(STORAGE_STAFF_MEMBERS, JSON.stringify(normalized));
+        return normalized;
+      }
+    } catch (err) {
+      console.warn('Supabase fetchStaffMembers notice:', err.message);
+    }
+  }
+
+  return localStaff;
+}
+
+export async function upsertStaffMember(member) {
+  let list = [];
+  try {
+    const saved = localStorage.getItem(STORAGE_STAFF_MEMBERS);
+    list = saved ? JSON.parse(saved) : [...initialStaffMembers];
+  } catch {
+    list = [...initialStaffMembers];
+  }
+
+  const existingIdx = list.findIndex((m) => m.id === member.id);
+  if (existingIdx >= 0) {
+    list[existingIdx] = { ...list[existingIdx], ...member };
+  } else {
+    list.unshift(member);
+  }
+  localStorage.setItem(STORAGE_STAFF_MEMBERS, JSON.stringify(list));
+
+  if (isSupabaseConfigured) {
+    try {
+      const payload = {
+        id: member.id,
+        name: member.name,
+        phone: member.phone || member.mobile,
+        mobile: member.mobile || member.phone,
+        pin: member.pin,
+        role: member.role || 'staff',
+        allowed_modules: member.allowed_modules || ['delivery']
+      };
+      await supabase.from('staff').upsert(payload);
+    } catch (err) {
+      console.warn('Supabase upsertStaffMember notice:', err.message);
+    }
+  }
+
+  return member;
+}
+
+export async function deleteStaffMember(id) {
+  let list = [];
+  try {
+    const saved = localStorage.getItem(STORAGE_STAFF_MEMBERS);
+    list = saved ? JSON.parse(saved) : [...initialStaffMembers];
+  } catch {
+    list = [...initialStaffMembers];
+  }
+
+  list = list.filter((m) => m.id !== id);
+  localStorage.setItem(STORAGE_STAFF_MEMBERS, JSON.stringify(list));
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase.from('staff').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteStaffMember notice:', err.message);
+    }
+  }
+
+  return true;
+}
+
 // ==========================================
 // PURCHASE INVOICES & INWARD OPERATIONS
 // ==========================================

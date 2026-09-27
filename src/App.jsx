@@ -8,6 +8,7 @@ import StaffPortal from './components/StaffPortal';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import PlannedModuleView from './components/PlannedModuleView';
 import DriverPortal from './components/DriverPortal';
+import StaffPermissions from './components/admin/StaffPermissions';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -142,7 +143,7 @@ function getModuleTitle(moduleKey) {
     case 'finance':
       return 'Bahi Khata & Finance';
     case 'staff':
-      return 'Staff & Attendance';
+      return 'Staff & Roles (स्टाफ एवं अनुमतियाँ)';
     case 'settings':
     case 'config':
       return 'Store & System Config';
@@ -835,8 +836,8 @@ export default function App() {
             </div>
           ) : (
             <div>
-              {/* Clean Module Top Bar: Back to Hub + Module Title (NO Switcher lines) */}
-              <div className="flex items-center justify-between gap-3 mb-4 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
+              {/* Clean Module Top Bar: Back to Hub + Module Title + Direct Navigation Tabs */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs shadow-md w-full max-w-full">
                 <div className="flex items-center gap-2 min-w-0">
                   <button
                     type="button"
@@ -858,6 +859,57 @@ export default function App() {
                     {getModuleTitle(routeState.module)}
                   </span>
                 </div>
+
+                {/* Direct Navigation Tabs in Module Header */}
+                {isAdminLoggedIn && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/admin/delivery')}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
+                        routeState.module === 'delivery'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
+                      }`}
+                    >
+                      🚚 Deliveries
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/admin/damage')}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
+                        routeState.module === 'damage'
+                          ? 'bg-rose-600 text-white shadow-sm'
+                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
+                      }`}
+                    >
+                      📦 Damage & Returns
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/admin/purchase')}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all ${
+                        routeState.module === 'purchase'
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-750'
+                      }`}
+                    >
+                      🧾 Purchase Bills
+                    </button>
+                    <button
+                      type="button"
+                      id="admin-module-header-staff-btn"
+                      onClick={() => navigate('/admin/staff')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all ${
+                        routeState.module === 'staff'
+                          ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
+                          : 'bg-cyan-950/40 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-900/60'
+                      }`}
+                    >
+                      👥 Staff & Roles (स्टाफ एवं अनुमतियाँ)
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Render Selected Module Component */}
@@ -896,6 +948,10 @@ export default function App() {
                   onBackToHub={handleBackToHub}
                   drivers={drivers}
                 />
+              ) : routeState.module === 'staff' ? (
+                <div className="w-full">
+                  <StaffPermissions onBackToHub={handleBackToHub} />
+                </div>
               ) : (
                 <PlannedModuleView
                   moduleId={routeState.module}
