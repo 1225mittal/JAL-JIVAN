@@ -179,20 +179,37 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
         imageUrl: finalImageUrl
       };
 
+      // Session Broadcast
       if (channel) {
-        await channel.send({
+        channel.send({
           type: 'broadcast',
           event: 'BILL_SNAPPED',
           payload: broadcastPayload
-        });
+        }).catch(() => {});
       } else if (sessionId) {
         const directCh = supabase.channel(`inward_qr_${sessionId}`);
-        await directCh.send({
-          type: 'broadcast',
-          event: 'BILL_SNAPPED',
-          payload: broadcastPayload
+        directCh.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            directCh.send({
+              type: 'broadcast',
+              event: 'BILL_SNAPPED',
+              payload: broadcastPayload
+            }).catch(() => {});
+          }
         });
       }
+
+      // Requirement 2: Dual Fallback via Realtime Broadcast on global_inward_sync
+      const globalChan = supabase.channel('global_inward_sync');
+      globalChan.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          globalChan.send({
+            type: 'broadcast',
+            event: 'NEW_BILL_SNAPPED',
+            payload: snappedBill
+          }).catch(() => {});
+        }
+      });
 
       // 4. Record local thumbnail with confirmation
       setSnappedList((prev) => [

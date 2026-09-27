@@ -74,6 +74,19 @@ export default function PurchaseInwardHub({
   const [isMobileScannerOpen, setIsMobileScannerOpen] = useState(false);
   const [zoomedQueueImage, setZoomedQueueImage] = useState(null);
   const [ocrStatusMessage, setOcrStatusMessage] = useState('');
+  const [recentlyArrivedIds, setRecentlyArrivedIds] = useState(() => new Set());
+
+  const markRecentlyArrived = (id) => {
+    if (!id) return;
+    setRecentlyArrivedIds((prev) => new Set([...prev, id]));
+    setTimeout(() => {
+      setRecentlyArrivedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, 2000);
+  };
 
   // Active / Selected Bill Form State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -221,6 +234,7 @@ export default function PurchaseInwardHub({
       return [itemObj, ...prev];
     });
 
+    markRecentlyArrived(itemObj.id);
     playNotificationChime();
     showToast(`📸 Photo received from mobile (${billQueue.length + 1} total)`, 'success');
   };
@@ -275,23 +289,110 @@ export default function PurchaseInwardHub({
     loadVendors();
     loadBillQueue();
 
-    // Supabase Realtime subscription on purchase_bill_queue
     if (isSupabaseConfigured && supabase) {
+      // 1. Global Realtime Subscription on the Purchase Screen: realtime_bill_queue
       const queueChannel = supabase
-        .channel('realtime_purchase_bill_queue_hub')
+        .channel('realtime_bill_queue')
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'purchase_bill_queue' },
           (payload) => {
-            if (payload.new && payload.new.status === 'pending_ocr') {
-              handleIncomingBill(payload.new);
+            if (!payload?.new) return;
+            const newRow = payload.new;
+            const formatted = {
+              ...newRow,
+              name: newRow.name || `Mobile Snap #${Date.now().toString().slice(-4)}`,
+              image_url: newRow.image_url,
+              dataUrl: newRow.image_url,
+              uploadedAt: newRow.created_at || new Date().toISOString(),
+              created_at: newRow.created_at || new Date().toISOString(),
+              status: newRow.status || 'pending_ocr',
+              attachedToPrevious: false
+            };
+
+            // Instantly prepend or append new bill to the queue state
+            setBillQueue((prev) => {
+              if (prev.some((b) => b.id === formatted.id || (formatted.image_url && (b.image_url === formatted.image_url || b.dataUrl === formatted.image_url)))) {
+                return prev;
+              }
+              return [formatted, ...prev];
+            });
+
+            markRecentlyArrived(formatted.id);
+            playNotificationChime();
+            showToast('📸 New bill snapped from mobile added to queue!', 'success');
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'purchase_bill_queue' },
+          (payload) => {
+            if (!payload?.new) return;
+            const updated = payload.new;
+            // Handle status changes (e.g. processed or discarded)
+            setBillQueue((prev) =>
+              updated.status === 'pending_ocr'
+                ? prev.map((b) =>
+                    b.id === updated.id
+                      ? {
+                          ...b,
+                          ...updated,
+                          image_url: updated.image_url,
+                          dataUrl: updated.image_url
+                        }
+                      : b
+                  )
+                : prev.filter((b) => b.id !== updated.id)
+            );
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'purchase_bill_queue' },
+          (payload) => {
+            if (payload?.old?.id) {
+              setBillQueue((prev) => prev.filter((b) => b.id !== payload.old.id));
             }
           }
         )
         .subscribe();
 
+      // 2. Dual Fallback via Realtime Broadcast on global_inward_sync
+      const globalSyncChannel = supabase
+        .channel('global_inward_sync')
+        .on('broadcast', { event: 'NEW_BILL_SNAPPED' }, ({ payload }) => {
+          if (!payload) return;
+          const imgUrl = payload.image_url || payload.imageUrl || payload.dataUrl;
+          if (!imgUrl) return;
+
+          const newBill = {
+            ...payload,
+            id: payload.id || ('bill_' + Date.now()),
+            name: payload.name || `Mobile Snap #${Date.now().toString().slice(-4)}`,
+            image_url: imgUrl,
+            dataUrl: imgUrl,
+            uploadedAt: payload.created_at || new Date().toISOString(),
+            created_at: payload.created_at || new Date().toISOString(),
+            status: payload.status || 'pending_ocr',
+            attachedToPrevious: false
+          };
+
+          setBillQueue((prev) => {
+            if (prev.some((b) => b.id === newBill.id || (imgUrl && (b.image_url === imgUrl || b.dataUrl === imgUrl)))) {
+              return prev;
+            }
+            return [newBill, ...prev];
+          });
+
+          markRecentlyArrived(newBill.id);
+          playNotificationChime();
+          showToast('📸 New bill snapped from mobile added to queue!', 'success');
+        })
+        .subscribe();
+
       return () => {
         supabase.removeChannel(queueChannel);
+        supabase.removeChannel(globalSyncChannel);
       };
     }
   }, []);
@@ -1060,6 +1161,7 @@ export default function PurchaseInwardHub({
                     const isProcessing = activeProcessingBillId === item.id;
                     const itemUrl = item.image_url || item.dataUrl;
                     const isCurrentlyActive = billPreviewUrl === itemUrl;
+                    const isRecentlyArrived = recentlyArrivedIds.has(item.id);
                     const formattedTime = new Date(item.uploadedAt || item.created_at || Date.now()).toLocaleTimeString([], {
                       hour: '2-digit',
                       minute: '2-digit'
@@ -1068,8 +1170,10 @@ export default function PurchaseInwardHub({
                     return (
                       <div
                         key={item.id}
-                        className={`p-3 rounded-xl border transition-all ${
-                          isCurrentlyActive
+                        className={`p-3 rounded-xl border transition-all duration-300 ${
+                          isRecentlyArrived
+                            ? 'bg-emerald-950/80 border-emerald-400 ring-2 ring-emerald-400 shadow-xl shadow-emerald-500/30 scale-[1.01]'
+                            : isCurrentlyActive
                             ? 'bg-slate-950 border-amber-500 shadow-md shadow-amber-500/10'
                             : item.attachedToPrevious
                             ? 'bg-slate-950/90 border-cyan-500/40'
@@ -1100,10 +1204,15 @@ export default function PurchaseInwardHub({
                           <div className="flex-1 min-w-0 space-y-2">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-bold text-white text-xs truncate max-w-[170px]">
                                     {item.name || `Bill #${index + 1}`}
                                   </span>
+                                  {isRecentlyArrived && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-400 text-slate-950 animate-pulse shadow-sm">
+                                      ✨ Just Arrived!
+                                    </span>
+                                  )}
                                   {isCurrentlyActive && (
                                     <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500 text-slate-950">
                                       Active
