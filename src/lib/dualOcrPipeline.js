@@ -563,6 +563,7 @@ function buildEnsembleResult({
     discount_total: discountAmount,
     round_off: roundOff,
     grand_total: grandTotal,
+    vendor_grand_total: Number(primary.grand_total ?? secondary.grand_total ?? primary.totals?.grand_total) || grandTotal,
     items: mergedItems,
 
     // Backward-compatible nested aliases for existing UI consumers

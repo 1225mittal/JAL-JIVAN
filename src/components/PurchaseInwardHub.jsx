@@ -45,7 +45,8 @@ import {
   Image as ImageIcon,
   X,
   Sliders,
-  AlertTriangle
+  AlertTriangle,
+  Tag
 } from 'lucide-react';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import MobileScannerModal from './MobileScannerModal';
@@ -71,6 +72,80 @@ import {
 } from '../lib/supabase';
 
 export const PURCHASE_UNITS = ['PCS', 'KG', 'GM', 'LTR', 'ML', 'BAG', 'BOX', 'PACK', 'TIN'];
+
+/**
+ * Pure Mathematical Calculation Engine for Purchase Inward Line Items
+ * Computes:
+ * 1. Gross Line Amount = qty * rate
+ * 2. Line Discount = discount_type === '%' ? (Gross * disc / 100) : disc
+ * 3. Line Taxable Base = Gross - Line Discount
+ * 4. CGST = Line Taxable Base * (gst_pct / 2) / 100
+ * 5. SGST = Line Taxable Base * (gst_pct / 2) / 100
+ * 6. Line Total = Line Taxable Base + CGST + SGST + CESS
+ * 7. Landed Cost Per Unit = Line Total / qty
+ */
+export function calculateLineItem(item, manualTaxable = false) {
+  const qty = Math.max(1, Number(item.quantity ?? item.qty) || 1);
+  const rate = Math.max(0, Number(item.rate ?? item.price_before_gst ?? item.purchase_price) || 0);
+  const discType = item.discount_type === '₹' ? '₹' : '%';
+  const discVal = Math.max(0, Number(item.discount_value ?? item.discount) || 0);
+
+  // 1. Gross Line Amount = qty * rate
+  const gross = +(qty * rate).toFixed(2);
+
+  // 2. Line Discount = discount_type === '%' ? (Gross * disc / 100) : disc
+  const discAmt = discType === '%'
+    ? +((gross * (discVal / 100))).toFixed(2)
+    : Math.min(gross, +discVal.toFixed(2));
+
+  // 3. Line Taxable Base = Gross Line Amount - Line Discount
+  const taxable = manualTaxable && item.taxable_amount !== undefined
+    ? Math.max(0, Number(item.taxable_amount) || 0)
+    : Math.max(0, +(gross - discAmt).toFixed(2));
+
+  // 4 & 5. CGST and SGST
+  const gstPct = Number(item.gst_pct ?? item.gst_rate) || 0;
+  const cgstPct = +(gstPct / 2).toFixed(2);
+  const sgstPct = +(gstPct / 2).toFixed(2);
+  const cgstAmt = +((taxable * (cgstPct / 100))).toFixed(2);
+  const sgstAmt = +((taxable * (sgstPct / 100))).toFixed(2);
+
+  // 6. Line Total = Line Taxable Base + CGST + SGST + CESS
+  const cessAmt = Math.max(0, Number(item.cess_amount ?? item.cess) || 0);
+  const lineTotal = +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
+
+  // 7. Landed Cost Per Unit = Line Total / qty
+  const landedCost = qty > 0 ? +((lineTotal / qty)).toFixed(2) : lineTotal;
+
+  return {
+    ...item,
+    quantity: qty,
+    qty,
+    rate,
+    price_before_gst: rate,
+    purchase_price: rate,
+    discount_type: discType,
+    discount_value: discVal,
+    discount: discAmt,
+    discount_amount: discAmt,
+    taxable_amount: taxable,
+    taxable,
+    gst_pct: gstPct,
+    gst_rate: gstPct,
+    cgst_pct: cgstPct,
+    cgst_amount: cgstAmt,
+    sgst_pct: sgstPct,
+    sgst_amount: sgstAmt,
+    cess_pct: Number(item.cess_pct) || 0,
+    cess_amount: cessAmt,
+    cess: cessAmt,
+    total_amount: lineTotal,
+    price_after_gst: lineTotal,
+    total: lineTotal,
+    landed_cost: landedCost,
+    landed_cost_per_unit: landedCost
+  };
+}
 
 export default function PurchaseInwardHub({
   onBackToHub,
@@ -161,9 +236,11 @@ export default function PurchaseInwardHub({
   const [items, setItems] = useState([]);
   const [rawOcrData, setRawOcrData] = useState(null);
 
-  // Invoice-Level Discount State
+  // Invoice-Level Discount State & Verification Controls
   const [invoiceDiscountPct, setInvoiceDiscountPct] = useState('');
   const [invoiceDiscountAmount, setInvoiceDiscountAmount] = useState('');
+  const [globalDiscountType, setGlobalDiscountType] = useState('pre_tax'); // 'pre_tax' | 'post_tax'
+  const [vendorPrintedGrandTotal, setVendorPrintedGrandTotal] = useState(null);
 
   // File input refs
   const cameraInputRef = useRef(null);
@@ -612,6 +689,15 @@ export default function PurchaseInwardHub({
       const rawDiscountAmt = Number(parsed.discount_amount ?? parsed.discount ?? parsed.totals?.discount_total) || 0;
       const rawDiscountPct = Number(parsed.discount_pct ?? parsed.totals?.discount_pct) || 0;
 
+      // Extract vendor printed grand total strictly for validation & discrepancy verification
+      const rawVendorGrand = Number(
+        parsed.vendor_grand_total ??
+        parsed.grand_total ??
+        parsed.invoice?.grand_total ??
+        parsed.totals?.grand_total
+      );
+      setVendorPrintedGrandTotal(!isNaN(rawVendorGrand) && rawVendorGrand > 0 ? rawVendorGrand : null);
+
       const parsedItemsList = Array.isArray(parsed.items) ? parsed.items : [];
       let parsedGrossSum = 0;
       parsedItemsList.forEach((it) => {
@@ -635,61 +721,54 @@ export default function PurchaseInwardHub({
         setInvoiceDiscountPct('');
       }
 
-      // Populate Line Items with detailed GST fields & auto-calculation
+      // Populate Line Items with detailed GST fields & pure arithmetic calculation
       if (Array.isArray(parsed.items) && parsed.items.length > 0) {
         setItems(
           parsed.items.map((it, idx) => {
             const sn = Number(it.sn) || (idx + 1);
-            const qty = Number(it.qty ?? it.quantity) || 1;
-            const rate = Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0;
-            const disc = Number(it.discount_amount ?? it.discount) || 0;
-            const taxable = Number(it.taxable_amount) || +Math.max(0, (qty * rate) - disc).toFixed(2);
-            const gstPct = Number(it.gst_pct ?? it.gst_rate) || 18;
-            const cgstPct = Number(it.cgst_pct) || (gstPct / 2);
-            const sgstPct = Number(it.sgst_pct) || (gstPct / 2);
-            const cgstAmt = Number(it.cgst_amount) || +((taxable * (cgstPct / 100))).toFixed(2);
-            const sgstAmt = Number(it.sgst_amount) || +((taxable * (sgstPct / 100))).toFixed(2);
-            const cessAmt = Number(it.cess_amount ?? it.cess) || 0;
-            const totalAmt = Number(it.total_amount ?? it.price_after_gst) || +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
+            const qty = Math.max(1, Number(it.qty ?? it.quantity) || 1);
+            const rate = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
+
+            // Extract explicitly printed line discount (percentage or flat amount)
+            let discType = '%';
+            let discVal = 0;
+            if (Number(it.discount_pct) > 0) {
+              discType = '%';
+              discVal = Number(it.discount_pct);
+            } else if (Number(it.discount_amount ?? it.discount) > 0) {
+              discType = '₹';
+              discVal = Number(it.discount_amount ?? it.discount);
+            }
+
             const hsnCode = (it.hsn ?? it.hsn_code ?? '').toString().trim();
             const rawBarcode = (it.barcode || '').toString().trim();
             // Discard barcode if it matches HSN or is less than 12 digits
             const cleanBarcode = (rawBarcode && rawBarcode !== hsnCode && rawBarcode.length >= 12) ? rawBarcode : '';
 
-            return {
+            const rawItem = {
               id: `temp_${Date.now()}_${idx}`,
               sn,
               barcode: cleanBarcode,
-              item_name: it.item_name || `Item ${sn}`,
+              item_name: (it.item_name || it.description || `Item ${sn}`).toString().trim(),
               hsn_code: hsnCode,
               hsn: hsnCode,
               unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
               quantity: qty,
-              qty,
               mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
               rate: rate,
-              purchase_price: rate,
-              price_before_gst: rate,
-              taxable_amount: taxable,
-              gst_pct: gstPct,
-              gst_rate: gstPct,
-              cgst_pct: cgstPct,
-              cgst_amount: cgstAmt,
-              sgst_pct: sgstPct,
-              sgst_amount: sgstAmt,
-              cess_pct: Number(it.cess_pct) || 0,
-              cess_amount: cessAmt,
-              cess: cessAmt,
-              discount: disc,
-              discount_amount: disc,
-              total_amount: totalAmt,
-              price_after_gst: totalAmt
+              discount_type: discType,
+              discount_value: discVal,
+              gst_pct: Number(it.gst_pct ?? it.gst_rate) || 18,
+              cess_amount: Number(it.cess_amount ?? it.cess) || 0
             };
+
+            // Pure arithmetic calculation engine - independent of printed line totals
+            return calculateLineItem(rawItem);
           })
         );
       } else {
         setItems([
-          {
+          calculateLineItem({
             id: `temp_${Date.now()}`,
             barcode: '',
             item_name: 'New Product Item',
@@ -698,21 +777,11 @@ export default function PurchaseInwardHub({
             quantity: 1,
             mrp: 100,
             rate: 70,
-            price_before_gst: 70,
-            taxable_amount: 70,
+            discount_type: '%',
+            discount_value: 0,
             gst_pct: 18,
-            gst_rate: 18,
-            cgst_pct: 9,
-            cgst_amount: 6.30,
-            sgst_pct: 9,
-            sgst_amount: 6.30,
-            cess_pct: 0,
-            cess_amount: 0,
-            cess: 0,
-            discount: 0,
-            total_amount: 82.60,
-            price_after_gst: 82.60
-          }
+            cess_amount: 0
+          })
         ]);
       }
 
@@ -736,41 +805,13 @@ export default function PurchaseInwardHub({
     }
   };
 
-  // Recalculate row totals with detailed GST logic
+  // Recalculate row totals with pure arithmetic engine
   const handleItemFieldChange = (index, field, value) => {
     setItems((prev) => {
       const next = [...prev];
       const target = { ...next[index], [field]: value };
-
-      const qty = Number(target.quantity) || 1;
-      const rate = Number(target.rate ?? target.price_before_gst) || 0;
-      const disc = Number(target.discount) || 0;
-      const gstPct = Number(target.gst_pct ?? target.gst_rate) || 0;
-      const cessAmt = Number(target.cess_amount ?? target.cess) || 0;
-
-      // If user adjusts taxable_amount directly
-      let taxable = Number(target.taxable_amount) || 0;
-      if (field === 'rate' || field === 'quantity' || field === 'discount') {
-        taxable = Math.max(0, +(qty * rate - disc).toFixed(2));
-        target.taxable_amount = taxable;
-        target.price_before_gst = rate;
-      }
-
-      const cgstPct = gstPct / 2;
-      const sgstPct = gstPct / 2;
-      const cgstAmt = +((taxable * (cgstPct / 100))).toFixed(2);
-      const sgstAmt = +((taxable * (sgstPct / 100))).toFixed(2);
-      const totalAmt = +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
-
-      target.cgst_pct = cgstPct;
-      target.cgst_amount = cgstAmt;
-      target.sgst_pct = sgstPct;
-      target.sgst_amount = sgstAmt;
-      target.total_amount = totalAmt;
-      target.price_after_gst = totalAmt;
-      target.gst_rate = gstPct;
-
-      next[index] = target;
+      const isManualTaxable = field === 'taxable_amount';
+      next[index] = calculateLineItem(target, isManualTaxable);
       return next;
     });
   };
@@ -779,7 +820,7 @@ export default function PurchaseInwardHub({
   const handleAddItemRow = () => {
     setItems((prev) => [
       ...prev,
-      {
+      calculateLineItem({
         id: `row_${Date.now()}`,
         barcode: '',
         item_name: '',
@@ -788,21 +829,11 @@ export default function PurchaseInwardHub({
         quantity: 1,
         mrp: 0,
         rate: 0,
-        price_before_gst: 0,
-        taxable_amount: 0,
+        discount_type: '%',
+        discount_value: 0,
         gst_pct: 18,
-        gst_rate: 18,
-        cgst_pct: 9,
-        cgst_amount: 0,
-        sgst_pct: 9,
-        sgst_amount: 0,
-        cess_pct: 0,
-        cess_amount: 0,
-        cess: 0,
-        discount: 0,
-        total_amount: 0,
-        price_after_gst: 0
-      }
+        cess_amount: 0
+      })
     ]);
   };
 
@@ -832,12 +863,13 @@ export default function PurchaseInwardHub({
     }
   };
 
-  // Linked Discount Input Handlers
+  // Linked Global Discount Input Handlers
   const handleDiscountPctChange = (val) => {
     setInvoiceDiscountPct(val);
     const pct = parseFloat(val);
-    if (!isNaN(pct) && grossSubtotal > 0) {
-      const calculatedAmt = +((grossSubtotal * (pct / 100))).toFixed(2);
+    const base = globalDiscountType === 'pre_tax' ? preTaxBase : (preTaxBase + totalCgst + totalSgst + totalCess);
+    if (!isNaN(pct) && base > 0) {
+      const calculatedAmt = +((base * (pct / 100))).toFixed(2);
       setInvoiceDiscountAmount(calculatedAmt > 0 ? String(calculatedAmt) : '');
     } else if (!val) {
       setInvoiceDiscountAmount('');
@@ -847,17 +879,20 @@ export default function PurchaseInwardHub({
   const handleDiscountAmountChange = (val) => {
     setInvoiceDiscountAmount(val);
     const amt = parseFloat(val);
-    if (!isNaN(amt) && grossSubtotal > 0) {
-      const calculatedPct = +(((amt / grossSubtotal) * 100)).toFixed(2);
+    const base = globalDiscountType === 'pre_tax' ? preTaxBase : (preTaxBase + totalCgst + totalSgst + totalCess);
+    if (!isNaN(amt) && base > 0) {
+      const calculatedPct = +(((amt / base) * 100)).toFixed(2);
       setInvoiceDiscountPct(calculatedPct > 0 ? String(calculatedPct) : '');
     } else if (!val) {
       setInvoiceDiscountPct('');
     }
   };
 
-  // Calculations for Totals Card & Indian GST Invoice Round-Off Matching
+  // Calculations for Totals Card, Flexible Global Discount & Indian GST Invoice Verification
   const {
     grossSubtotal,
+    totalLineDiscounts,
+    preTaxBase,
     discountAmountNum,
     discountPctNum,
     totalTaxable,
@@ -868,100 +903,120 @@ export default function PurchaseInwardHub({
     subtotal,
     rawTotal,
     roundOff,
-    grandTotal
+    grandTotal,
+    hasDiscrepancy,
+    discrepancy
   } = useMemo(() => {
     let gross = 0;
+    let lineDiscountsSum = 0;
     let cessSum = 0;
+    let sumLineCgst = 0;
+    let sumLineSgst = 0;
+    let sumLineTaxable = 0;
 
-    // 1. Gross Subtotal = sum(item.qty * item.rate)
     (items || []).forEach((it) => {
       if (!it) return;
       const q = Math.max(0, Number(it.quantity ?? it.qty) || 1);
       const r = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
-      gross += q * r;
+      const lineGross = +(q * r).toFixed(2);
+      gross += lineGross;
+
+      const lineDisc = Number(it.discount_amount ?? it.discount) || 0;
+      lineDiscountsSum += lineDisc;
+
+      const taxable = Number(it.taxable_amount) || Math.max(0, +(lineGross - lineDisc).toFixed(2));
+      sumLineTaxable += taxable;
+
+      sumLineCgst += Number(it.cgst_amount) || 0;
+      sumLineSgst += Number(it.sgst_amount) || 0;
       cessSum += Number(it.cess_amount || it.cess) || 0;
     });
 
     const cleanGross = +gross.toFixed(2);
+    const cleanLineDiscounts = +lineDiscountsSum.toFixed(2);
+    const cleanPreTaxBase = +sumLineTaxable.toFixed(2);
 
-    // 2. Parse Discount Inputs
-    let discAmt = parseFloat(invoiceDiscountAmount) || 0;
-    let discPct = parseFloat(invoiceDiscountPct) || 0;
+    // Global Discount Calculation
+    let globalDiscAmt = parseFloat(invoiceDiscountAmount) || 0;
+    let globalDiscPct = parseFloat(invoiceDiscountPct) || 0;
 
-    if (discAmt === 0 && discPct > 0 && cleanGross > 0) {
-      discAmt = +((cleanGross * (discPct / 100))).toFixed(2);
-    } else if (discAmt > 0 && discPct === 0 && cleanGross > 0) {
-      discPct = +(((discAmt / cleanGross) * 100)).toFixed(2);
-    }
+    let netTaxable = cleanPreTaxBase;
+    let cgstFinal = 0;
+    let sgstFinal = 0;
+    let rawTot = 0;
 
-    discAmt = Math.min(cleanGross, Math.max(0, discAmt));
+    if (globalDiscountType === 'pre_tax') {
+      // PRE-TAX TRADE DISCOUNT:
+      // Applied on pre-tax taxable base BEFORE GST is calculated
+      const discountBase = cleanPreTaxBase > 0 ? cleanPreTaxBase : cleanGross;
 
-    // 3. Net Taxable Amount = Gross Subtotal - Discount Amount
-    const netTaxable = Math.max(0, +(cleanGross - discAmt).toFixed(2));
-
-    // 4. Calculate CGST and SGST on the Net Taxable Amount
-    let effectiveCgstRate = 0.025; // default 2.5% for standard Indian FMCG (5% GST)
-    let effectiveSgstRate = 0.025; // default 2.5% for standard Indian FMCG (5% GST)
-
-    if (cleanGross > 0 && items.length > 0) {
-      let weightedCgstSum = 0;
-      let weightedSgstSum = 0;
-      items.forEach((it) => {
-        const q = Math.max(0, Number(it.quantity ?? it.qty) || 1);
-        const r = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
-        const itemGross = q * r;
-        const gstPct = Number(it.gst_pct ?? it.gst_rate) || 0;
-        const cgstPct = Number(it.cgst_pct) || (gstPct / 2);
-        const sgstPct = Number(it.sgst_pct) || (gstPct / 2);
-
-        weightedCgstSum += itemGross * (cgstPct / 100);
-        weightedSgstSum += itemGross * (sgstPct / 100);
-      });
-      if (weightedCgstSum > 0) {
-        effectiveCgstRate = weightedCgstSum / cleanGross;
-        effectiveSgstRate = weightedSgstSum / cleanGross;
+      if (globalDiscAmt === 0 && globalDiscPct > 0 && discountBase > 0) {
+        globalDiscAmt = +((discountBase * (globalDiscPct / 100))).toFixed(2);
+      } else if (globalDiscAmt > 0 && globalDiscPct === 0 && discountBase > 0) {
+        globalDiscPct = +(((globalDiscAmt / discountBase) * 100)).toFixed(2);
       }
-    }
+      globalDiscAmt = Math.min(discountBase, Math.max(0, globalDiscAmt));
 
-    // Check item-level CGST/SGST if populated from bill
-    let itemCgstTotal = 0;
-    let itemSgstTotal = 0;
-    items.forEach((it) => {
-      itemCgstTotal += Number(it.cgst_amount) || 0;
-      itemSgstTotal += Number(it.sgst_amount) || 0;
-    });
+      netTaxable = Math.max(0, +(discountBase - globalDiscAmt).toFixed(2));
 
-    const calculatedCgst = +((netTaxable * effectiveCgstRate)).toFixed(2);
-    const calculatedSgst = +((netTaxable * effectiveSgstRate)).toFixed(2);
+      // Compute CGST and SGST on reduced net taxable base
+      let effectiveCgstRate = 0.025;
+      let effectiveSgstRate = 0.025;
+      if (cleanPreTaxBase > 0) {
+        effectiveCgstRate = sumLineCgst / cleanPreTaxBase;
+        effectiveSgstRate = sumLineSgst / cleanPreTaxBase;
+      }
+      cgstFinal = +((netTaxable * effectiveCgstRate)).toFixed(2);
+      sgstFinal = +((netTaxable * effectiveSgstRate)).toFixed(2);
 
-    let cgstFinal = calculatedCgst;
-    let sgstFinal = calculatedSgst;
+      // If no global discount, preserve exact sum of line CGST & SGST
+      if (globalDiscAmt === 0) {
+        cgstFinal = +sumLineCgst.toFixed(2);
+        sgstFinal = +sumLineSgst.toFixed(2);
+      }
 
-    // If item-level tax sums are close (e.g. 140.36 vs 140.34 due to per-line rounding), preserve printed accuracy
-    if (itemCgstTotal > 0 && Math.abs(itemCgstTotal - calculatedCgst) <= 0.05) {
-      cgstFinal = +itemCgstTotal.toFixed(2);
-      sgstFinal = +itemSgstTotal.toFixed(2);
+      rawTot = +(netTaxable + cgstFinal + sgstFinal + cessSum).toFixed(2);
+    } else {
+      // POST-TAX / CASH DISCOUNT (CD):
+      // GST computed on FULL taxable base, discount subtracted directly from (Taxable + Tax)
+      netTaxable = cleanPreTaxBase;
+      cgstFinal = +sumLineCgst.toFixed(2);
+      sgstFinal = +sumLineSgst.toFixed(2);
+      const postTaxSum = +(netTaxable + cgstFinal + sgstFinal + cessSum).toFixed(2);
+
+      if (globalDiscAmt === 0 && globalDiscPct > 0 && postTaxSum > 0) {
+        globalDiscAmt = +((postTaxSum * (globalDiscPct / 100))).toFixed(2);
+      } else if (globalDiscAmt > 0 && globalDiscPct === 0 && postTaxSum > 0) {
+        globalDiscPct = +(((globalDiscAmt / postTaxSum) * 100)).toFixed(2);
+      }
+      globalDiscAmt = Math.min(postTaxSum, Math.max(0, globalDiscAmt));
+
+      rawTot = Math.max(0, +(postTaxSum - globalDiscAmt).toFixed(2));
     }
 
     const cessFinal = +cessSum.toFixed(2);
     const taxFinal = +(cgstFinal + sgstFinal + cessFinal).toFixed(2);
 
-    // 5. Raw Total = Net Taxable + CGST + SGST + CESS
-    const rawTot = +(netTaxable + cgstFinal + sgstFinal + cessFinal).toFixed(2);
-
-    // 6. Grand Total = Math.round(Raw Total)
     let grandTot = Math.round(rawTot);
-    if (rawOcrData?.grand_total && Math.abs(rawOcrData.grand_total - rawTot) <= 1.0) {
-      grandTot = rawOcrData.grand_total;
+    // If vendor printed total is available and within standard rounding off (<= ₹1.00), match printed total
+    if (vendorPrintedGrandTotal !== null && vendorPrintedGrandTotal > 0 && Math.abs(vendorPrintedGrandTotal - rawTot) <= 1.0) {
+      grandTot = vendorPrintedGrandTotal;
     }
 
-    // 7. Round Off = (Grand Total - Raw Total).toFixed(2)
     const roundOffAmt = +(grandTot - rawTot).toFixed(2);
+
+    // Verification check against vendor's printed grand total
+    const diff = vendorPrintedGrandTotal !== null && vendorPrintedGrandTotal > 0
+      ? +(grandTot - vendorPrintedGrandTotal).toFixed(2)
+      : 0;
+    const isDiscrepant = vendorPrintedGrandTotal !== null && vendorPrintedGrandTotal > 0 && Math.abs(diff) > 1.0;
 
     return {
       grossSubtotal: cleanGross,
-      discountAmountNum: discAmt,
-      discountPctNum: discPct,
+      totalLineDiscounts: cleanLineDiscounts,
+      preTaxBase: cleanPreTaxBase,
+      discountAmountNum: globalDiscAmt,
+      discountPctNum: globalDiscPct,
       totalTaxable: netTaxable,
       totalCgst: cgstFinal,
       totalSgst: sgstFinal,
@@ -970,13 +1025,16 @@ export default function PurchaseInwardHub({
       subtotal: cleanGross,
       rawTotal: rawTot,
       roundOff: roundOffAmt,
-      grandTotal: grandTot
+      grandTotal: grandTot,
+      hasDiscrepancy: isDiscrepant,
+      discrepancy: diff
     };
-  }, [items, invoiceDiscountAmount, invoiceDiscountPct, rawOcrData]);
+  }, [items, invoiceDiscountAmount, invoiceDiscountPct, globalDiscountType, vendorPrintedGrandTotal]);
 
   // Direct Column Totals for Table <tfoot> Row
   const tableColumnTotals = useMemo(() => {
     let qtySum = 0;
+    let discountSum = 0;
     let taxableSum = 0;
     let cgstSum = 0;
     let sgstSum = 0;
@@ -996,6 +1054,7 @@ export default function PurchaseInwardHub({
       const gross = Number(it.total_amount ?? it.price_after_gst) || 0;
 
       qtySum += q;
+      discountSum += disc;
       taxableSum += taxable;
       cgstSum += cgst;
       sgstSum += sgst;
@@ -1006,6 +1065,7 @@ export default function PurchaseInwardHub({
 
     return {
       qtySum,
+      discountSum: +discountSum.toFixed(2),
       taxableSum: +taxableSum.toFixed(2),
       cgstSum: +cgstSum.toFixed(2),
       sgstSum: +sgstSum.toFixed(2),
@@ -1061,18 +1121,25 @@ export default function PurchaseInwardHub({
         discount_amount: discountAmountNum,
         discount_pct: discountPctNum,
         discount: discountAmountNum,
+        global_discount_type: globalDiscountType,
         round_off_amount: roundOff,
         round_off: roundOff,
         total_taxable_amount: totalTaxable,
         total_tax_amount: totalTax,
         grand_total: grandTotal,
+        vendor_grand_total: vendorPrintedGrandTotal,
+        has_discrepancy: hasDiscrepancy,
+        discrepancy: discrepancy,
         bill_image_url: uniqueBillUrls[0] || billPreviewUrl || '',
         bill_image_urls: uniqueBillUrls,
         vendor_details: sellerData,
         tax_summary: {
           gross_subtotal: grossSubtotal,
+          total_line_discounts: totalLineDiscounts,
+          pre_tax_base: preTaxBase,
           discount_amount: discountAmountNum,
           discount_pct: discountPctNum,
+          discount_type: globalDiscountType,
           total_taxable: totalTaxable,
           total_cgst: totalCgst,
           total_sgst: totalSgst,
@@ -1080,7 +1147,10 @@ export default function PurchaseInwardHub({
           total_tax: totalTax,
           subtotal: grossSubtotal,
           round_off: roundOff,
-          grand_total: grandTotal
+          grand_total: grandTotal,
+          vendor_grand_total: vendorPrintedGrandTotal,
+          has_discrepancy: hasDiscrepancy,
+          discrepancy: discrepancy
         },
         status: 'verified'
       };
@@ -1117,6 +1187,10 @@ export default function PurchaseInwardHub({
           purchase_price: rate,
           rate: rate,
           price_before_gst: rate,
+          discount_type: it.discount_type || '%',
+          discount_value: Number(it.discount_value) || 0,
+          discount: disc,
+          discount_amount: disc,
           taxable_amount: taxable,
           taxable: taxable,
           gst_pct: gstRate,
@@ -1128,8 +1202,6 @@ export default function PurchaseInwardHub({
           cess_pct: cessPct,
           cess_amount: cessAmt,
           cess: cessAmt,
-          discount: disc,
-          discount_amount: disc,
           price_after_gst: total,
           total_amount: total,
           total: total,
@@ -1211,6 +1283,8 @@ export default function PurchaseInwardHub({
     setRawOcrData(null);
     setInvoiceDiscountAmount('');
     setInvoiceDiscountPct('');
+    setGlobalDiscountType('pre_tax');
+    setVendorPrintedGrandTotal(null);
   };
 
   const handleDeleteInvoice = async (id) => {
@@ -1866,7 +1940,7 @@ export default function PurchaseInwardHub({
                         <span>2. Itemized Inward Stock Lines & GST Breakup ({items.length})</span>
                       </h3>
                       <p className="text-[11px] text-slate-400">
-                        Universal Barcode assignment, HSN codes, Taxable amounts, CGST, SGST and CESS auto-calculations.
+                        Universal Barcode assignment, HSN codes, Line discounts, Taxable amounts, CGST, SGST and CESS auto-calculations.
                       </p>
                     </div>
 
@@ -1879,6 +1953,43 @@ export default function PurchaseInwardHub({
                       <span>Add Line Item</span>
                     </button>
                   </div>
+
+                  {/* Bill Verification & Discrepancy Alert */}
+                  {hasDiscrepancy && (
+                    <div className="rounded-xl bg-amber-500/15 border-2 border-amber-500/50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-200 shadow-lg">
+                      <div className="flex items-start gap-2.5">
+                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs sm:text-sm font-bold text-amber-300">
+                            ⚠️ Bill Discrepancy Detected: Calculated ₹{grandTotal.toFixed(2)} vs Vendor Printed ₹{vendorPrintedGrandTotal.toFixed(2)} (Difference: {discrepancy >= 0 ? `+₹${discrepancy.toFixed(2)}` : `-₹${Math.abs(discrepancy).toFixed(2)}`})
+                          </p>
+                          <p className="text-[11px] text-amber-400/80 mt-0.5">
+                            Independent mathematical tally does not match the vendor's printed bill total. Please check line item rates, quantities, discounts, or tax rates.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVendorPrintedGrandTotal(null)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold border border-amber-500/30 transition cursor-pointer self-start sm:self-auto shrink-0"
+                        title="Dismiss discrepancy warning"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+
+                  {!hasDiscrepancy && vendorPrintedGrandTotal !== null && vendorPrintedGrandTotal > 0 && (
+                    <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-3.5 py-2 flex items-center justify-between gap-2 text-emerald-300 text-xs">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>
+                          ✓ Bill Verified: Math matches vendor printed total of <strong>₹{vendorPrintedGrandTotal.toFixed(2)}</strong> (Difference: ₹{discrepancy.toFixed(2)})
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-mono text-emerald-400/70">100% Math Match</span>
+                    </div>
+                  )}
 
                   {/* Comprehensive Line Items Table */}
                   <div className="w-full overflow-x-auto border border-slate-800 rounded-xl bg-slate-950/60 shadow-inner">
@@ -1893,6 +2004,7 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2 min-w-[75px]">Unit</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">MRP (₹)</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">Rate (₹)</th>
+                          <th className="py-2.5 px-2 min-w-[110px] text-right">DISC</th>
                           <th className="py-2.5 px-2 min-w-[90px] text-right">Taxable (₹)</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">GST %</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">CGST (₹)</th>
@@ -2019,6 +2131,34 @@ export default function PurchaseInwardHub({
                                 />
                               </td>
 
+                              {/* Line-Level Discount (DISC) */}
+                              <td className="py-2 px-2 min-w-[110px]">
+                                <div className="flex items-center bg-slate-900 border border-slate-800 focus-within:border-emerald-500 rounded-lg overflow-hidden h-8">
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={it.discount_value !== undefined && it.discount_value !== 0 ? it.discount_value : ''}
+                                    placeholder="0"
+                                    onChange={(e) => handleItemFieldChange(idx, 'discount_value', e.target.value)}
+                                    className="w-full h-full px-1.5 bg-transparent text-white text-right font-mono text-xs focus:outline-none"
+                                    title={it.discount_type === '%' ? `Line Discount: ${it.discount_value || 0}% (₹${Number(it.discount_amount || 0).toFixed(2)})` : `Line Discount: ₹${it.discount_value || 0}`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleItemFieldChange(idx, 'discount_type', it.discount_type === '₹' ? '%' : '₹')}
+                                    className={`px-1.5 h-full text-[11px] font-bold border-l border-slate-800 transition cursor-pointer select-none shrink-0 ${
+                                      it.discount_type === '₹'
+                                        ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                                        : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                                    }`}
+                                    title="Click to toggle between % and ₹"
+                                  >
+                                    {it.discount_type === '₹' ? '₹' : '%'}
+                                  </button>
+                                </div>
+                              </td>
+
                               {/* Taxable Amount */}
                               <td className="py-2 px-2 min-w-[90px]">
                                 <input
@@ -2116,7 +2256,7 @@ export default function PurchaseInwardHub({
 
                         {items.length === 0 && (
                           <tr>
-                            <td colSpan="17" className="py-8 text-center text-slate-500">
+                            <td colSpan="18" className="py-8 text-center text-slate-500">
                               No line items entered yet. Click "Add Line Item" or click "⚡ Process This Bill" from the queue above.
                             </td>
                           </tr>
@@ -2147,6 +2287,11 @@ export default function PurchaseInwardHub({
 
                           {/* Rate Column */}
                           <td className="py-2.5 px-2 min-w-[80px] text-right text-slate-500">—</td>
+
+                          {/* Line Discount Column (DISC) */}
+                          <td className="py-2.5 px-2 min-w-[110px] text-right font-mono font-bold text-rose-400">
+                            {tableColumnTotals.discountSum > 0 ? `₹${tableColumnTotals.discountSum.toFixed(2)}` : '—'}
+                          </td>
 
                           {/* Taxable Amount Column */}
                           <td className="py-2.5 px-2 min-w-[90px] text-right font-mono font-bold text-slate-200">
@@ -2200,9 +2345,50 @@ export default function PurchaseInwardHub({
                         <span className="font-mono font-bold text-white">₹{grossSubtotal.toFixed(2)}</span>
                       </div>
 
-                      {/* Discount: [- ₹114.54] (2%) (Editable linked inputs) */}
-                      <div className="px-3 py-1.5 rounded-xl bg-rose-950/25 border border-rose-500/40 text-rose-300 shadow-sm flex items-center gap-2">
-                        <span className="font-semibold text-rose-400 text-xs">Discount:</span>
+                      {/* Line Discounts (if any) */}
+                      {totalLineDiscounts > 0 && (
+                        <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                          <span className="text-slate-400 font-medium">Line Disc:</span>
+                          <span className="font-mono font-bold text-rose-400">-₹{totalLineDiscounts.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {/* Bill-Level Global Discount with Pre-Tax vs Post-Tax toggle */}
+                      <div className="px-3 py-1.5 rounded-xl bg-rose-950/25 border border-rose-500/40 text-rose-300 shadow-sm flex items-center gap-2.5 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <Tag className="w-3.5 h-3.5 text-rose-400" />
+                          <span className="font-semibold text-rose-400 text-xs">Bill Discount:</span>
+                        </div>
+
+                        {/* Mode Toggle: Pre-Tax vs Post-Tax */}
+                        <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setGlobalDiscountType('pre_tax')}
+                            className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                              globalDiscountType === 'pre_tax'
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                            title="Pre-Tax Trade Discount: Deducts from taxable base before computing GST"
+                          >
+                            Pre-Tax (Trade)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setGlobalDiscountType('post_tax')}
+                            className={`px-2 py-0.5 rounded-md font-bold transition cursor-pointer ${
+                              globalDiscountType === 'post_tax'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                            title="Post-Tax / Cash Discount (CD): Computes GST on full taxable base, deducts from bill total"
+                          >
+                            Post-Tax (Cash / CD)
+                          </button>
+                        </div>
+
+                        {/* Amount and Percentage Inputs */}
                         <div className="flex items-center gap-1.5">
                           {/* Amount Input */}
                           <div className="flex items-center bg-slate-900/90 border border-rose-500/40 rounded-lg px-2 py-0.5 focus-within:border-rose-400">
@@ -2215,7 +2401,7 @@ export default function PurchaseInwardHub({
                               value={invoiceDiscountAmount}
                               onChange={(e) => handleDiscountAmountChange(e.target.value)}
                               className="w-20 bg-transparent text-right font-mono font-bold text-rose-200 text-xs focus:outline-none"
-                              title="Discount Amount in ₹ (Subtracts before GST)"
+                              title={globalDiscountType === 'pre_tax' ? 'Discount Amount in ₹ (Subtracts before GST)' : 'Cash Discount Amount in ₹ (Subtracts after GST)'}
                             />
                             <span className="text-rose-400/80 font-bold text-xs ml-0.5">]</span>
                           </div>
@@ -2539,12 +2725,17 @@ export default function PurchaseInwardHub({
                       {selectedLedgerInvoice.invoice_number || 'INV'}
                     </span>
                   </h3>
-                  <div className="text-[11px] text-slate-400 flex items-center gap-3">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-3 flex-wrap">
                     <span>Date: <strong>{selectedLedgerInvoice.invoice_date || 'N/A'}</strong></span>
                     {selectedLedgerInvoice.seller_gst && (
                       <span>GST: <strong>{selectedLedgerInvoice.seller_gst}</strong></span>
                     )}
                     <span>Grand Total: <strong className="text-emerald-400 font-mono">₹{Number(selectedLedgerInvoice.grand_total || 0).toFixed(2)}</strong></span>
+                    {selectedLedgerInvoice.vendor_grand_total && Math.abs(Number(selectedLedgerInvoice.grand_total || 0) - Number(selectedLedgerInvoice.vendor_grand_total)) > 1.0 && (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                        ⚠️ Discrepancy: Printed ₹{Number(selectedLedgerInvoice.vendor_grand_total).toFixed(2)}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2731,7 +2922,8 @@ export default function PurchaseInwardHub({
                         <th className="py-2.5 px-2 text-right min-w-[65px]">QTY</th>
                         <th className="py-2.5 px-2 text-center min-w-[65px]">Unit</th>
                         <th className="py-2.5 px-2 text-right min-w-[75px]">MRP</th>
-                        <th className="py-2.5 px-2 text-right min-w-[80px]">Rate</th>
+                        <th className="py-2.5 px-2 text-right min-w-[75px]">Rate</th>
+                        <th className="py-2.5 px-2 text-right min-w-[70px]">DISC</th>
                         <th className="py-2.5 px-2 text-right min-w-[85px]">Taxable</th>
                         <th className="py-2.5 px-2 text-right min-w-[65px]">GST %</th>
                         <th className="py-2.5 px-2 text-right min-w-[110px]">Taxes (CGST/SGST)</th>
@@ -2745,7 +2937,7 @@ export default function PurchaseInwardHub({
                         if (itemsList.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={13} className="py-8 text-center text-slate-500">
+                              <td colSpan={14} className="py-8 text-center text-slate-500">
                                 No items found in this invoice entry.
                               </td>
                             </tr>
@@ -2758,7 +2950,8 @@ export default function PurchaseInwardHub({
                           // Dynamic Fallback Calculations in the Item Rows (as specified by user)
                           const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
                           const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
-                          const taxable = Number(item.taxable_amount || (Number(item.qty || item.quantity || 1) * Number(item.rate || item.purchase_price || item.price_before_gst || 0)));
+                          const disc = Number(item.discount_amount || item.discount || 0);
+                          const taxable = Number(item.taxable_amount || Math.max(0, (qty * rate) - disc));
                           const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
                           const cgst = Number(item.cgst_amount || 0);
                           const sgst = Number(item.sgst_amount || 0);
@@ -2852,6 +3045,11 @@ export default function PurchaseInwardHub({
                                 ₹{displayRate.toFixed(2)}
                               </td>
 
+                              {/* DISC */}
+                              <td className="py-2 px-2 text-right font-mono text-rose-400 text-[11px]">
+                                {disc > 0 ? `₹${disc.toFixed(2)}` : '—'}
+                              </td>
+
                               {/* Taxable */}
                               <td className="py-2 px-2 text-right font-mono font-semibold text-slate-200">
                                 ₹{taxable.toFixed(2)}
@@ -2895,6 +3093,7 @@ export default function PurchaseInwardHub({
                       if (itemsList.length === 0) return null;
 
                       let sumQty = 0;
+                      let sumDiscount = 0;
                       let sumTaxable = 0;
                       let sumTaxes = 0;
                       let sumGross = 0;
@@ -2902,7 +3101,8 @@ export default function PurchaseInwardHub({
                       itemsList.forEach((it) => {
                         const q = Math.max(1, Number(it.qty || it.quantity) || 1);
                         const r = Number(it.rate || it.purchase_price || it.price_before_gst || 0);
-                        const t = Number(it.taxable_amount || (q * r));
+                        const d = Number(it.discount_amount || it.discount || 0);
+                        const t = Number(it.taxable_amount || Math.max(0, (q * r) - d));
                         const g = Number(it.gst_pct || it.gst_rate || ((Number(it.cgst_pct || 0) + Number(it.sgst_pct || 0))) || 5);
                         const c = Number(it.cgst_amount || 0);
                         const s = Number(it.sgst_amount || 0);
@@ -2911,6 +3111,7 @@ export default function PurchaseInwardHub({
                         const lineTot = Number(it.total || it.total_amount || it.price_after_gst || (t + taxes));
 
                         sumQty += q;
+                        sumDiscount += d;
                         sumTaxable += t;
                         sumTaxes += taxes;
                         sumGross += lineTot;
@@ -2932,6 +3133,9 @@ export default function PurchaseInwardHub({
                             <td className="py-2.5 px-2 text-center text-slate-500">—</td>
                             <td className="py-2.5 px-2 text-right text-slate-500">—</td>
                             <td className="py-2.5 px-2 text-right text-slate-500">—</td>
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-rose-400">
+                              {sumDiscount > 0 ? `₹${sumDiscount.toFixed(2)}` : '—'}
+                            </td>
                             <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-200">
                               ₹{finalTaxable.toFixed(2)}
                             </td>
