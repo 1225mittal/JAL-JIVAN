@@ -215,10 +215,11 @@ export default function AdminHub({ onNavigate }) {
     }
   ];
 
-  const handleCardClick = (mod) => {
-    if (onNavigate) {
-      onNavigate(mod.path);
+  const handleCardClick = (mod, e) => {
+    if (e && e.preventDefault) {
+      e.preventDefault();
     }
+    window.open(mod.path, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -316,12 +317,12 @@ export default function AdminHub({ onNavigate }) {
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
-              <strong className="text-slate-200">3 Active</strong>
+              <strong className="text-slate-200">{modulesList.filter((m) => m.isLive).length} Active</strong>
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-              <span>5 Planned</span>
+              <span>{modulesList.filter((m) => !m.isLive).length} Planned</span>
             </span>
           </div>
         </div>
@@ -330,10 +331,13 @@ export default function AdminHub({ onNavigate }) {
           {modulesList.map((mod) => {
             const Icon = mod.icon;
             return (
-              <div
+              <a
                 key={mod.id}
-                onClick={() => handleCardClick(mod)}
-                className={`group relative cursor-pointer rounded-2xl p-5 shadow-xl transition-all duration-300 flex flex-col justify-between ${
+                href={mod.path}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => handleCardClick(mod, e)}
+                className={`group relative cursor-pointer rounded-2xl p-5 shadow-xl transition-all duration-300 flex flex-col justify-between no-underline block select-none ${
                   mod.isLive
                     ? 'bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-2 border-emerald-500/40 hover:border-emerald-400 hover:shadow-2xl hover:shadow-emerald-500/20 hover:-translate-y-1.5'
                     : 'bg-gradient-to-b from-slate-900/90 to-slate-950/90 border border-slate-800 hover:border-slate-700 hover:bg-slate-900/95 hover:-translate-y-0.5'
@@ -417,7 +421,7 @@ export default function AdminHub({ onNavigate }) {
                     <ArrowUpRight className="w-3.5 h-3.5 transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
                   </div>
                 </div>
-              </div>
+              </a>
             );
           })}
         </div>

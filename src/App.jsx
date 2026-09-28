@@ -760,7 +760,7 @@ export default function App() {
           !isAdminLoggedIn ? (
             <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           ) : (
-            <AdminHub onNavigate={(path) => navigate(path)} />
+            <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
           )
         ) : routeState.type === 'admin-module' ? (
           /* ======================================================== */
@@ -839,7 +839,7 @@ export default function App() {
           /* ROOT / OR DEFAULT EXECUTIVE ADMIN HUB */
           /* ======================================================== */
           isAdminLoggedIn ? (
-            <AdminHub onNavigate={(path) => navigate(path)} />
+            <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
           ) : (
             <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
           )
