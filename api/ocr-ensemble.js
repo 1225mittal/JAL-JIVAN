@@ -6,7 +6,10 @@
 
 import {
   INDIAN_GST_OCR_PROMPT,
-  reconcileOcrOutputs
+  reconcileOcrOutputs,
+  autoChunkLongBillIfNeeded,
+  fetchGroqContinuation,
+  fetchGeminiContinuation
 } from '../src/lib/dualOcrPipeline.js';
 
 export default async function handler(req, res) {
@@ -242,7 +245,10 @@ export default async function handler(req, res) {
             const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) {
               const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-              return JSON.parse(clean);
+              const initialResult = JSON.parse(clean);
+              return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
+                return fetchGeminiContinuation(base64Only, mimeType, startSno, highestSno, geminiApiKey);
+              });
             }
           }
         } catch (gErr) {
@@ -284,7 +290,10 @@ export default async function handler(req, res) {
           const content = data?.choices?.[0]?.message?.content;
           if (content) {
             const clean = content.replace(/```json/g, '').replace(/```/g, '').trim();
-            return JSON.parse(clean);
+            const initialResult = JSON.parse(clean);
+            return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
+              return fetchGroqContinuation(cleanImage, startSno, highestSno, groqApiKey);
+            });
           }
         } else {
           const errText = await resp.text();

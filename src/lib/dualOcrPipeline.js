@@ -26,9 +26,14 @@ Extract all data from this Indian purchase bill / tax invoice image with extreme
      * The entity listed under "M/s", "Billed To", "Customer", "Buyer", "Recipient", "Party Name", "Consignee", or "Ship To" (e.g., "MITTAL DEPARTMENTAL STORE") is the BUYER, NEVER the seller.
      * CRITICAL: Do NOT extract the buyer's name, GSTIN, or address into the vendor/seller fields!
 
-2. ROW-BY-ROW TABULAR ALIGNMENT (DOT-MATRIX / TABULAR INVOICES):
-   - CRITICAL: Scan through the entire table until the final summary totals/signature line. Do NOT cut off at 40 items. This invoice contains 40 to 70+ line items—extract EVERY single line item down to the very last row (including items 41, 42, 43, etc.). Output all items into the items array.
-   - Extract ALL rows present on the invoice without stopping or summarizing. If there are 30-50+ rows or 60-70+ rows, extract every single row.
+2. ROW-BY-ROW TABULAR ALIGNMENT & CRITICAL INVOICE ROW EXTRACTION PROTOCOL:
+   - First, read the invoice table's 'S.No' / '#' / row index column from top to bottom.
+   - Note the highest row number before the totals section (e.g., if there are 43 serial items, the last item is #43).
+   - Set "last_detected_serial_number": <number> in the JSON output (e.g. 43).
+   - You MUST extract EVERY SINGLE ROW sequentially from 1 to the final row number.
+   - DO NOT STOP at 40. Do NOT drop the last 3 to 5 items before the totals/tax summary.
+   - Before closing the JSON array, verify: Does \`items.length\` equal the last serial number on the paper? If not, continue appending the remaining rows until every line item above the tax summary is captured.
+   - Scan through the entire table until the final summary totals/signature line. This invoice may contain 40 to 70+ line items—extract EVERY single line item down to the very last row (including items 41, 42, 43, etc.). Output all items into the items array.
    - Indian FMCG invoices often use dense dot-matrix tables. Read line items STRICTLY row by horizontal row.
    - Anchor each line item using the Serial Number (SN: 1, 2, 3...):
      * Do NOT skip any rows or merge adjacent rows.
@@ -58,6 +63,7 @@ Return ONLY a valid JSON object matching EXACTLY this structure with no markdown
   "vendor_phone": "8882030921",
   "invoice_no": "T000820",
   "invoice_date": "2026-08-04",
+  "last_detected_serial_number": 43,
   "discount_pct": 2.0,
   "discount_amount": 114.54,
   "round_off": 0.58,
@@ -565,6 +571,7 @@ function buildEnsembleResult({
     vendor_phone: phone,
     invoice_no,
     invoice_date,
+    last_detected_serial_number: Number(primary.last_detected_serial_number ?? secondary.last_detected_serial_number) || 0,
     discount_pct: discountPct,
     discount_amount: discountAmount,
     discount_total: discountAmount,
@@ -621,6 +628,210 @@ function buildEnsembleResult({
 }
 
 /**
+ * Continuation prompt for Auto-Chunking Fallback on long invoices
+ */
+export function getContinuationPrompt(startSno, highestDetectedSno = 0) {
+  const targetNote = highestDetectedSno >= startSno ? ` down to S.No ${highestDetectedSno}` : ' to the bottom of the table';
+  return `You are an expert Indian GST B2B invoice OCR specialist.
+CRITICAL TASK: Extract items starting from S.No ${startSno}${targetNote} to the bottom of the table.
+The first pass extraction stopped at S.No ${startSno - 1}.
+
+RULES:
+1. Extract EVERY SINGLE ROW starting from S.No ${startSno} sequentially down to the final row before the totals/tax summary.
+2. For each row extract: sn, item_name, hsn, barcode, qty, unit, mrp, rate, discount_pct (number only, e.g. 1 for 1% or 0), taxable_amount, gst_pct, cgst_amount, sgst_amount, cess_amount, total_amount.
+3. Return ONLY a valid JSON object matching this schema:
+{
+  "items": [
+    {
+      "sn": ${startSno},
+      "item_name": "Product Name",
+      "hsn": "12345678",
+      "barcode": "",
+      "qty": 1,
+      "unit": "PCS",
+      "mrp": 0,
+      "rate": 0,
+      "discount_pct": 0,
+      "taxable_amount": 0,
+      "gst_pct": 5,
+      "cgst_pct": 2.5,
+      "cgst_amount": 0,
+      "sgst_pct": 2.5,
+      "sgst_amount": 0,
+      "cess_amount": 0,
+      "total_amount": 0
+    }
+  ]
+}`;
+}
+
+/**
+ * Perform a targeted continuation request to Groq Vision
+ */
+export async function fetchGroqContinuation(cleanImage, startSno, highestSno, apiKey) {
+  if (!apiKey) return null;
+  try {
+    const prompt = getContinuationPrompt(startSno, highestSno);
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'qwen/qwen3.8-27b',
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: cleanImage } }
+            ]
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 8192
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (content) {
+        const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanJson);
+      }
+    }
+  } catch (err) {
+    console.warn('Groq auto-chunk continuation failed:', err.message || err);
+  }
+  return null;
+}
+
+/**
+ * Perform a targeted continuation request to Gemini Vision
+ */
+export async function fetchGeminiContinuation(base64Only, mimeType, startSno, highestSno, apiKey) {
+  if (!apiKey) return null;
+  const prompt = getContinuationPrompt(startSno, highestSno);
+  const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+
+  for (const model of geminiModels) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [
+          {
+            parts: [
+              { text: `${prompt}\n\nIMPORTANT: Return ONLY raw JSON without markdown formatting.` },
+              {
+                inline_data: {
+                  mime_type: mimeType || 'image/jpeg',
+                  data: base64Only
+                }
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          maxOutputTokens: 8192
+        }
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          return JSON.parse(cleanJson);
+        }
+      }
+    } catch (err) {
+      console.warn(`Gemini ${model} auto-chunk continuation failed:`, err.message || err);
+    }
+  }
+  return null;
+}
+
+/**
+ * Auto-Chunking Fallback for Long Bills:
+ * If >35 rows detected and the extracted items count does not match the highest detected serial number in the first pass:
+ * Trigger an immediate targeted follow-up prompt to the same model:
+ * "Extract items starting from S.No [last_extracted_sno + 1] to the bottom of the table."
+ * Then append those items automatically to the list before rendering to the UI.
+ */
+export async function autoChunkLongBillIfNeeded(firstPassResult, fetchRemainingRows) {
+  if (!firstPassResult || typeof firstPassResult !== 'object') {
+    return firstPassResult;
+  }
+
+  const items = Array.isArray(firstPassResult.items) ? [...firstPassResult.items] : [];
+
+  const highestDetectedSno = Number(
+    firstPassResult.last_detected_serial_number ||
+    firstPassResult.highest_serial_number ||
+    firstPassResult.last_serial_number ||
+    0
+  );
+
+  const lastExtractedSno = items.reduce((max, it, idx) => {
+    const sn = Number(it.sn);
+    return !isNaN(sn) && sn > 0 ? Math.max(max, sn) : Math.max(max, idx + 1);
+  }, 0);
+
+  const isLongBill = items.length >= 35 || highestDetectedSno >= 35 || lastExtractedSno >= 35;
+  const isCutoff = (highestDetectedSno > 0 && (items.length < highestDetectedSno || lastExtractedSno < highestDetectedSno)) ||
+                   (items.length === 40 && highestDetectedSno === 0);
+
+  if (isLongBill && isCutoff && typeof fetchRemainingRows === 'function') {
+    const startSno = lastExtractedSno + 1;
+    console.warn(`[Auto-Chunking] Detected cutoff at item ${items.length} (last S.No ${lastExtractedSno}) with highest detected S.No ${highestDetectedSno || 'unknown'}. Requesting items starting from S.No ${startSno}...`);
+
+    try {
+      const continuationResult = await fetchRemainingRows(startSno, highestDetectedSno);
+      const remainingItems = Array.isArray(continuationResult?.items) ? continuationResult.items : [];
+
+      if (remainingItems.length > 0) {
+        console.log(`[Auto-Chunking] Retrieved ${remainingItems.length} additional rows! Appending sequentially.`);
+        const existingSns = new Set(items.map(it => Number(it.sn)).filter(Boolean));
+        let fallbackSn = startSno;
+
+        remainingItems.forEach((remItem) => {
+          const rawSn = Number(remItem.sn);
+          const sn = (!isNaN(rawSn) && rawSn > 0) ? rawSn : fallbackSn;
+          fallbackSn = Math.max(fallbackSn, sn) + 1;
+
+          if (!existingSns.has(sn)) {
+            existingSns.add(sn);
+            items.push({
+              ...remItem,
+              sn,
+              _auto_chunked: true
+            });
+          }
+        });
+
+        items.sort((a, b) => (Number(a.sn) || 0) - (Number(b.sn) || 0));
+        firstPassResult.items = items;
+      }
+    } catch (chunkErr) {
+      console.warn('[Auto-Chunking] Continuation failed, returning first pass result:', chunkErr.message || chunkErr);
+    }
+  }
+
+  return firstPassResult;
+}
+
+/**
  * Call Groq Vision API using official active vision model: qwen/qwen3.8-27b
  */
 export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
@@ -670,7 +881,11 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
   }
 
   const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
-  return JSON.parse(cleanJson);
+  const initialResult = JSON.parse(cleanJson);
+
+  return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
+    return fetchGroqContinuation(cleanImage, startSno, highestSno, effectiveKey);
+  });
 }
 
 /**
@@ -729,7 +944,10 @@ export async function callGeminiVision(imageBase64, { apiKey = '', mimeType = 'i
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) {
         const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanJson);
+        const initialResult = JSON.parse(cleanJson);
+        return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
+          return fetchGeminiContinuation(base64Only, mimeType, startSno, highestSno, effectiveKey);
+        });
       }
     } catch (err) {
       lastError = err;
@@ -763,8 +981,27 @@ export async function processBill(imageBase64, options = {}) {
       });
 
       if (response.ok) {
-        const result = await response.json();
+        let result = await response.json();
         if (result && (result.items || result.grand_total || result.vendor_name)) {
+          const cleanImage = imageBase64.startsWith('data:')
+            ? imageBase64
+            : `data:${options.mimeType || 'image/jpeg'};base64,${imageBase64}`;
+          const base64Only = imageBase64.startsWith('data:')
+            ? imageBase64.split(',')[1]
+            : imageBase64;
+          const groqKey = options.groqApiKey || options.apiKey || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
+          const geminiKey = options.geminiApiKey || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GEMINI_API_KEY : '');
+
+          result = await autoChunkLongBillIfNeeded(result, async (startSno, highestSno) => {
+            if (groqKey) {
+              return fetchGroqContinuation(cleanImage, startSno, highestSno, groqKey);
+            }
+            if (geminiKey) {
+              return fetchGeminiContinuation(base64Only, options.mimeType || 'image/jpeg', startSno, highestSno, geminiKey);
+            }
+            return null;
+          });
+
           return result;
         }
       }
@@ -819,5 +1056,9 @@ export default {
   cleanVendorName,
   isValidGstin,
   sanitizeItemHsnAndBarcode,
-  evaluateModelMath
+  evaluateModelMath,
+  getContinuationPrompt,
+  fetchGroqContinuation,
+  fetchGeminiContinuation,
+  autoChunkLongBillIfNeeded
 };
