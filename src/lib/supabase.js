@@ -3980,14 +3980,22 @@ export function saveLocalInventoryItems(items) {
 export async function fetchInventoryItems() {
   if (isSupabaseConfigured && supabase) {
     try {
+      // Fetch directly from purchase_items (all 78 items from inward invoices)
       const { data, error } = await supabase
-        .from('inventory_items')
+        .from('purchase_items')
         .select('*')
-        .order('item_name', { ascending: true });
+        .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        saveLocalInventoryItems(data);
-        return data;
+        const mapped = data.map((it) => ({
+          ...it,
+          stock_qty: Number(it.quantity ?? it.stock_qty) || 0,
+          cost_price: Number(it.purchase_price ?? it.cost_price) || 0,
+          selling_price: Number(it.selling_price || it.mrp || 0),
+          category: it.category || 'General FMCG'
+        }));
+        saveLocalInventoryItems(mapped);
+        return mapped;
       }
       if (error) {
         console.warn('Supabase fetchInventoryItems notice:', error.message);
@@ -3997,6 +4005,23 @@ export async function fetchInventoryItems() {
     }
   }
   return getLocalInventoryItems();
+}
+
+export async function fetchPurchaseItems() {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_items')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        return data;
+      }
+    } catch (err) {
+      console.warn('fetchPurchaseItems exception:', err.message);
+    }
+  }
+  return [];
 }
 
 export async function saveInventoryItem(item) {

@@ -24,20 +24,52 @@ import {
   CheckSquare
 } from 'lucide-react';
 import {
+  supabase,
+  isSupabaseConfigured,
   fetchInventoryItems,
   saveInventoryItem,
   deleteInventoryItem,
   bulkDeleteInventoryItems,
-  bulkUpdateInventoryCategory,
-  isSupabaseConfigured
+  bulkUpdateInventoryCategory
 } from '../../lib/supabase';
 import BarcodeScannerModal from '../BarcodeScannerModal';
+
+/**
+ * Infer category from FMCG item name if unassigned
+ */
+export function inferCategory(name = '') {
+  const upper = (name || '').toUpperCase();
+  if (/MASALA|CHILLI|MIRCH|HALDI|TURMERIC|DHANIYA|CORIANDER|JEERA|CUMIN|GARAM|HING|KASURI|METHI|CARDAMOM|CLOVE|SPICE/i.test(upper)) {
+    return 'Spices & Masalas';
+  }
+  if (/CHUTNEY|PASTE|PICKLE|ACHAR|SAUCE|KETCHUP|VINEGAR|DIP/i.test(upper)) {
+    return 'Chutneys & Sauces';
+  }
+  if (/BHEL|NAMKEEN|SNACK|CHIPS|BHUJIA|SEV|KURKURE|POPCORN|MIXTURE/i.test(upper)) {
+    return 'Snacks & Namkeen';
+  }
+  if (/BISCUIT|COOKIE|RUSK|CAKE|BREAD|TOAST|WAFER/i.test(upper)) {
+    return 'Bakery & Biscuits';
+  }
+  if (/OIL|GHEE|MUSTARD|REFINED|VANASPATI/i.test(upper)) {
+    return 'Edible Oils & Ghee';
+  }
+  if (/ATTA|RICE|FLOUR|DAL|PULSE|BESAN|SUJI|MAIDA|GRAIN|WHEAT|CHANA|SOYA/i.test(upper)) {
+    return 'Staples & Grains';
+  }
+  if (/SOAP|SHAMPOO|WASH|CLEANER|DETERGENT|PASTE|BRUSH|TOOTH/i.test(upper)) {
+    return 'Personal & Home Care';
+  }
+  return 'General FMCG';
+}
 
 export default function ItemsInventoryHub({
   onBackToHub = null,
   showToast = () => {}
 }) {
   const [items, setItems] = useState([]);
+  const [rawPurchasedItems, setRawPurchasedItems] = useState([]);
+  const [viewMode, setViewMode] = useState('grouped'); // 'grouped' | 'all'
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -64,15 +96,52 @@ export default function ItemsInventoryHub({
   // Barcode Scanner Modal State
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
 
-  // Load Inventory Data
+  // Load Inventory Data directly from purchase_items
   const loadData = async () => {
     setLoading(true);
     setErrorMsg('');
     try {
-      const data = await fetchInventoryItems();
-      setItems(data || []);
+      let rawData = [];
+      if (isSupabaseConfigured && supabase) {
+        // Fetch all records directly from purchase_items without restricting to any invoice
+        const { data, error } = await supabase
+          .from('purchase_items')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.warn('Direct purchase_items fetch notice:', error.message);
+          rawData = await fetchInventoryItems();
+        } else {
+          rawData = data || [];
+        }
+      } else {
+        rawData = await fetchInventoryItems();
+      }
+
+      setRawPurchasedItems(rawData || []);
+
+      const normalized = (rawData || []).map((it, idx) => ({
+        id: it.id || `pi_${idx}`,
+        purchase_invoice_id: it.purchase_invoice_id || null,
+        barcode: (it.barcode || '').toString().trim() || null,
+        item_name: (it.item_name || 'Unnamed Item').toString().trim(),
+        category: it.category || inferCategory(it.item_name),
+        hsn_code: (it.hsn_code || '').toString().trim() || null,
+        stock_qty: Number(it.quantity ?? it.stock_qty) || 0,
+        quantity: Number(it.quantity ?? it.stock_qty) || 0,
+        cost_price: Number(it.purchase_price ?? it.cost_price) || 0,
+        purchase_price: Number(it.purchase_price ?? it.cost_price) || 0,
+        mrp: Number(it.mrp) || 0,
+        selling_price: Number(it.selling_price || it.mrp || 0),
+        gst_pct: Number(it.gst_percentage ?? it.gst_pct ?? 18),
+        unit: it.unit || 'PCS',
+        created_at: it.created_at || new Date().toISOString()
+      }));
+
+      setItems(normalized);
     } catch (err) {
-      console.error('Failed to load inventory items:', err);
+      console.error('Failed to load items for Stock Master:', err);
       setErrorMsg(err.message || 'Failed to load inventory data.');
     } finally {
       setLoading(false);
@@ -83,18 +152,61 @@ export default function ItemsInventoryHub({
     loadData();
   }, []);
 
+  // Deduplicate / Group Display
+  const displayedItems = useMemo(() => {
+    if (viewMode === 'all') {
+      return items;
+    }
+
+    // Group items by item_name so duplicate inward entries combine their quantity
+    const map = new Map();
+    (items || []).forEach((item) => {
+      const key = (item.item_name || '').trim().toLowerCase();
+      const qty = Number(item.stock_qty ?? item.quantity) || 0;
+      const cost = Number(item.cost_price ?? item.purchase_price) || 0;
+      const mrp = Number(item.mrp) || 0;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          ...item,
+          stock_qty: qty,
+          quantity: qty,
+          inward_batches: 1,
+          all_ids: [item.id],
+          latest_created_at: item.created_at
+        });
+      } else {
+        const existing = map.get(key);
+        existing.stock_qty += qty;
+        existing.quantity += qty;
+        existing.inward_batches += 1;
+        existing.all_ids.push(item.id);
+
+        if (!existing.barcode && item.barcode) existing.barcode = item.barcode;
+        if (!existing.hsn_code && item.hsn_code) existing.hsn_code = item.hsn_code;
+        if (cost > 0) existing.cost_price = cost;
+        if (mrp > 0) existing.mrp = mrp;
+        if (new Date(item.created_at) > new Date(existing.latest_created_at)) {
+          existing.latest_created_at = item.created_at;
+        }
+      }
+    });
+
+    return Array.from(map.values());
+  }, [items, viewMode]);
+
   // Unique categories list
   const categories = useMemo(() => {
     const set = new Set();
-    (items || []).forEach((item) => {
+    (displayedItems || []).forEach((item) => {
       if (item && item.category) set.add(item.category);
     });
     return Array.from(set).sort();
-  }, [items]);
+  }, [displayedItems]);
 
   // Filtered & Sorted items
   const filteredItems = useMemo(() => {
-    let result = [...(items || [])];
+    let result = [...(displayedItems || [])];
 
     // Stock Filter
     if (stockFilter === 'low') {
@@ -139,27 +251,35 @@ export default function ItemsInventoryHub({
     });
 
     return result;
-  }, [items, stockFilter, selectedCategory, searchQuery, sortField, sortOrder]);
+  }, [displayedItems, stockFilter, selectedCategory, searchQuery, sortField, sortOrder]);
 
-  // Inventory KPI Metrics
+  // Inventory KPI Metrics: Computed from all 78 fetched items
   const metrics = useMemo(() => {
-    const totalSkus = (items || []).length;
+    // Total Catalog SKUs: distinct item_name count across all fetched purchase_items (78)
+    const distinctSkuNames = new Set((rawPurchasedItems || []).map((i) => (i.item_name || '').trim().toLowerCase()));
+    const totalSkus = distinctSkuNames.size > 0 ? distinctSkuNames.size : (rawPurchasedItems || []).length;
+
     let totalStockUnits = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
     let totalValuation = 0;
 
-    (items || []).forEach((item) => {
-      const qty = Number(item.stock_qty) || 0;
-      const cost = Number(item.cost_price) || 0;
-
+    // Units in Stock: sum of quantities across all 78 fetched items
+    (rawPurchasedItems || []).forEach((item) => {
+      const qty = Number(item.quantity ?? item.stock_qty) || 0;
+      const cost = Number(item.purchase_price ?? item.cost_price) || 0;
       totalStockUnits += qty;
+      totalValuation += qty * cost;
+    });
+
+    // Low stock / out of stock computed from the catalog (displayedItems)
+    (displayedItems || []).forEach((item) => {
+      const qty = Number(item.stock_qty ?? item.quantity) || 0;
       if (qty <= 0) {
         outOfStockCount++;
       } else if (qty < 10) {
         lowStockCount++;
       }
-      totalValuation += qty * cost;
     });
 
     return {
@@ -169,7 +289,7 @@ export default function ItemsInventoryHub({
       outOfStockCount,
       totalValuation
     };
-  }, [items]);
+  }, [rawPurchasedItems, displayedItems]);
 
   // Open Drawer for Add New Item
   const handleAddNew = () => {
@@ -378,116 +498,146 @@ export default function ItemsInventoryHub({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={loadData}
-            disabled={loading}
-            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
-            title="Refresh Inventory"
-          >
-            <RefreshCw className={`w-4 h-4 text-amber-400 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleAddNew}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add New Item</span>
-          </button>
-        </div>
-      </div>
-
-      {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-        {/* Total SKUs */}
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
-            <Package className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[11px] font-semibold text-slate-400">Total Catalog SKUs</div>
-            <div className="text-lg font-black text-white">{metrics.totalSkus}</div>
-          </div>
-        </div>
-
-        {/* Total Stock Units */}
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
-            <Layers className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[11px] font-semibold text-slate-400">Units in Stock</div>
-            <div className="text-lg font-black text-emerald-400">{metrics.totalStockUnits}</div>
-          </div>
-        </div>
-
-        {/* Low Stock Alerts */}
-        <div
-          onClick={() => setStockFilter(stockFilter === 'low' ? 'all' : 'low')}
-          className={`p-3.5 rounded-2xl border transition cursor-pointer ${
-            stockFilter === 'low'
-              ? 'bg-amber-500/20 border-amber-500/50 shadow-md shadow-amber-500/10'
-              : 'bg-slate-900/90 border-slate-800 hover:border-amber-500/30'
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-              <AlertTriangle className="w-5 h-5" />
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* View Mode Toggle: Grouped SKUs vs All Inward Lines */}
+            <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+              <button
+                type="button"
+                onClick={() => setViewMode('grouped')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'grouped'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Group duplicate inward entries by product name and combine stock quantities"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Grouped SKUs ({metrics.totalSkus})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('all')}
+                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  viewMode === 'all'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Display all individual inward line items from purchase_items"
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span>All Inward Lines ({rawPurchasedItems.length})</span>
+              </button>
             </div>
-            <div>
-              <div className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
-                <span>Low Stock (&lt;10)</span>
-              </div>
-              <div className="text-lg font-black text-amber-300">{metrics.lowStockCount}</div>
-            </div>
-          </div>
-        </div>
 
-        {/* Inventory Valuation */}
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
-            <IndianRupee className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[11px] font-semibold text-slate-400">Stock Valuation (Cost)</div>
-            <div className="text-lg font-black text-cyan-300">
-              ₹{metrics.totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-        {/* Search Input */}
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by SKU name, barcode, HSN, category..."
-            className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-          />
-        </div>
-
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs">
             <button
               type="button"
-              onClick={() => setStockFilter('all')}
-              className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
-                stockFilter === 'all'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              onClick={loadData}
+              disabled={loading}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
+              title="Refresh Inventory"
             >
-              All ({items.length})
+              <RefreshCw className={`w-4 h-4 text-amber-400 ${loading ? 'animate-spin' : ''}`} />
             </button>
+
+            <button
+              type="button"
+              onClick={handleAddNew}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add New Item</span>
+            </button>
+          </div>
+        </div>
+
+        {/* KPI Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+          {/* Total SKUs */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+              <Package className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-slate-400">Total Catalog SKUs</div>
+              <div className="text-lg font-black text-white">{metrics.totalSkus}</div>
+            </div>
+          </div>
+
+          {/* Total Stock Units */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-slate-400">Units in Stock</div>
+              <div className="text-lg font-black text-emerald-400">{metrics.totalStockUnits}</div>
+            </div>
+          </div>
+
+          {/* Low Stock Alerts */}
+          <div
+            onClick={() => setStockFilter(stockFilter === 'low' ? 'all' : 'low')}
+            className={`p-3.5 rounded-2xl border transition cursor-pointer ${
+              stockFilter === 'low'
+                ? 'bg-amber-500/20 border-amber-500/50 shadow-md shadow-amber-500/10'
+                : 'bg-slate-900/90 border-slate-800 hover:border-amber-500/30'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold text-amber-400 flex items-center gap-1">
+                  <span>Low Stock (&lt;10)</span>
+                </div>
+                <div className="text-lg font-black text-amber-300">{metrics.lowStockCount}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Inventory Valuation */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+              <IndianRupee className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-slate-400">Stock Valuation (Cost)</div>
+              <div className="text-lg font-black text-cyan-300">
+                ₹{metrics.totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter and Search Bar */}
+        <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          {/* Search Input */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by SKU name, barcode, HSN, category..."
+              className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Filter Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setStockFilter('all')}
+                className={`px-3 py-1 rounded-lg font-bold transition cursor-pointer ${
+                  stockFilter === 'all'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                All ({displayedItems.length})
+              </button>
             <button
               type="button"
               onClick={() => setStockFilter('low')}
@@ -687,8 +837,13 @@ export default function ItemsInventoryHub({
 
                     {/* Name */}
                     <td className="py-2.5 px-3">
-                      <div className="font-bold text-white max-w-xs truncate" title={item.item_name}>
-                        {item.item_name}
+                      <div className="font-bold text-white max-w-xs truncate flex items-center gap-1.5" title={item.item_name}>
+                        <span className="truncate">{item.item_name}</span>
+                        {item.inward_batches > 1 && (
+                          <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            {item.inward_batches} Inwards
+                          </span>
+                        )}
                       </div>
                     </td>
 
