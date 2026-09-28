@@ -27,9 +27,10 @@ Extract all data from this Indian purchase bill / tax invoice image with extreme
      * CRITICAL: Do NOT extract the buyer's name, GSTIN, or address into the vendor/seller fields!
 
 2. ROW-BY-ROW TABULAR ALIGNMENT (DOT-MATRIX / TABULAR INVOICES):
-   - Extract ALL rows present on the invoice without stopping or summarizing. If there are 30-50 rows, extract every single row.
+   - CRITICAL: Scan through the entire table until the final summary totals/signature line. Do NOT cut off at 40 items. This invoice contains 40 to 70+ line items—extract EVERY single line item down to the very last row (including items 41, 42, 43, etc.). Output all items into the items array.
+   - Extract ALL rows present on the invoice without stopping or summarizing. If there are 30-50+ rows or 60-70+ rows, extract every single row.
    - Indian FMCG invoices often use dense dot-matrix tables. Read line items STRICTLY row by horizontal row.
-   - Anchor each line item using the Serial Number (SN: 1, 2, 3... 14):
+   - Anchor each line item using the Serial Number (SN: 1, 2, 3...):
      * Do NOT skip any rows or merge adjacent rows.
      * Match each item's name, quantity, MRP, rate, and taxable amount along the exact same horizontal baseline.
    - Handwritten corrections: If a line has a hand-written strike-through or pen note (e.g., blue ink revising qty or rate), extract the legible line data or respect the pen revision.
