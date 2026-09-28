@@ -623,7 +623,7 @@ export default function PurchaseInwardHub({
     setCurrentQueueBillId(billItem.id);
     setIsProcessingOcr(true);
     setOcrError('');
-    setOcrStatusMessage(`Running Ensemble OCR (Gemini + Groq) on "${billItem.name || 'Selected Bill'}"...`);
+    setOcrStatusMessage(`Running Gemini Vision OCR on "${billItem.name || 'Selected Bill'}"...`);
 
     const imgPreview = billItem.dataUrl || billItem.image_url;
     setBillPreviewUrl(imgPreview);
@@ -631,16 +631,16 @@ export default function PurchaseInwardHub({
     try {
       let base64 = billItem.base64;
       if (!base64 && (billItem.image_url || billItem.dataUrl)) {
-        setOcrStatusMessage('Fetching full-resolution bill image for Ensemble OCR...');
+        setOcrStatusMessage('Fetching full-resolution bill image for Vision OCR...');
         base64 = await getBase64FromUrl(billItem.image_url || billItem.dataUrl);
       }
 
       if (!base64) {
-        throw new Error('Could not access image data for Ensemble Vision OCR.');
+        throw new Error('Could not access image data for Vision OCR.');
       }
 
       setBillBase64(base64);
-      setOcrStatusMessage('Analyzing layout, items, barcodes & GST breakdown via Ensemble Engine (Gemini + Groq Consensus)...');
+      setOcrStatusMessage('Extracting invoice header & line items via Gemini Vision...');
 
       const parsed = await dualOcrPipeline.processBill(base64, {
         mimeType: billItem.mimeType || 'image/jpeg'
@@ -649,7 +649,7 @@ export default function PurchaseInwardHub({
 
       // Populate Editable Header Fields (Priority to standard schema with fallback to nested)
       const vendorName = parsed.vendor_name || parsed.seller?.name || '';
-      const vendorGstin = parsed.vendor_gstin || parsed.seller?.gst || '';
+      const vendorGstin = parsed.vendor_gstin || parsed.gstin || parsed.seller?.gst || '';
       const vendorAddress = parsed.vendor_address || parsed.seller?.address || '';
       const vendorPhone = parsed.vendor_phone || parsed.seller?.contact || '';
       const fssai = parsed.vendor_fssai || parsed.fssai || parsed.seller?.fssai || '';
@@ -753,7 +753,7 @@ export default function PurchaseInwardHub({
               id: `temp_${Date.now()}_${idx}`,
               sn,
               barcode: cleanBarcode,
-              item_name: (it.item_name || it.description || `Item ${sn}`).toString().trim(),
+              item_name: (it.name || it.item_name || it.description || `Item ${sn}`).toString().trim(),
               hsn_code: hsnCode,
               hsn: hsnCode,
               unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
@@ -794,7 +794,7 @@ export default function PurchaseInwardHub({
         (prev || []).map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
       );
 
-      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" verified & extracted successfully via Ensemble Consensus!`, 'success');
+      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Gemini Vision!`, 'success');
 
       setTimeout(() => {
         const reviewEl = document.getElementById('inward-bill-review-section');

@@ -1,94 +1,34 @@
 /**
- * Dual OCR Pipeline & Ensemble Reconciliation Engine
- * Combines Google Gemini Flash and Groq Vision for Indian GST B2B Wholesale / FMCG Tax Invoices.
- *
- * Core Features:
- * 1. Parallel Execution: Concurrent requests to Gemini (gemini-2.5-flash / gemini-1.5-flash)
- *    and Groq Vision (qwen/qwen3.8-27b).
- * 2. Consensus & Reconciliation Arbiter (reconcileOcrOutputs):
- *    - Header Information: Buyer vs. Seller disambiguation ("MITTAL DEPARTMENTAL STORE" vs "RUDRAKSH AGENCIES")
- *      and letterhead GSTIN validation.
- *    - Row-by-Row Tallying: Mathematical variance against printed grand total; zero-variance marks primary.
- *    - Field-Level Merging: Missing rows (e.g. SN 1 "SHAHI PANEER MASALA") merged seamlessly from secondary model.
- *    - HSN vs Barcode separation: HSN exclusively in hsn field; barcode strictly 12-14 digits EAN.
+ * Direct Multimodal OCR Pipeline for Indian GST Purchase Invoices
+ * Primary Engine: Google Gemini Vision directly (gemini-2.5-flash)
+ * Fallback: Groq Vision (qwen/qwen3.8-27b)
  */
 
-export const INDIAN_GST_OCR_PROMPT = `You are an expert Indian GST B2B tax invoice and FMCG purchase bill OCR specialist with deep expertise in reading dense dot-matrix computer printouts, thermal bills, and multi-tier tax invoices.
-
-Extract all data from this Indian purchase bill / tax invoice image with extreme numerical precision according to these STRICT DOMAIN RULES:
-
-1. SUPPLIER (SELLER) vs. BUYER (RECIPIENT) DISAMBIGUATION:
-   - Identify the Supplier (Seller):
-     * The Supplier is ALWAYS the issuing agency, distributor, or company printed at the very TOP / HEADER (e.g., "RUDRAKSH AGENCIES").
-     * The Supplier's GSTIN (15-character alphanumeric, e.g. "09BASPG6346Q1ZQ"), address, and phone numbers are located at the top banner or agency letterhead.
-     * Extract: "vendor_name", "vendor_gstin", "vendor_address", "vendor_phone".
-   - Identify the Billed-To Party (Buyer/Retailer):
-     * The entity listed under "M/s", "Billed To", "Customer", "Buyer", "Recipient", "Party Name", "Consignee", or "Ship To" (e.g., "MITTAL DEPARTMENTAL STORE") is the BUYER, NEVER the seller.
-     * CRITICAL: Do NOT extract the buyer's name, GSTIN, or address into the vendor/seller fields!
-
-2. ROW-BY-ROW TABULAR ALIGNMENT & CRITICAL INVOICE ROW EXTRACTION PROTOCOL:
-   - First, read the invoice table's 'S.No' / '#' / row index column from top to bottom.
-   - Note the highest row number before the totals section (e.g., if there are 43 serial items, the last item is #43).
-   - Set "last_detected_serial_number": <number> in the JSON output (e.g. 43).
-   - You MUST extract EVERY SINGLE ROW sequentially from 1 to the final row number.
-   - DO NOT STOP at 40. Do NOT drop the last 3 to 5 items before the totals/tax summary.
-   - Before closing the JSON array, verify: Does \`items.length\` equal the last serial number on the paper? If not, continue appending the remaining rows until every line item above the tax summary is captured.
-   - Scan through the entire table until the final summary totals/signature line. This invoice may contain 40 to 70+ line items—extract EVERY single line item down to the very last row (including items 41, 42, 43, etc.). Output all items into the items array.
-   - Indian FMCG invoices often use dense dot-matrix tables. Read line items STRICTLY row by horizontal row.
-   - Anchor each line item using the Serial Number (SN: 1, 2, 3...):
-     * Do NOT skip any rows or merge adjacent rows.
-     * Match each item's name, quantity, MRP, rate, and taxable amount along the exact same horizontal baseline.
-   - Handwritten corrections: If a line has a hand-written strike-through or pen note (e.g., blue ink revising qty or rate), extract the legible line data or respect the pen revision.
-
-3. HSN vs. BARCODE STRICT SEPARATION:
-   - Do NOT map the 4-to-8 digit HSN/SAC code (e.g. "09109100", "2201", "1905") into the "barcode" field! Set "hsn": "09109100".
-   - Leave "barcode" as an empty string "" unless an explicit 12-to-13 digit retail barcode (EAN-13, starting with 890... in India) is printed on the bill.
-
-4. DATE & BILL NUMBER FORMATTING:
-   - Dates on Indian bills are formatted as DD/MM/YYYY (e.g., "04/08/2026" is 4th August 2026, NOT 8th April). Parse into standard ISO "YYYY-MM-DD" (e.g., "2026-08-04").
-   - Distinguish letters from numbers in Bill Numbers (e.g., uppercase "T000820", not "10006320" or "T00082O").
-
-5. LINE ITEM & INVOICE LEVEL DISCOUNT HANDLING:
-   - Look specifically for the item discount column (e.g., 'Disc. %', 'Disc%', 'Trade Disc'). Extract this value as \`discount_pct\` (number only, e.g. 1 for 1%). If no discount is printed for a row, set \`discount_pct\` to 0.
-   - Extract cash discounts or trade discounts (e.g., "Discount 2%", "Cash Disc", "Trade Disc"):
-     * Include "discount_pct": number and "discount_amount": number.
-     * Deduct discount from taxable base before computing SGST, CGST, and Roundoff.
-
-6. REQUIRED JSON OUTPUT SCHEMA:
-Return ONLY a valid JSON object matching EXACTLY this structure with no markdown or additional text:
+export const INDIAN_GST_OCR_PROMPT = `Extract all line items and header details from this Indian GST purchase invoice.
+Return ONLY valid JSON matching this schema:
 {
-  "vendor_name": "RUDRAKSH AGENCIES",
-  "vendor_gstin": "09BASPG6346Q1ZQ",
-  "vendor_address": "SHOP NO C 939, NAND GRAM, GHAZIABAD",
-  "vendor_phone": "8882030921",
-  "invoice_no": "T000820",
-  "invoice_date": "2026-08-04",
-  "last_detected_serial_number": 43,
-  "discount_pct": 2.0,
-  "discount_amount": 114.54,
-  "round_off": 0.58,
-  "grand_total": 5895.00,
+  "vendor_name": "string",
+  "gstin": "string",
+  "invoice_no": "string",
+  "invoice_date": "YYYY-MM-DD",
+  "vendor_grand_total": 0,
   "items": [
     {
-      "sn": 1,
-      "item_name": "SHAHI PANNER MASALA",
-      "hsn": "09109100",
-      "barcode": "",
-      "qty": 48,
-      "unit": "PCS",
-      "mrp": 50.00,
-      "rate": 36.43,
-      "discount_pct": 0,
-      "taxable_amount": 1748.64,
-      "gst_pct": 5,
-      "cgst_pct": 2.5,
-      "cgst_amount": 43.72,
-      "sgst_pct": 2.5,
-      "sgst_amount": 43.72,
-      "cess_amount": 0
+      "name": "full product name",
+      "hsn": "HSN/SAC code",
+      "qty": 0,
+      "unit": "PCS/NOS/BOX",
+      "mrp": 0,
+      "rate": 0,
+      "discount_pct": 0
     }
   ]
-}`;
+}
+
+RULES:
+- Extract EVERY row sequentially from row 1 to the final row above the tax totals. Do not truncate.
+- For each row, read the discount percentage from 'Disc. %' or 'Disc' column as \`discount_pct\`. If none, 0.
+- Do NOT calculate line totals or taxes in the JSON (the client will compute them).`;
 
 /**
  * Standardize Indian DD/MM/YYYY date strings into ISO YYYY-MM-DD
@@ -110,7 +50,20 @@ export function normalizeIndianDate(dateStr) {
 }
 
 /**
- * Check if a vendor name matches customer/buyer patterns (e.g. "MITTAL DEPARTMENTAL STORE")
+ * Clean vendor name by stripping residual buyer/billed-to prefixes
+ */
+export function cleanVendorName(name) {
+  if (!name) return '';
+  let cleaned = name.toString().trim();
+  cleaned = cleaned.replace(/^(M\/s\.?|Billed\s*To:?|Buyer:?|Customer:?|Party\s*Name:?|Recipient:?|Consignee:?|Ship\s*To:?)\s*/i, '').trim();
+  if (cleaned.includes('\n')) {
+    cleaned = cleaned.split('\n').map((l) => l.trim()).filter(Boolean)[0] || cleaned;
+  }
+  return cleaned;
+}
+
+/**
+ * Check if a name matches customer/buyer patterns
  */
 export function isBuyerPattern(name) {
   if (!name || typeof name !== 'string') return false;
@@ -122,19 +75,6 @@ export function isBuyerPattern(name) {
     return true;
   }
   return false;
-}
-
-/**
- * Clean vendor name by stripping residual buyer/billed-to prefixes
- */
-export function cleanVendorName(name) {
-  if (!name) return '';
-  let cleaned = name.toString().trim();
-  cleaned = cleaned.replace(/^(M\/s\.?|Billed\s*To:?|Buyer:?|Customer:?|Party\s*Name:?|Recipient:?|Consignee:?|Ship\s*To:?)\s*/i, '').trim();
-  if (cleaned.includes('\n')) {
-    cleaned = cleaned.split('\n').map((l) => l.trim()).filter(Boolean)[0] || cleaned;
-  }
-  return cleaned;
 }
 
 /**
@@ -163,7 +103,6 @@ export function sanitizeItemHsnAndBarcode(rawHsn, rawBarcode) {
   }
 
   // Barcode MUST be an explicit 12-14 digit retail barcode (e.g. EAN-13 starting with 890)
-  // Ensure HSN codes are never copied into the barcode field
   if (barcode && (!/^\d{12,14}$/.test(barcode) || barcode === hsn)) {
     barcode = '';
   }
@@ -172,559 +111,144 @@ export function sanitizeItemHsnAndBarcode(rawHsn, rawBarcode) {
 }
 
 /**
- * Evaluate mathematical consistency and row serial numbers of a model's OCR output
+ * Safe JSON parsing:
+ * - Strip markdown code fences if wrapped in ```json ... ```
+ * - Never throw a hard error if an optional field is missing
+ * - Default items: [] if null
  */
-export function evaluateModelMath(data) {
-  if (!data || typeof data !== 'object') {
-    return {
-      isValid: false,
-      items: [],
-      itemsCount: 0,
-      computedTotal: 0,
-      grandTotal: 0,
-      variance: Infinity,
-      isZeroVariance: false,
-      hasContinuousSns: false,
-      maxSn: 0
-    };
+export function safeParseJsonResponse(rawText) {
+  if (!rawText || typeof rawText !== 'string') {
+    return normalizeParsedInvoice({ items: [] });
   }
 
-  const rawItems = Array.isArray(data.items) ? data.items : [];
-  let sumTaxable = 0;
-  let sumCgst = 0;
-  let sumSgst = 0;
-  let sumCess = 0;
-  let maxSn = 0;
-  const snsFound = new Set();
+  let cleaned = rawText.trim();
+  // Strip code fences: ```json ... ``` or ``` ... ```
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
 
+  // If text contains markdown or extra content, find the outermost { ... }
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+  }
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    console.warn('Initial JSON.parse failed, attempting to sanitize JSON string:', err.message);
+    try {
+      // Remove trailing commas before closing braces/brackets
+      const sanitized = cleaned.replace(/,\s*([\]}])/g, '$1');
+      parsed = JSON.parse(sanitized);
+    } catch (e2) {
+      console.error('Safe JSON parse failed:', e2.message);
+      parsed = {};
+    }
+  }
+
+  return normalizeParsedInvoice(parsed);
+}
+
+/**
+ * Normalize parsed invoice fields into standard schema while ensuring items is an array
+ */
+export function normalizeParsedInvoice(parsed) {
+  const data = (parsed && typeof parsed === 'object') ? parsed : {};
+
+  const vendorName = cleanVendorName(data.vendor_name || data.seller?.name || '');
+  const gstin = (data.gstin || data.vendor_gstin || data.seller?.gst || '').toUpperCase().trim();
+  let invoiceNo = (data.invoice_no || data.invoice?.invoice_number || '').toString().trim();
+  if (invoiceNo) invoiceNo = invoiceNo.replace(/\s+/g, '');
+  const invoiceDate = normalizeIndianDate(data.invoice_date || data.invoice?.invoice_date || '');
+  const vendorGrandTotal = Number(data.vendor_grand_total ?? data.grand_total ?? data.totals?.grand_total ?? 0) || 0;
+
+  const rawItems = Array.isArray(data.items) ? data.items : [];
   const normalizedItems = rawItems.map((it, idx) => {
     const rawSn = Number(it.sn);
     const sn = (!isNaN(rawSn) && rawSn > 0) ? rawSn : (idx + 1);
-    if (!isNaN(rawSn) && rawSn > 0) {
-      snsFound.add(rawSn);
-      if (rawSn > maxSn) maxSn = rawSn;
-    }
-
-    const qty = Math.max(0, Number(it.qty ?? it.quantity) || 1);
+    const name = (it.name || it.item_name || it.description || `Item ${sn}`).toString().trim();
+    const rawHsn = (it.hsn ?? it.hsn_code ?? '').toString().trim();
+    const qty = Math.max(1, Number(it.qty ?? it.quantity) || 1);
+    const unit = (it.unit || 'PCS').toString().toUpperCase().trim();
     const rate = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
-    const discPct = Number(it.discount_pct) || 0;
-    let disc = Math.max(0, Number(it.discount_amount ?? it.discount) || 0);
-    if (!disc && discPct > 0) {
-      disc = +((qty * rate * (discPct / 100))).toFixed(2);
-    }
+    const mrp = Number(it.mrp) || +(rate * 1.25).toFixed(2);
+    const discPct = Number(it.discount_pct || 0);
 
-    let taxable = Number(it.taxable_amount);
-    if (isNaN(taxable) || taxable <= 0) {
-      taxable = Math.max(0, +((qty * rate) - disc).toFixed(2));
-    }
-
-    const gstPct = Number(it.gst_pct ?? it.gst_rate) || 0;
-    const cgstPct = Number(it.cgst_pct) || (gstPct / 2);
-    const sgstPct = Number(it.sgst_pct) || (gstPct / 2);
-
-    let cgst = Number(it.cgst_amount);
-    if (isNaN(cgst) || cgst <= 0) {
-      cgst = +((taxable * (cgstPct / 100))).toFixed(2);
-    }
-
-    let sgst = Number(it.sgst_amount);
-    if (isNaN(sgst) || sgst <= 0) {
-      sgst = +((taxable * (sgstPct / 100))).toFixed(2);
-    }
-
-    const cess = Math.max(0, Number(it.cess_amount ?? it.cess) || 0);
-    const lineTotal = Number(it.total_amount ?? it.price_after_gst) || +(taxable + cgst + sgst + cess).toFixed(2);
-
-    sumTaxable += taxable;
-    sumCgst += cgst;
-    sumSgst += sgst;
-    sumCess += cess;
-
-    const { hsn, barcode } = sanitizeItemHsnAndBarcode(it.hsn ?? it.hsn_code, it.barcode);
+    const { hsn, barcode } = sanitizeItemHsnAndBarcode(rawHsn, it.barcode);
 
     return {
       sn,
-      item_name: (it.item_name || it.description || `Item ${sn}`).toString().trim(),
+      name,
+      item_name: name,
       hsn,
       hsn_code: hsn,
       barcode,
       qty,
       quantity: qty,
-      unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
-      mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
+      unit,
+      mrp,
       rate,
       purchase_price: rate,
       price_before_gst: rate,
-      discount_pct: discPct,
-      discount_amount: disc,
-      discount: disc,
-      taxable_amount: taxable,
-      gst_pct: gstPct,
-      gst_rate: gstPct,
-      cgst_pct: cgstPct,
-      cgst_amount: cgst,
-      sgst_pct: sgstPct,
-      sgst_amount: sgst,
-      cess_amount: cess,
-      cess,
-      total_amount: lineTotal,
-      price_after_gst: lineTotal,
-      landed_cost_per_unit: qty > 0 ? Number((lineTotal / qty).toFixed(2)) : lineTotal
+      discount_pct: discPct
     };
   });
 
-  const invoiceDiscount = Number(data.discount_amount ?? data.totals?.discount_total) || 0;
-  const roundoff = Number(data.round_off ?? data.totals?.round_off) || 0;
-  const printedGrandTotal = Number(data.grand_total ?? data.totals?.grand_total) || 0;
-
-  // computed_total = sum(items.taxable + items.cgst + items.sgst + items.cess) - discount + roundoff
-  const computedTotal = +((sumTaxable + sumCgst + sumSgst + sumCess) - invoiceDiscount + roundoff).toFixed(2);
-  const variance = printedGrandTotal > 0 ? Math.abs(computedTotal - printedGrandTotal) : 0;
-  const isZeroVariance = variance < 0.05;
-
-  // Check physical serial number continuity (e.g. SN 1 to 14)
-  let hasContinuousSns = maxSn > 0 && snsFound.size === maxSn;
-  for (let s = 1; s <= maxSn; s++) {
-    if (!snsFound.has(s)) {
-      hasContinuousSns = false;
-      break;
-    }
-  }
-
   return {
-    isValid: true,
+    vendor_name: vendorName,
+    vendor_gstin: gstin,
+    gstin,
+    invoice_no: invoiceNo,
+    invoice_date: invoiceDate,
+    vendor_grand_total: vendorGrandTotal,
+    grand_total: vendorGrandTotal,
     items: normalizedItems,
-    itemsCount: normalizedItems.length,
-    computedTotal,
-    grandTotal: printedGrandTotal,
-    variance,
-    isZeroVariance,
-    hasContinuousSns,
-    maxSn,
-    sumTaxable: +sumTaxable.toFixed(2),
-    sumCgst: +sumCgst.toFixed(2),
-    sumSgst: +sumSgst.toFixed(2),
-    sumCess: +sumCess.toFixed(2),
-    discount: invoiceDiscount,
-    roundoff
-  };
-}
-
-/**
- * Pure JavaScript Consensus & Reconciliation Arbiter function
- * Combines Google Gemini and Groq Vision outputs according to strict Indian GST domain rules.
- *
- * @param {Object} geminiResult Output from Google Gemini Vision
- * @param {Object} groqResult Output from Groq Vision
- * @returns {Object} Reconciled, math-validated, consensus invoice dataset
- */
-export function reconcileOcrOutputs(geminiResult, groqResult) {
-  // 1. Guard against empty inputs
-  const geminiEval = evaluateModelMath(geminiResult);
-  const groqEval = evaluateModelMath(groqResult);
-
-  if (!geminiEval.isValid && !groqEval.isValid) {
-    throw new Error('Both Google Gemini and Groq Vision OCR outputs are invalid or empty.');
-  }
-
-  // Handle single engine success gracefully
-  if (geminiEval.isValid && !groqEval.isValid) {
-    return buildEnsembleResult({
-      primaryEngine: 'gemini',
-      primaryEval: geminiEval,
-      secondaryEval: null,
-      primaryRaw: geminiResult,
-      secondaryRaw: null,
-      chosenVendorName: cleanVendorName(geminiResult?.vendor_name || geminiResult?.seller?.name),
-      chosenVendorGstin: (geminiResult?.vendor_gstin || geminiResult?.seller?.gst || '').toUpperCase().trim(),
-      mergedItems: geminiEval.items,
-      mergedRowsCount: 0,
-      consensusLabel: 'Google Gemini Flash (Single Engine)'
-    });
-  }
-
-  if (!geminiEval.isValid && groqEval.isValid) {
-    return buildEnsembleResult({
-      primaryEngine: 'groq',
-      primaryEval: groqEval,
-      secondaryEval: null,
-      primaryRaw: groqResult,
-      secondaryRaw: null,
-      chosenVendorName: cleanVendorName(groqResult?.vendor_name || groqResult?.seller?.name),
-      chosenVendorGstin: (groqResult?.vendor_gstin || groqResult?.seller?.gst || '').toUpperCase().trim(),
-      mergedItems: groqEval.items,
-      mergedRowsCount: 0,
-      consensusLabel: 'Groq Vision (Single Engine)'
-    });
-  }
-
-  // --------------------------------------------------------------------------
-  // 2. HEADER INFORMATION (Buyer vs. Seller Disambiguation & Letterhead GSTIN)
-  // --------------------------------------------------------------------------
-  const gemName = geminiResult?.vendor_name || geminiResult?.seller?.name || '';
-  const gemGst = (geminiResult?.vendor_gstin || geminiResult?.seller?.gst || '').toUpperCase().trim();
-  const groqName = groqResult?.vendor_name || groqResult?.seller?.name || '';
-  const groqGst = (groqResult?.vendor_gstin || groqResult?.seller?.gst || '').toUpperCase().trim();
-
-  const gemIsBuyer = isBuyerPattern(gemName);
-  const groqIsBuyer = isBuyerPattern(groqName);
-
-  let chosenVendorName = '';
-  let chosenVendorGstin = '';
-
-  // Rule: If one model identifies the buyer ("MITTAL DEPARTMENTAL STORE") instead of seller ("RUDRAKSH AGENCIES"),
-  // prefer the result where GSTIN matches top letterhead format
-  if (gemIsBuyer && !groqIsBuyer) {
-    chosenVendorName = cleanVendorName(groqName);
-    chosenVendorGstin = groqGst || gemGst;
-  } else if (groqIsBuyer && !gemIsBuyer) {
-    chosenVendorName = cleanVendorName(gemName);
-    chosenVendorGstin = gemGst || groqGst;
-  } else {
-    // Both or neither match buyer pattern: Prefer top letterhead format (valid 15-char GSTIN)
-    const gemGstValid = isValidGstin(gemGst);
-    const groqGstValid = isValidGstin(groqGst);
-
-    if (groqGstValid && !gemGstValid) {
-      chosenVendorName = cleanVendorName(groqName || gemName);
-      chosenVendorGstin = groqGst;
-    } else if (gemGstValid && !groqGstValid) {
-      chosenVendorName = cleanVendorName(gemName || groqName);
-      chosenVendorGstin = gemGst;
-    } else {
-      chosenVendorName = cleanVendorName(groqName || gemName);
-      chosenVendorGstin = groqGst || gemGst;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // 3. ROW-BY-ROW TALLYING & PRIMARY ENGINE SELECTION
-  // --------------------------------------------------------------------------
-  // Whichever model achieves zero variance against the bill's grand total is marked as primary
-  let primaryEngine = 'groq';
-
-  if (groqEval.isZeroVariance && !geminiEval.isZeroVariance) {
-    primaryEngine = 'groq';
-  } else if (geminiEval.isZeroVariance && !groqEval.isZeroVariance) {
-    primaryEngine = 'gemini';
-  } else if (Math.abs(groqEval.variance - geminiEval.variance) > 0.1) {
-    // Pick the one with smallest variance
-    primaryEngine = groqEval.variance < geminiEval.variance ? 'groq' : 'gemini';
-  } else {
-    // Tie-breaker 1: Physical serial number continuity (SN 1 to 14)
-    if (groqEval.hasContinuousSns && !geminiEval.hasContinuousSns) {
-      primaryEngine = 'groq';
-    } else if (geminiEval.hasContinuousSns && !groqEval.hasContinuousSns) {
-      primaryEngine = 'gemini';
-    } else if (groqEval.itemsCount !== geminiEval.itemsCount) {
-      // Tie-breaker 2: Higher line item count
-      primaryEngine = groqEval.itemsCount > geminiEval.itemsCount ? 'groq' : 'gemini';
-    } else {
-      // Tie-breaker 3: Valid letterhead GSTIN
-      if (isValidGstin(groqGst) && !isValidGstin(gemGst)) {
-        primaryEngine = 'groq';
-      } else {
-        primaryEngine = 'gemini';
-      }
-    }
-  }
-
-  const primaryEval = primaryEngine === 'groq' ? groqEval : geminiEval;
-  const secondaryEval = primaryEngine === 'groq' ? geminiEval : groqEval;
-  const primaryRaw = primaryEngine === 'groq' ? groqResult : geminiResult;
-  const secondaryRaw = primaryEngine === 'groq' ? geminiResult : groqResult;
-
-  // --------------------------------------------------------------------------
-  // 4. FIELD-LEVEL MERGING (Missing Rows & HSN/Barcode Separation)
-  // --------------------------------------------------------------------------
-  // If Gemini captured an item row that Groq skipped (e.g. Line 1 "SHAHI PANEER MASALA"),
-  // automatically merge the missing row into the final dataset.
-  const primaryItems = [...primaryEval.items];
-  const secondaryItems = [...secondaryEval.items];
-
-  const primarySns = new Set(primaryItems.map((it) => Number(it.sn)).filter(Boolean));
-  const primaryNames = new Set(
-    primaryItems.map((it) => (it.item_name || '').toUpperCase().replace(/[^A-Z0-9]/g, ''))
-  );
-
-  let mergedRowsCount = 0;
-  const mergedItems = [...primaryItems];
-
-  secondaryItems.forEach((secItem) => {
-    const secSn = Number(secItem.sn);
-    const normName = (secItem.item_name || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-    let isMissingInPrimary = false;
-
-    // Condition A: Serial number was skipped in primary (e.g. SN 1)
-    if (secSn && !primarySns.has(secSn)) {
-      isMissingInPrimary = true;
-    }
-    // Condition B: Distinct product name completely skipped in primary
-    else if (normName && !primaryNames.has(normName)) {
-      const hasFuzzyMatch = Array.from(primaryNames).some(
-        (pName) => pName.includes(normName) || normName.includes(pName)
-      );
-      if (!hasFuzzyMatch) {
-        isMissingInPrimary = true;
-      }
-    }
-
-    if (isMissingInPrimary) {
-      mergedRowsCount++;
-      mergedItems.push({
-        ...secItem,
-        _merged_from_consensus: true
-      });
-      if (secSn) primarySns.add(secSn);
-      if (normName) primaryNames.add(normName);
-    }
-  });
-
-  // Sort merged items by serial number and ensure continuous numbering
-  mergedItems.sort((a, b) => (Number(a.sn) || 0) - (Number(b.sn) || 0));
-  mergedItems.forEach((it, idx) => {
-    it.sn = idx + 1;
-    // Strict HSN vs Barcode separation
-    const { hsn, barcode } = sanitizeItemHsnAndBarcode(it.hsn ?? it.hsn_code, it.barcode);
-    it.hsn = hsn;
-    it.hsn_code = hsn;
-    it.barcode = barcode;
-  });
-
-  return buildEnsembleResult({
-    primaryEngine,
-    primaryEval,
-    secondaryEval,
-    primaryRaw,
-    secondaryRaw,
-    chosenVendorName,
-    chosenVendorGstin,
-    mergedItems,
-    mergedRowsCount,
-    consensusLabel: 'Gemini + Groq Consensus'
-  });
-}
-
-/**
- * Assemble final standardized JSON schema with nested backward compatibility aliases
- */
-function buildEnsembleResult({
-  primaryEngine,
-  primaryEval,
-  secondaryEval,
-  primaryRaw,
-  secondaryRaw,
-  chosenVendorName,
-  chosenVendorGstin,
-  mergedItems,
-  mergedRowsCount,
-  consensusLabel
-}) {
-  const secondary = secondaryRaw || {};
-  const primary = primaryRaw || {};
-
-  // Cross-pollinate vendor contact details
-  const address = primary.vendor_address || secondary.vendor_address || primary.seller?.address || secondary.seller?.address || '';
-  const phone = primary.vendor_phone || secondary.vendor_phone || primary.seller?.contact || secondary.seller?.contact || '';
-  const fssai = primary.vendor_fssai || secondary.vendor_fssai || primary.seller?.fssai || secondary.seller?.fssai || '';
-  const salesmanName = primary.salesman_name || secondary.salesman_name || primary.seller?.salesman_name || secondary.seller?.salesman_name || '';
-  const salesmanNumber = primary.salesman_number || secondary.salesman_number || primary.seller?.salesman_number || secondary.seller?.salesman_number || '';
-
-  // Invoice identifiers
-  let invoice_no = (primary.invoice_no || secondary.invoice_no || primary.invoice?.invoice_number || secondary.invoice?.invoice_number || '').toString().trim();
-  if (invoice_no) invoice_no = invoice_no.replace(/\s+/g, '');
-  const invoice_date = normalizeIndianDate(primary.invoice_date || secondary.invoice_date || primary.invoice?.invoice_date || secondary.invoice?.invoice_date);
-
-  // Recalculate financial breakdown across all merged items
-  let finalTaxable = 0;
-  let finalCgst = 0;
-  let finalSgst = 0;
-  let finalCess = 0;
-  let finalSubtotal = 0;
-
-  mergedItems.forEach((it) => {
-    finalTaxable += Number(it.taxable_amount) || 0;
-    finalCgst += Number(it.cgst_amount) || 0;
-    finalSgst += Number(it.sgst_amount) || 0;
-    finalCess += Number(it.cess_amount) || 0;
-    finalSubtotal += Number(it.total_amount) || 0;
-  });
-
-  const discountAmount = Number(primary.discount_amount ?? secondary.discount_amount) || 0;
-  const discountPct = Number(primary.discount_pct ?? secondary.discount_pct) || (
-    finalSubtotal > 0 && discountAmount > 0 ? +((discountAmount / finalSubtotal) * 100).toFixed(2) : 0
-  );
-  let roundOff = Number(primary.round_off ?? secondary.round_off) || 0;
-  let grandTotal = Number(primary.grand_total ?? secondary.grand_total) || 0;
-
-  const calculatedBase = finalTaxable + finalCgst + finalSgst + finalCess - discountAmount;
-  if (grandTotal <= 0 || (mergedRowsCount > 0 && Math.abs(calculatedBase + roundOff - grandTotal) > 1.0)) {
-    grandTotal = Math.round(calculatedBase);
-    roundOff = +(grandTotal - calculatedBase).toFixed(2);
-  }
-
-  return {
-    vendor_name: chosenVendorName,
-    vendor_gstin: chosenVendorGstin,
-    vendor_address: address,
-    vendor_phone: phone,
-    invoice_no,
-    invoice_date,
-    last_detected_serial_number: Number(primary.last_detected_serial_number ?? secondary.last_detected_serial_number) || 0,
-    discount_pct: discountPct,
-    discount_amount: discountAmount,
-    discount_total: discountAmount,
-    round_off: roundOff,
-    grand_total: grandTotal,
-    vendor_grand_total: Number(primary.grand_total ?? secondary.grand_total ?? primary.totals?.grand_total) || grandTotal,
-    items: mergedItems,
 
     // Backward-compatible nested aliases for existing UI consumers
     seller: {
-      name: chosenVendorName,
-      gst: chosenVendorGstin,
-      address,
-      contact: phone,
-      fssai,
-      salesman_name: salesmanName,
-      salesman_number: salesmanNumber
+      name: vendorName,
+      gst: gstin,
+      address: data.vendor_address || data.seller?.address || '',
+      contact: data.vendor_phone || data.seller?.contact || ''
     },
     invoice: {
-      invoice_number: invoice_no,
-      invoice_date: invoice_date
-    },
-    bank_details: {
-      bank_name: primary.bank_details?.bank_name || secondary.bank_details?.bank_name || '',
-      account_no: primary.bank_details?.account_no || secondary.bank_details?.account_no || '',
-      ifsc: primary.bank_details?.ifsc || secondary.bank_details?.ifsc || ''
+      invoice_number: invoiceNo,
+      invoice_date: invoiceDate
     },
     totals: {
-      taxable_amount: +finalTaxable.toFixed(2),
-      cgst_total: +finalCgst.toFixed(2),
-      sgst_total: +finalSgst.toFixed(2),
-      cess_total: +finalCess.toFixed(2),
-      total_tax: +(finalCgst + finalSgst + finalCess).toFixed(2),
-      subtotal: +finalSubtotal.toFixed(2),
-      discount_pct: discountPct,
-      discount_amount: discountAmount,
-      discount_total: discountAmount,
-      round_off: roundOff,
-      grand_total: grandTotal
-    },
-
-    // Ensemble metadata for frontend UI badge & audit trail
-    _ensemble: {
-      verified: true,
-      consensus: consensusLabel,
-      primary_engine: primaryEngine,
-      gemini_items: primaryEngine === 'gemini' ? primaryEval.itemsCount : (secondaryEval?.itemsCount ?? 0),
-      groq_items: primaryEngine === 'groq' ? primaryEval.itemsCount : (secondaryEval?.itemsCount ?? 0),
-      gemini_variance: primaryEngine === 'gemini' ? primaryEval.variance : (secondaryEval?.variance ?? null),
-      groq_variance: primaryEngine === 'groq' ? primaryEval.variance : (secondaryEval?.variance ?? null),
-      merged_rows_count: mergedRowsCount
+      grand_total: vendorGrandTotal
     }
   };
 }
 
 /**
- * Continuation prompt for Auto-Chunking Fallback on long invoices
+ * Direct Multimodal Extraction using Google Gemini Vision (gemini-2.5-flash)
  */
-export function getContinuationPrompt(startSno, highestDetectedSno = 0) {
-  const targetNote = highestDetectedSno >= startSno ? ` down to S.No ${highestDetectedSno}` : ' to the bottom of the table';
-  return `You are an expert Indian GST B2B invoice OCR specialist.
-CRITICAL TASK: Extract items starting from S.No ${startSno}${targetNote} to the bottom of the table.
-The first pass extraction stopped at S.No ${startSno - 1}.
+export async function callGeminiVision(imageBase64, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
+  const effectiveKey = apiKey
+    || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY : '')
+    || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GEMINI_API_KEY : '');
 
-RULES:
-1. Extract EVERY SINGLE ROW starting from S.No ${startSno} sequentially down to the final row before the totals/tax summary.
-2. For each row extract: sn, item_name, hsn, barcode, qty, unit, mrp, rate, discount_pct (number only, e.g. 1 for 1% or 0), taxable_amount, gst_pct, cgst_amount, sgst_amount, cess_amount, total_amount.
-3. Return ONLY a valid JSON object matching this schema:
-{
-  "items": [
-    {
-      "sn": ${startSno},
-      "item_name": "Product Name",
-      "hsn": "12345678",
-      "barcode": "",
-      "qty": 1,
-      "unit": "PCS",
-      "mrp": 0,
-      "rate": 0,
-      "discount_pct": 0,
-      "taxable_amount": 0,
-      "gst_pct": 5,
-      "cgst_pct": 2.5,
-      "cgst_amount": 0,
-      "sgst_pct": 2.5,
-      "sgst_amount": 0,
-      "cess_amount": 0,
-      "total_amount": 0
-    }
-  ]
-}`;
-}
-
-/**
- * Perform a targeted continuation request to Groq Vision
- */
-export async function fetchGroqContinuation(cleanImage, startSno, highestSno, apiKey) {
-  if (!apiKey) return null;
-  try {
-    const prompt = getContinuationPrompt(startSno, highestSno);
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b',
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: cleanImage } }
-            ]
-          }
-        ],
-        temperature: 0.1,
-        max_tokens: 8192
-      })
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const content = data?.choices?.[0]?.message?.content;
-      if (content) {
-        const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanJson);
-      }
-    }
-  } catch (err) {
-    console.warn('Groq auto-chunk continuation failed:', err.message || err);
+  if (!effectiveKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
   }
-  return null;
-}
 
-/**
- * Perform a targeted continuation request to Gemini Vision
- */
-export async function fetchGeminiContinuation(base64Only, mimeType, startSno, highestSno, apiKey) {
-  if (!apiKey) return null;
-  const prompt = getContinuationPrompt(startSno, highestSno);
-  const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const base64Only = imageBase64.startsWith('data:')
+    ? imageBase64.split(',')[1]
+    : imageBase64;
 
-  for (const model of geminiModels) {
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  let lastError = null;
+
+  for (const model of models) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${effectiveKey}`;
       const payload = {
         contents: [
           {
             parts: [
-              { text: `${prompt}\n\nIMPORTANT: Return ONLY raw JSON without markdown formatting.` },
+              { text: `${INDIAN_GST_OCR_PROMPT}\n\nIMPORTANT: Return ONLY valid JSON without markdown formatting or code blocks.` },
               {
                 inline_data: {
                   mime_type: mimeType || 'image/jpeg',
@@ -747,104 +271,44 @@ export async function fetchGeminiContinuation(base64Only, mimeType, startSno, hi
         body: JSON.stringify(payload)
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (text) {
-          const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-          return JSON.parse(cleanJson);
-        }
+      if (!response.ok) {
+        const errText = await response.text();
+        lastError = new Error(`Gemini ${model} Error (${response.status}): ${errText}`);
+        console.warn(lastError.message);
+        continue;
       }
+
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error(`Gemini ${model} returned an empty response`);
+      }
+
+      return safeParseJsonResponse(text);
     } catch (err) {
-      console.warn(`Gemini ${model} auto-chunk continuation failed:`, err.message || err);
-    }
-  }
-  return null;
-}
-
-/**
- * Auto-Chunking Fallback for Long Bills:
- * If >35 rows detected and the extracted items count does not match the highest detected serial number in the first pass:
- * Trigger an immediate targeted follow-up prompt to the same model:
- * "Extract items starting from S.No [last_extracted_sno + 1] to the bottom of the table."
- * Then append those items automatically to the list before rendering to the UI.
- */
-export async function autoChunkLongBillIfNeeded(firstPassResult, fetchRemainingRows) {
-  if (!firstPassResult || typeof firstPassResult !== 'object') {
-    return firstPassResult;
-  }
-
-  const items = Array.isArray(firstPassResult.items) ? [...firstPassResult.items] : [];
-
-  const highestDetectedSno = Number(
-    firstPassResult.last_detected_serial_number ||
-    firstPassResult.highest_serial_number ||
-    firstPassResult.last_serial_number ||
-    0
-  );
-
-  const lastExtractedSno = items.reduce((max, it, idx) => {
-    const sn = Number(it.sn);
-    return !isNaN(sn) && sn > 0 ? Math.max(max, sn) : Math.max(max, idx + 1);
-  }, 0);
-
-  const isLongBill = items.length >= 35 || highestDetectedSno >= 35 || lastExtractedSno >= 35;
-  const isCutoff = (highestDetectedSno > 0 && (items.length < highestDetectedSno || lastExtractedSno < highestDetectedSno)) ||
-                   (items.length === 40 && highestDetectedSno === 0);
-
-  if (isLongBill && isCutoff && typeof fetchRemainingRows === 'function') {
-    const startSno = lastExtractedSno + 1;
-    console.warn(`[Auto-Chunking] Detected cutoff at item ${items.length} (last S.No ${lastExtractedSno}) with highest detected S.No ${highestDetectedSno || 'unknown'}. Requesting items starting from S.No ${startSno}...`);
-
-    try {
-      const continuationResult = await fetchRemainingRows(startSno, highestDetectedSno);
-      const remainingItems = Array.isArray(continuationResult?.items) ? continuationResult.items : [];
-
-      if (remainingItems.length > 0) {
-        console.log(`[Auto-Chunking] Retrieved ${remainingItems.length} additional rows! Appending sequentially.`);
-        const existingSns = new Set(items.map(it => Number(it.sn)).filter(Boolean));
-        let fallbackSn = startSno;
-
-        remainingItems.forEach((remItem) => {
-          const rawSn = Number(remItem.sn);
-          const sn = (!isNaN(rawSn) && rawSn > 0) ? rawSn : fallbackSn;
-          fallbackSn = Math.max(fallbackSn, sn) + 1;
-
-          if (!existingSns.has(sn)) {
-            existingSns.add(sn);
-            items.push({
-              ...remItem,
-              sn,
-              _auto_chunked: true
-            });
-          }
-        });
-
-        items.sort((a, b) => (Number(a.sn) || 0) - (Number(b.sn) || 0));
-        firstPassResult.items = items;
-      }
-    } catch (chunkErr) {
-      console.warn('[Auto-Chunking] Continuation failed, returning first pass result:', chunkErr.message || chunkErr);
+      lastError = err;
+      console.warn(`Gemini ${model} extraction failed:`, err.message || err);
     }
   }
 
-  return firstPassResult;
+  throw lastError || new Error('Gemini Vision extraction failed on all flash models.');
 }
 
 /**
- * Call Groq Vision API using official active vision model: qwen/qwen3.8-27b
+ * Fallback Multimodal Extraction using Groq Vision (qwen/qwen3.8-27b)
  */
 export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
-  const effectiveKey = apiKey || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
+  const effectiveKey = apiKey
+    || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '')
+    || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
+
   if (!effectiveKey) {
     throw new Error('GROQ_API_KEY is not configured');
   }
 
   const cleanImage = imageBase64.startsWith('data:')
     ? imageBase64
-    : `data:${mimeType};base64,${imageBase64}`;
-
-  const activeModel = 'qwen/qwen3.8-27b';
+    : `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -853,7 +317,7 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
       'Authorization': `Bearer ${effectiveKey}`
     },
     body: JSON.stringify({
-      model: activeModel,
+      model: 'qwen/qwen3.8-27b',
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -880,92 +344,16 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
     throw new Error('Groq Vision returned an empty response.');
   }
 
-  const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
-  const initialResult = JSON.parse(cleanJson);
-
-  return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
-    return fetchGroqContinuation(cleanImage, startSno, highestSno, effectiveKey);
-  });
+  return safeParseJsonResponse(content);
 }
 
 /**
- * Call Google Gemini Vision API using active flash models: gemini-2.5-flash or gemini-1.5-flash
- */
-export async function callGeminiVision(imageBase64, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
-  const effectiveKey = apiKey || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GEMINI_API_KEY : '');
-  if (!effectiveKey) {
-    throw new Error('GEMINI_API_KEY is not configured');
-  }
-
-  const base64Only = imageBase64.startsWith('data:')
-    ? imageBase64.split(',')[1]
-    : imageBase64;
-
-  const geminiModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
-  let lastError = null;
-
-  for (const model of geminiModels) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${effectiveKey}`;
-      const payload = {
-        contents: [
-          {
-            parts: [
-              { text: `${INDIAN_GST_OCR_PROMPT}\n\nIMPORTANT: Return ONLY raw JSON without markdown formatting.` },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64Only
-                }
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-          maxOutputTokens: 8192
-        }
-      };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        lastError = new Error(`Gemini ${model} Error (${response.status}): ${errText}`);
-        continue;
-      }
-
-      const data = await response.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) {
-        const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        const initialResult = JSON.parse(cleanJson);
-        return autoChunkLongBillIfNeeded(initialResult, (startSno, highestSno) => {
-          return fetchGeminiContinuation(base64Only, mimeType, startSno, highestSno, effectiveKey);
-        });
-      }
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  throw lastError || new Error('Gemini Vision extraction failed on all flash models.');
-}
-
-/**
- * Main ensemble entry point: Process invoice through backend route or parallel client execution
- *
- * @param {string} imageBase64 Base64 or data URL of invoice image/PDF
- * @param {Object} options Configuration options (mimeType, apiKey, etc.)
- * @returns {Promise<Object>} Reconciled invoice data
+ * Main OCR entry point:
+ * Uses Google Gemini Vision directly (gemini-2.5-flash).
+ * If backend endpoint is available, calls it; otherwise direct client execution.
  */
 export async function processBill(imageBase64, options = {}) {
-  // 1. First attempt through backend route /api/ocr-ensemble or /api/purchase-ocr
+  // 1. First attempt backend route /api/ocr-ensemble or /api/purchase-ocr if in browser
   if (typeof window !== 'undefined' && !options.useDirectClient) {
     try {
       const endpoint = '/api/ocr-ensemble';
@@ -975,59 +363,38 @@ export async function processBill(imageBase64, options = {}) {
         body: JSON.stringify({
           imageBase64,
           mimeType: options.mimeType || 'image/jpeg',
-          groqApiKey: options.groqApiKey || options.apiKey,
-          geminiApiKey: options.geminiApiKey
+          geminiApiKey: options.geminiApiKey || options.apiKey,
+          groqApiKey: options.groqApiKey
         })
       });
 
       if (response.ok) {
-        let result = await response.json();
-        if (result && (result.items || result.grand_total || result.vendor_name)) {
-          const cleanImage = imageBase64.startsWith('data:')
-            ? imageBase64
-            : `data:${options.mimeType || 'image/jpeg'};base64,${imageBase64}`;
-          const base64Only = imageBase64.startsWith('data:')
-            ? imageBase64.split(',')[1]
-            : imageBase64;
-          const groqKey = options.groqApiKey || options.apiKey || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
-          const geminiKey = options.geminiApiKey || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY || process.env?.VITE_GEMINI_API_KEY : '') || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GEMINI_API_KEY : '');
-
-          result = await autoChunkLongBillIfNeeded(result, async (startSno, highestSno) => {
-            if (groqKey) {
-              return fetchGroqContinuation(cleanImage, startSno, highestSno, groqKey);
-            }
-            if (geminiKey) {
-              return fetchGeminiContinuation(base64Only, options.mimeType || 'image/jpeg', startSno, highestSno, geminiKey);
-            }
-            return null;
-          });
-
-          return result;
+        const result = await response.json();
+        if (result && (Array.isArray(result.items) || result.vendor_name || result.invoice_no)) {
+          return normalizeParsedInvoice(result);
         }
       }
     } catch (apiErr) {
-      console.warn('Backend OCR route unavailable, proceeding with direct client parallel ensemble:', apiErr.message);
+      console.warn('Backend OCR route unavailable, proceeding with direct client Gemini Vision:', apiErr.message);
     }
   }
 
-  // 2. Direct Parallel Execution: Request A (Gemini) + Request B (Groq) concurrently
-  const [geminiSettled, groqSettled] = await Promise.allSettled([
-    callGeminiVision(imageBase64, options),
-    callGroqVision(imageBase64, options)
-  ]);
+  // 2. Direct Multimodal Extraction: Primary Engine Google Gemini Vision
+  try {
+    return await callGeminiVision(imageBase64, options);
+  } catch (geminiErr) {
+    console.warn('Primary Gemini Vision extraction error, checking for Groq Vision fallback:', geminiErr.message);
+    const groqKey = options.groqApiKey
+      || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '')
+      || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
 
-  const geminiResult = geminiSettled.status === 'fulfilled' ? geminiSettled.value : null;
-  const groqResult = groqSettled.status === 'fulfilled' ? groqSettled.value : null;
+    if (groqKey) {
+      console.log('Falling back to Groq Vision...');
+      return await callGroqVision(imageBase64, { ...options, apiKey: groqKey });
+    }
 
-  if (geminiSettled.status === 'rejected') {
-    console.warn('Ensemble Gemini call failed:', geminiSettled.reason?.message || geminiSettled.reason);
+    throw geminiErr;
   }
-  if (groqSettled.status === 'rejected') {
-    console.warn('Ensemble Groq call failed:', groqSettled.reason?.message || groqSettled.reason);
-  }
-
-  // 3. Reconcile and arrive at consensus
-  return reconcileOcrOutputs(geminiResult, groqResult);
 }
 
 /**
@@ -1035,6 +402,19 @@ export async function processBill(imageBase64, options = {}) {
  */
 export async function runDualOcrPipeline(imageBase64, options = {}) {
   return processBill(imageBase64, options);
+}
+
+/**
+ * Backward compatibility stub for reconcileOcrOutputs
+ */
+export function reconcileOcrOutputs(geminiResult, groqResult) {
+  if (geminiResult && Array.isArray(geminiResult.items) && geminiResult.items.length > 0) {
+    return normalizeParsedInvoice(geminiResult);
+  }
+  if (groqResult && Array.isArray(groqResult.items) && groqResult.items.length > 0) {
+    return normalizeParsedInvoice(groqResult);
+  }
+  return normalizeParsedInvoice(geminiResult || groqResult || { items: [] });
 }
 
 /**
@@ -1046,19 +426,16 @@ export function reconcileOrFallback(geminiData, groqData) {
 
 export default {
   INDIAN_GST_OCR_PROMPT,
-  callGroqVision,
   callGeminiVision,
-  reconcileOcrOutputs,
+  callGroqVision,
   processBill,
   runDualOcrPipeline,
+  safeParseJsonResponse,
+  normalizeParsedInvoice,
+  reconcileOcrOutputs,
   reconcileOrFallback,
   isBuyerPattern,
   cleanVendorName,
   isValidGstin,
-  sanitizeItemHsnAndBarcode,
-  evaluateModelMath,
-  getContinuationPrompt,
-  fetchGroqContinuation,
-  fetchGeminiContinuation,
-  autoChunkLongBillIfNeeded
+  sanitizeItemHsnAndBarcode
 };
