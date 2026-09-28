@@ -56,8 +56,9 @@ export default async function handler(req, res) {
         vendor_phone: '8882030921',
         invoice_no: 'T000820',
         invoice_date: '2026-08-04',
+        discount_pct: 2,
         discount_amount: 114.54,
-        round_off: 0.47,
+        round_off: 0.58,
         grand_total: 5895.00,
         items: [
           {
@@ -93,6 +94,23 @@ export default async function handler(req, res) {
             sgst_pct: 2.5,
             sgst_amount: 51.00,
             cess_amount: 0
+          },
+          {
+            sn: 4,
+            item_name: 'GARAM MASALA 100G',
+            hsn: '09109100',
+            barcode: '',
+            qty: 4,
+            unit: 'PCS',
+            mrp: 70.00,
+            rate: 51.10,
+            taxable_amount: 204.40,
+            gst_pct: 5,
+            cgst_pct: 2.5,
+            cgst_amount: 2.26,
+            sgst_pct: 2.5,
+            sgst_amount: 2.26,
+            cess_amount: 0
           }
         ]
       };
@@ -103,8 +121,9 @@ export default async function handler(req, res) {
         vendor_phone: '8882030921',
         invoice_no: 'T000820',
         invoice_date: '2026-08-04',
+        discount_pct: 2,
         discount_amount: 114.54,
-        round_off: 0.47,
+        round_off: 0.58,
         grand_total: 5895.00,
         items: [
           {
@@ -156,6 +175,23 @@ export default async function handler(req, res) {
             cgst_amount: 51.00,
             sgst_pct: 2.5,
             sgst_amount: 51.00,
+            cess_amount: 0
+          },
+          {
+            sn: 4,
+            item_name: 'GARAM MASALA 100G',
+            hsn: '09109100',
+            barcode: '',
+            qty: 4,
+            unit: 'PCS',
+            mrp: 70.00,
+            rate: 51.10,
+            taxable_amount: 204.40,
+            gst_pct: 5,
+            cgst_pct: 2.5,
+            cgst_amount: 2.26,
+            sgst_pct: 2.5,
+            sgst_amount: 2.26,
             cess_amount: 0
           }
         ]

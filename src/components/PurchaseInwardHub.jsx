@@ -153,6 +153,10 @@ export default function PurchaseInwardHub({
   const [items, setItems] = useState([]);
   const [rawOcrData, setRawOcrData] = useState(null);
 
+  // Invoice-Level Discount State
+  const [invoiceDiscountPct, setInvoiceDiscountPct] = useState('');
+  const [invoiceDiscountAmount, setInvoiceDiscountAmount] = useState('');
+
   // File input refs
   const cameraInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -596,6 +600,33 @@ export default function PurchaseInwardHub({
         });
       }
 
+      // Auto-populate Invoice-Level Discount from OCR
+      const rawDiscountAmt = Number(parsed.discount_amount ?? parsed.discount ?? parsed.totals?.discount_total) || 0;
+      const rawDiscountPct = Number(parsed.discount_pct ?? parsed.totals?.discount_pct) || 0;
+
+      const parsedItemsList = Array.isArray(parsed.items) ? parsed.items : [];
+      let parsedGrossSum = 0;
+      parsedItemsList.forEach((it) => {
+        const q = Math.max(0, Number(it.qty ?? it.quantity) || 1);
+        const r = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
+        parsedGrossSum += q * r;
+      });
+
+      if (rawDiscountAmt > 0) {
+        setInvoiceDiscountAmount(String(rawDiscountAmt));
+        const computedPct = rawDiscountPct > 0
+          ? rawDiscountPct
+          : (parsedGrossSum > 0 ? +((rawDiscountAmt / parsedGrossSum) * 100).toFixed(2) : 0);
+        setInvoiceDiscountPct(computedPct > 0 ? String(computedPct) : '');
+      } else if (rawDiscountPct > 0) {
+        setInvoiceDiscountPct(String(rawDiscountPct));
+        const computedAmt = parsedGrossSum > 0 ? +((parsedGrossSum * (rawDiscountPct / 100))).toFixed(2) : 0;
+        setInvoiceDiscountAmount(computedAmt > 0 ? String(computedAmt) : '');
+      } else {
+        setInvoiceDiscountAmount('');
+        setInvoiceDiscountPct('');
+      }
+
       // Populate Line Items with detailed GST fields & auto-calculation
       if (Array.isArray(parsed.items) && parsed.items.length > 0) {
         setItems(
@@ -793,39 +824,147 @@ export default function PurchaseInwardHub({
     }
   };
 
-  // Calculations for Totals Card & Indian GST Invoice Round-Off Matching
-  const { totalTaxable, totalCgst, totalSgst, totalCess, totalTax, subtotal, roundOff, grandTotal } = useMemo(() => {
-    let taxable = 0;
-    let cgst = 0;
-    let sgst = 0;
-    let cess = 0;
-    let rowSubtotal = 0;
+  // Linked Discount Input Handlers
+  const handleDiscountPctChange = (val) => {
+    setInvoiceDiscountPct(val);
+    const pct = parseFloat(val);
+    if (!isNaN(pct) && grossSubtotal > 0) {
+      const calculatedAmt = +((grossSubtotal * (pct / 100))).toFixed(2);
+      setInvoiceDiscountAmount(calculatedAmt > 0 ? String(calculatedAmt) : '');
+    } else if (!val) {
+      setInvoiceDiscountAmount('');
+    }
+  };
 
+  const handleDiscountAmountChange = (val) => {
+    setInvoiceDiscountAmount(val);
+    const amt = parseFloat(val);
+    if (!isNaN(amt) && grossSubtotal > 0) {
+      const calculatedPct = +(((amt / grossSubtotal) * 100)).toFixed(2);
+      setInvoiceDiscountPct(calculatedPct > 0 ? String(calculatedPct) : '');
+    } else if (!val) {
+      setInvoiceDiscountPct('');
+    }
+  };
+
+  // Calculations for Totals Card & Indian GST Invoice Round-Off Matching
+  const {
+    grossSubtotal,
+    discountAmountNum,
+    discountPctNum,
+    totalTaxable,
+    totalCgst,
+    totalSgst,
+    totalCess,
+    totalTax,
+    subtotal,
+    rawTotal,
+    roundOff,
+    grandTotal
+  } = useMemo(() => {
+    let gross = 0;
+    let cessSum = 0;
+
+    // 1. Gross Subtotal = sum(item.qty * item.rate)
     (items || []).forEach((it) => {
       if (!it) return;
-      taxable += Number(it.taxable_amount) || 0;
-      cgst += Number(it.cgst_amount) || 0;
-      sgst += Number(it.sgst_amount) || 0;
-      cess += Number(it.cess_amount || it.cess) || 0;
-      rowSubtotal += Number(it.total_amount ?? it.price_after_gst) || 0;
+      const q = Math.max(0, Number(it.quantity ?? it.qty) || 1);
+      const r = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
+      gross += q * r;
+      cessSum += Number(it.cess_amount || it.cess) || 0;
     });
 
-    const tax = cgst + sgst + cess;
-    const cleanSubtotal = +rowSubtotal.toFixed(2);
-    const roundedNetTotal = Math.round(cleanSubtotal);
-    const roundOffAmt = +(roundedNetTotal - cleanSubtotal).toFixed(2);
+    const cleanGross = +gross.toFixed(2);
+
+    // 2. Parse Discount Inputs
+    let discAmt = parseFloat(invoiceDiscountAmount) || 0;
+    let discPct = parseFloat(invoiceDiscountPct) || 0;
+
+    if (discAmt === 0 && discPct > 0 && cleanGross > 0) {
+      discAmt = +((cleanGross * (discPct / 100))).toFixed(2);
+    } else if (discAmt > 0 && discPct === 0 && cleanGross > 0) {
+      discPct = +(((discAmt / cleanGross) * 100)).toFixed(2);
+    }
+
+    discAmt = Math.min(cleanGross, Math.max(0, discAmt));
+
+    // 3. Net Taxable Amount = Gross Subtotal - Discount Amount
+    const netTaxable = Math.max(0, +(cleanGross - discAmt).toFixed(2));
+
+    // 4. Calculate CGST and SGST on the Net Taxable Amount
+    let effectiveCgstRate = 0.025; // default 2.5% for standard Indian FMCG (5% GST)
+    let effectiveSgstRate = 0.025; // default 2.5% for standard Indian FMCG (5% GST)
+
+    if (cleanGross > 0 && items.length > 0) {
+      let weightedCgstSum = 0;
+      let weightedSgstSum = 0;
+      items.forEach((it) => {
+        const q = Math.max(0, Number(it.quantity ?? it.qty) || 1);
+        const r = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
+        const itemGross = q * r;
+        const gstPct = Number(it.gst_pct ?? it.gst_rate) || 0;
+        const cgstPct = Number(it.cgst_pct) || (gstPct / 2);
+        const sgstPct = Number(it.sgst_pct) || (gstPct / 2);
+
+        weightedCgstSum += itemGross * (cgstPct / 100);
+        weightedSgstSum += itemGross * (sgstPct / 100);
+      });
+      if (weightedCgstSum > 0) {
+        effectiveCgstRate = weightedCgstSum / cleanGross;
+        effectiveSgstRate = weightedSgstSum / cleanGross;
+      }
+    }
+
+    // Check item-level CGST/SGST if populated from bill
+    let itemCgstTotal = 0;
+    let itemSgstTotal = 0;
+    items.forEach((it) => {
+      itemCgstTotal += Number(it.cgst_amount) || 0;
+      itemSgstTotal += Number(it.sgst_amount) || 0;
+    });
+
+    const calculatedCgst = +((netTaxable * effectiveCgstRate)).toFixed(2);
+    const calculatedSgst = +((netTaxable * effectiveSgstRate)).toFixed(2);
+
+    let cgstFinal = calculatedCgst;
+    let sgstFinal = calculatedSgst;
+
+    // If item-level tax sums are close (e.g. 140.36 vs 140.34 due to per-line rounding), preserve printed accuracy
+    if (itemCgstTotal > 0 && Math.abs(itemCgstTotal - calculatedCgst) <= 0.05) {
+      cgstFinal = +itemCgstTotal.toFixed(2);
+      sgstFinal = +itemSgstTotal.toFixed(2);
+    }
+
+    const cessFinal = +cessSum.toFixed(2);
+    const taxFinal = +(cgstFinal + sgstFinal + cessFinal).toFixed(2);
+
+    // 5. Raw Total = Net Taxable + CGST + SGST + CESS
+    const rawTot = +(netTaxable + cgstFinal + sgstFinal + cessFinal).toFixed(2);
+
+    // 6. Grand Total = Math.round(Raw Total)
+    let grandTot = Math.round(rawTot);
+    if (rawOcrData?.grand_total && Math.abs(rawOcrData.grand_total - rawTot) <= 1.0) {
+      grandTot = rawOcrData.grand_total;
+    }
+
+    // 7. Round Off = (Grand Total - Raw Total).toFixed(2)
+    const roundOffAmt = +(grandTot - rawTot).toFixed(2);
 
     return {
-      totalTaxable: +taxable.toFixed(2),
-      totalCgst: +cgst.toFixed(2),
-      totalSgst: +sgst.toFixed(2),
-      totalCess: +cess.toFixed(2),
-      totalTax: +tax.toFixed(2),
-      subtotal: cleanSubtotal,
+      grossSubtotal: cleanGross,
+      discountAmountNum: discAmt,
+      discountPctNum: discPct,
+      totalTaxable: netTaxable,
+      totalCgst: cgstFinal,
+      totalSgst: sgstFinal,
+      totalCess: cessFinal,
+      totalTax: taxFinal,
+      subtotal: cleanGross,
+      rawTotal: rawTot,
       roundOff: roundOffAmt,
-      grandTotal: roundedNetTotal
+      grandTotal: grandTot
     };
-  }, [items]);
+  }, [items, invoiceDiscountAmount, invoiceDiscountPct, rawOcrData]);
 
   // Save Purchase Entry to Supabase (Permanent Archival & Stock Sync)
   const handleSavePurchaseEntry = async () => {
@@ -868,7 +1007,11 @@ export default function PurchaseInwardHub({
         bank_ifsc: bankIfsc || null,
         account_no: bankAccountNo || null,
         ifsc: bankIfsc || null,
-        subtotal: subtotal,
+        subtotal: grossSubtotal,
+        gross_subtotal: grossSubtotal,
+        discount_amount: discountAmountNum,
+        discount_pct: discountPctNum,
+        discount: discountAmountNum,
         round_off_amount: roundOff,
         round_off: roundOff,
         total_taxable_amount: totalTaxable,
@@ -878,12 +1021,15 @@ export default function PurchaseInwardHub({
         bill_image_urls: uniqueBillUrls,
         vendor_details: sellerData,
         tax_summary: {
+          gross_subtotal: grossSubtotal,
+          discount_amount: discountAmountNum,
+          discount_pct: discountPctNum,
           total_taxable: totalTaxable,
           total_cgst: totalCgst,
           total_sgst: totalSgst,
           total_cess: totalCess,
           total_tax: totalTax,
-          subtotal: subtotal,
+          subtotal: grossSubtotal,
           round_off: roundOff,
           grand_total: grandTotal
         },
@@ -989,6 +1135,8 @@ export default function PurchaseInwardHub({
     setBankDetails({ bank_name: '', account_no: '', ifsc: '' });
     setItems([]);
     setRawOcrData(null);
+    setInvoiceDiscountAmount('');
+    setInvoiceDiscountPct('');
   };
 
   const handleDeleteInvoice = async (id) => {
@@ -1884,35 +2032,90 @@ export default function PurchaseInwardHub({
                   </div>
 
                   {/* Summary Bar & Commit Button */}
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-800 bg-slate-950/60 p-3 rounded-xl">
-                    <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-slate-400">Taxable: </span>
+                  <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 pt-3 border-t border-slate-800 bg-slate-950/80 p-3.5 rounded-2xl shadow-xl">
+                    <div className="flex items-center gap-2.5 flex-wrap text-xs">
+                      {/* Gross Subtotal */}
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                        <span className="text-slate-400 font-medium">Gross Subtotal:</span>
+                        <span className="font-mono font-bold text-white">₹{grossSubtotal.toFixed(2)}</span>
+                      </div>
+
+                      {/* Discount: [- ₹114.54] (2%) (Editable linked inputs) */}
+                      <div className="px-3 py-1.5 rounded-xl bg-rose-950/25 border border-rose-500/40 text-rose-300 shadow-sm flex items-center gap-2">
+                        <span className="font-semibold text-rose-400 text-xs">Discount:</span>
+                        <div className="flex items-center gap-1.5">
+                          {/* Amount Input */}
+                          <div className="flex items-center bg-slate-900/90 border border-rose-500/40 rounded-lg px-2 py-0.5 focus-within:border-rose-400">
+                            <span className="text-rose-400/80 font-bold text-xs mr-0.5">[- ₹</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              value={invoiceDiscountAmount}
+                              onChange={(e) => handleDiscountAmountChange(e.target.value)}
+                              className="w-20 bg-transparent text-right font-mono font-bold text-rose-200 text-xs focus:outline-none"
+                              title="Discount Amount in ₹ (Subtracts before GST)"
+                            />
+                            <span className="text-rose-400/80 font-bold text-xs ml-0.5">]</span>
+                          </div>
+
+                          {/* Percentage Input */}
+                          <div className="flex items-center bg-slate-900/90 border border-rose-500/40 rounded-lg px-1.5 py-0.5 focus-within:border-rose-400">
+                            <span className="text-rose-400/80 font-bold text-xs mr-0.5">(</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              max="100"
+                              placeholder="0"
+                              value={invoiceDiscountPct}
+                              onChange={(e) => handleDiscountPctChange(e.target.value)}
+                              className="w-12 bg-transparent text-right font-mono font-bold text-rose-300 text-xs focus:outline-none"
+                              title="Discount Percentage (%)"
+                            />
+                            <span className="text-rose-400/80 font-bold text-xs ml-0.5">%)</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Taxable Base */}
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                        <span className="text-slate-400 font-medium">Taxable Base:</span>
                         <span className="font-mono font-bold text-white">₹{totalTaxable.toFixed(2)}</span>
                       </div>
-                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-slate-400">CGST: </span>
+
+                      {/* CGST */}
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                        <span className="text-slate-400 font-medium">CGST:</span>
                         <span className="font-mono font-bold text-amber-400">₹{totalCgst.toFixed(2)}</span>
                       </div>
-                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-slate-400">SGST: </span>
+
+                      {/* SGST */}
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                        <span className="text-slate-400 font-medium">SGST:</span>
                         <span className="font-mono font-bold text-amber-400">₹{totalSgst.toFixed(2)}</span>
                       </div>
+
                       {totalCess > 0 && (
-                        <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
-                          <span className="text-slate-400">CESS: </span>
+                        <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 flex items-center gap-1.5">
+                          <span className="text-slate-400 font-medium">CESS:</span>
                           <span className="font-mono font-bold text-cyan-400">₹{totalCess.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300">
-                        <span className="text-slate-400">Round Off: </span>
+
+                      {/* Round Off */}
+                      <div className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 shadow-sm flex items-center gap-1.5">
+                        <span className="text-slate-400 font-medium">Round Off:</span>
                         <span className={`font-mono font-bold ${roundOff === 0 ? 'text-slate-400' : roundOff > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
                           {roundOff >= 0 ? `+₹${roundOff.toFixed(2)}` : `-₹${Math.abs(roundOff).toFixed(2)}`}
                         </span>
                       </div>
-                      <div className="px-3.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
-                        <span className="font-semibold text-emerald-400">Grand Total: </span>
-                        <span className="font-mono font-black text-emerald-300 text-sm">₹{grandTotal.toFixed(2)}</span>
+
+                      {/* Grand Total (Highlight badge) */}
+                      <div className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border-2 border-emerald-500/40 text-emerald-300 shadow-lg shadow-emerald-500/10 flex items-center gap-2">
+                        <span className="font-bold text-emerald-400">Grand Total:</span>
+                        <span className="font-mono font-black text-emerald-300 text-sm sm:text-base">₹{grandTotal.toFixed(2)}</span>
                       </div>
                     </div>
 

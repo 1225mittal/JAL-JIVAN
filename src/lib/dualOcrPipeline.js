@@ -55,8 +55,9 @@ Return ONLY a valid JSON object matching EXACTLY this structure with no markdown
   "vendor_phone": "8882030921",
   "invoice_no": "T000820",
   "invoice_date": "2026-08-04",
+  "discount_pct": 2.0,
   "discount_amount": 114.54,
-  "round_off": 0.47,
+  "round_off": 0.58,
   "grand_total": 5895.00,
   "items": [
     {
@@ -538,6 +539,9 @@ function buildEnsembleResult({
   });
 
   const discountAmount = Number(primary.discount_amount ?? secondary.discount_amount) || 0;
+  const discountPct = Number(primary.discount_pct ?? secondary.discount_pct) || (
+    finalSubtotal > 0 && discountAmount > 0 ? +((discountAmount / finalSubtotal) * 100).toFixed(2) : 0
+  );
   let roundOff = Number(primary.round_off ?? secondary.round_off) || 0;
   let grandTotal = Number(primary.grand_total ?? secondary.grand_total) || 0;
 
@@ -554,7 +558,9 @@ function buildEnsembleResult({
     vendor_phone: phone,
     invoice_no,
     invoice_date,
+    discount_pct: discountPct,
     discount_amount: discountAmount,
+    discount_total: discountAmount,
     round_off: roundOff,
     grand_total: grandTotal,
     items: mergedItems,
@@ -585,6 +591,8 @@ function buildEnsembleResult({
       cess_total: +finalCess.toFixed(2),
       total_tax: +(finalCgst + finalSgst + finalCess).toFixed(2),
       subtotal: +finalSubtotal.toFixed(2),
+      discount_pct: discountPct,
+      discount_amount: discountAmount,
       discount_total: discountAmount,
       round_off: roundOff,
       grand_total: grandTotal
