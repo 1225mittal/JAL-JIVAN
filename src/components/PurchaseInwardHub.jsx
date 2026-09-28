@@ -153,6 +153,7 @@ export default function PurchaseInwardHub({
 }) {
   // Navigation: 'new' | 'history' | 'vendors' | 'debit_notes' | 'items'
   const [activeTab, setActiveTab] = useState('new');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Ledger / Invoices History State
   const [invoicesHistory, setInvoicesHistory] = useState([]);
@@ -1377,34 +1378,69 @@ export default function PurchaseInwardHub({
       {/* ======================================================== */}
       <div className="flex flex-col lg:flex-row min-h-screen">
         {/* ======================================================== */}
-        {/* LEFT COLUMN: NARROW NAVIGATION SIDEBAR (250px - 280px) */}
+        {/* LEFT COLUMN: NARROW NAVIGATION SIDEBAR (250px - 280px / 64px Collapsed) */}
         {/* ======================================================== */}
-        <aside className="w-full lg:w-64 xl:w-72 bg-slate-950/90 border-b lg:border-b-0 lg:border-r border-slate-800 p-4 shrink-0 flex flex-col justify-between">
+        <aside
+          className={`w-full bg-slate-950/90 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 flex flex-col justify-between transition-all duration-200 ${
+            isSidebarCollapsed ? 'lg:w-16 p-2' : 'lg:w-64 xl:w-72 p-4'
+          }`}
+        >
           <div className="space-y-4">
-            {/* Clean Single Return to Hub Button */}
-            {onBackToHub && (
+            {/* Top Row: Back to Admin Hub + Collapse/Expand Toggle */}
+            <div className={`flex items-center ${isSidebarCollapsed ? 'flex-col gap-2' : 'gap-2'}`}>
+              {onBackToHub && (
+                <button
+                  type="button"
+                  onClick={onBackToHub}
+                  className={`flex-1 flex items-center ${
+                    isSidebarCollapsed ? 'w-full justify-center p-2' : 'gap-2 px-3 py-2'
+                  } rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition text-xs font-semibold cursor-pointer shadow-sm`}
+                  title="Back to Admin Hub"
+                >
+                  <ArrowLeft className="w-4 h-4 text-amber-400 shrink-0" />
+                  {!isSidebarCollapsed && <span>← Back to Admin Hub</span>}
+                </button>
+              )}
+
+              {/* Sidebar Collapse/Expand Toggle Button */}
               <button
                 type="button"
-                onClick={onBackToHub}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition text-xs font-semibold cursor-pointer shadow-sm"
+                onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+                className={`hidden lg:flex items-center justify-center rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white transition cursor-pointer shadow-sm ${
+                  isSidebarCollapsed ? 'w-full p-2' : 'p-2 shrink-0'
+                }`}
+                title={isSidebarCollapsed ? 'Expand Sidebar (»)' : 'Collapse Sidebar («)'}
+                aria-label={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
               >
-                <ArrowLeft className="w-4 h-4 text-amber-400" />
-                <span>← Back to Admin Hub</span>
+                {isSidebarCollapsed ? (
+                  <ChevronRight className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <ChevronLeft className="w-4 h-4" />
+                )}
               </button>
-            )}
+            </div>
 
             {/* Brand Header */}
-            <div className="p-3 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-900 to-slate-950 border border-amber-500/20">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md">
-                  <FileSpreadsheet className="w-5 h-5" />
-                </div>
-                <div>
-                  <h1 className="text-sm font-black text-white tracking-wide">Purchase Hub</h1>
-                  <span className="text-[10px] font-semibold text-amber-400/90">Enterprise Inward & Sync</span>
+            {isSidebarCollapsed ? (
+              <div
+                className="w-10 h-10 mx-auto rounded-xl bg-gradient-to-br from-amber-500/20 via-slate-900 to-slate-950 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md"
+                title="Purchase Hub - Enterprise Inward & Sync"
+              >
+                <FileSpreadsheet className="w-5 h-5" />
+              </div>
+            ) : (
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-amber-500/10 via-slate-900 to-slate-950 border border-amber-500/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-md shrink-0">
+                    <FileSpreadsheet className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h1 className="text-sm font-black text-white tracking-wide">Purchase Hub</h1>
+                    <span className="text-[10px] font-semibold text-amber-400/90">Enterprise Inward & Sync</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Navigation Tabs */}
             <nav className="space-y-1 text-xs font-bold">
@@ -1412,22 +1448,33 @@ export default function PurchaseInwardHub({
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition text-left cursor-pointer ${
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                } rounded-xl transition text-left cursor-pointer relative ${
                   activeTab === 'new'
                     ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
+                title="Add New Purchase"
               >
-                <div className="flex items-center gap-2.5">
-                  <Plus className="w-4 h-4" />
-                  <span>📥 Add New Purchase</span>
+                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                  <Plus className="w-4 h-4 shrink-0" />
+                  {!isSidebarCollapsed && <span>📥 Add New Purchase</span>}
                 </div>
                 {billQueue.length > 0 && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                    activeTab === 'new' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400'
-                  }`}>
-                    {billQueue.length}
-                  </span>
+                  isSidebarCollapsed ? (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black flex items-center justify-center shadow">
+                      {billQueue.length}
+                    </span>
+                  ) : (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        activeTab === 'new' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400'
+                      }`}
+                    >
+                      {billQueue.length}
+                    </span>
+                  )
                 )}
               </button>
 
@@ -1438,38 +1485,54 @@ export default function PurchaseInwardHub({
                   setActiveTab('history');
                   loadHistory();
                 }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition text-left cursor-pointer ${
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                } rounded-xl transition text-left cursor-pointer relative ${
                   activeTab === 'history'
                     ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
+                title={`Invoices Ledger (${invoicesHistory.length})`}
               >
-                <div className="flex items-center gap-2.5">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>📜 Invoices Ledger</span>
+                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                  <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                  {!isSidebarCollapsed && <span>📜 Invoices Ledger</span>}
                 </div>
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeTab === 'history' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {invoicesHistory.length}
-                </span>
+                {isSidebarCollapsed ? (
+                  invoicesHistory.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-slate-800 text-slate-300 text-[9px] font-bold border border-slate-700 flex items-center justify-center">
+                      {invoicesHistory.length}
+                    </span>
+                  )
+                ) : (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      activeTab === 'history' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {invoicesHistory.length}
+                  </span>
+                )}
               </button>
 
               {/* Tab 3: Item & Stock Master */}
               <button
                 type="button"
                 onClick={() => setActiveTab('items')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition text-left cursor-pointer ${
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                } rounded-xl transition text-left cursor-pointer ${
                   activeTab === 'items'
                     ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
+                title="Item & Stock Master (Live)"
               >
-                <div className="flex items-center gap-2.5">
-                  <Package className="w-4 h-4" />
-                  <span>📦 Item & Stock Master</span>
+                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                  <Package className="w-4 h-4 shrink-0" />
+                  {!isSidebarCollapsed && <span>📦 Item & Stock Master</span>}
                 </div>
-                <span className="text-[10px] font-semibold text-emerald-400">Live</span>
+                {!isSidebarCollapsed && <span className="text-[10px] font-semibold text-emerald-400">Live</span>}
               </button>
 
               {/* Tab 4: Vendors Directory */}
@@ -1479,57 +1542,83 @@ export default function PurchaseInwardHub({
                   setActiveTab('vendors');
                   loadVendors();
                 }}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition text-left cursor-pointer ${
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                } rounded-xl transition text-left cursor-pointer relative ${
                   activeTab === 'vendors'
                     ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
+                title={`Vendors Directory (${vendorsList.length})`}
               >
-                <div className="flex items-center gap-2.5">
-                  <Building2 className="w-4 h-4" />
-                  <span>🏢 Vendors Directory</span>
+                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                  <Building2 className="w-4 h-4 shrink-0" />
+                  {!isSidebarCollapsed && <span>🏢 Vendors Directory</span>}
                 </div>
-                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeTab === 'vendors' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {vendorsList.length}
-                </span>
+                {isSidebarCollapsed ? (
+                  vendorsList.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-slate-800 text-slate-300 text-[9px] font-bold border border-slate-700 flex items-center justify-center">
+                      {vendorsList.length}
+                    </span>
+                  )
+                ) : (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      activeTab === 'vendors' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {vendorsList.length}
+                  </span>
+                )}
               </button>
 
               {/* Tab 5: Sale Return / Debit Note */}
               <button
                 type="button"
                 onClick={() => setActiveTab('debit_notes')}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition text-left cursor-pointer ${
+                className={`w-full flex items-center ${
+                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                } rounded-xl transition text-left cursor-pointer ${
                   activeTab === 'debit_notes'
                     ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
+                title="Sale Return / Debit Note"
               >
-                <div className="flex items-center gap-2.5">
-                  <RotateCcw className="w-4 h-4" />
-                  <span>🔄 Sale Return / Debit Note</span>
+                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                  <RotateCcw className="w-4 h-4 shrink-0" />
+                  {!isSidebarCollapsed && <span>🔄 Sale Return / Debit Note</span>}
                 </div>
               </button>
             </nav>
           </div>
 
           {/* Left Sidebar Footer */}
-          <div className="pt-4 border-t border-slate-900 text-[11px] text-slate-500 space-y-1 hidden lg:block">
-            <div className="flex items-center justify-between font-semibold text-slate-400">
-              <span>Jal Jeevan Enterprise</span>
-              <span className="font-mono text-emerald-400">v2.5</span>
+          {isSidebarCollapsed ? (
+            <div className="pt-2 border-t border-slate-900 text-center hidden lg:block" title="Jal Jeevan Enterprise v2.5">
+              <span className="font-mono text-[10px] text-emerald-400 font-bold">v2.5</span>
             </div>
-            <p className="text-[10px] text-slate-600">
-              Permanent archival, Groq Vision OCR & automatic stock syncing.
-            </p>
-          </div>
+          ) : (
+            <div className="pt-4 border-t border-slate-900 text-[11px] text-slate-500 space-y-1 hidden lg:block">
+              <div className="flex items-center justify-between font-semibold text-slate-400">
+                <span>Jal Jeevan Enterprise</span>
+                <span className="font-mono text-emerald-400">v2.5</span>
+              </div>
+              <p className="text-[10px] text-slate-600">
+                Permanent archival, Groq Vision OCR & automatic stock syncing.
+              </p>
+            </div>
+          )}
         </aside>
 
         {/* ======================================================== */}
         {/* RIGHT COLUMN: FLUID WORKSPACE AREA */}
         {/* ======================================================== */}
-        <main className="flex-1 min-w-0 p-3 sm:p-5 lg:p-6 overflow-y-auto">
+        <main
+          className={`flex-1 min-w-0 p-3 sm:p-5 lg:p-6 overflow-y-auto transition-all duration-200 ${
+            isSidebarCollapsed ? 'pl-2 lg:pl-4' : ''
+          }`}
+        >
           {/* ======================================================== */}
           {/* WORKSPACE TAB 1: ADD NEW PURCHASE (ACTIVE QUEUE & OCR) */}
           {/* ======================================================== */}
@@ -1999,7 +2088,7 @@ export default function PurchaseInwardHub({
                         <tr className="bg-slate-900 border-b border-slate-800 text-[11px] font-bold uppercase text-slate-400 tracking-wider">
                           <th className="py-2.5 px-2 min-w-[50px] text-center">#</th>
                           <th className="py-2.5 px-2.5 min-w-[150px]">Barcode / EAN</th>
-                          <th className="py-2.5 px-2.5 min-w-[200px]">Item Name</th>
+                          <th className="py-2.5 px-2.5 min-w-[280px] w-[320px]">Item Name</th>
                           <th className="py-2.5 px-2 min-w-[75px]">HSN</th>
                           <th className="py-2.5 px-2 min-w-[65px] text-right">Qty</th>
                           <th className="py-2.5 px-2 min-w-[75px]">Unit</th>
@@ -2062,12 +2151,13 @@ export default function PurchaseInwardHub({
                               </td>
 
                               {/* Item Name */}
-                              <td className="py-2 px-2.5 min-w-[200px]">
+                              <td className="py-2 px-2.5 min-w-[280px] w-[320px]">
                                 <input
                                   type="text"
                                   value={it.item_name}
                                   onChange={(e) => handleItemFieldChange(idx, 'item_name', e.target.value)}
                                   placeholder="Product Description"
+                                  title={it.item_name || it.name || it.description || ''}
                                   className="w-full h-8 px-2.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white font-medium text-xs focus:outline-none"
                                 />
                               </td>
