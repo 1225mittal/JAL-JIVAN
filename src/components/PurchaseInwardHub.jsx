@@ -55,7 +55,7 @@ import DebitNoteManager from './purchase/DebitNoteManager';
 import ItemsInventoryHub from './items/ItemsInventoryHub';
 import ErrorBoundary from './ErrorBoundary';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
-import dualOcrPipeline from '../lib/dualOcrPipeline';
+import groqVisionOcr from '../lib/groqVisionOcr';
 import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
 import {
   fetchPurchaseInvoices,
@@ -175,6 +175,8 @@ export function calculateLineItem(item, manualTaxable = false) {
     total_amount: lineTotal,
     price_after_gst: lineTotal,
     total: lineTotal,
+    gross,
+    gross_amount: gross,
     landing_cost: landedCost,
     landed_cost: landedCost,
     landed_cost_per_unit: landedCost,
@@ -757,6 +759,7 @@ export default function PurchaseInwardHub({
 
     setOcrError('');
 
+    const addedItems = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
@@ -773,7 +776,7 @@ export default function PurchaseInwardHub({
             attachedToPrevious: false,
             status: 'queued'
           };
-          setBillQueue((prev) => [...prev, newItem]);
+          addedItems.push(newItem);
         } else {
           await new Promise((resolve) => {
             const reader = new FileReader();
@@ -791,7 +794,7 @@ export default function PurchaseInwardHub({
                 attachedToPrevious: false,
                 status: 'queued'
               };
-              setBillQueue((prev) => [...prev, newItem]);
+              addedItems.push(newItem);
               resolve();
             };
             reader.readAsDataURL(file);
@@ -801,6 +804,12 @@ export default function PurchaseInwardHub({
         console.error('File conversion error:', err);
         setOcrError(`Failed to process document "${file.name}": ${err.message || 'Corrupted file'}`);
       }
+    }
+
+    if (addedItems.length > 0) {
+      setBillQueue((prev) => [...prev, ...addedItems]);
+      // Directly trigger Groq Vision LPU OCR on the first uploaded bill
+      processSingleBillOcr(addedItems[0]);
     }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -834,7 +843,7 @@ export default function PurchaseInwardHub({
     setCurrentQueueBillId(billItem.id);
     setIsProcessingOcr(true);
     setOcrError('');
-    setOcrStatusMessage(`Running Gemini Vision OCR on "${billItem.name || 'Selected Bill'}"...`);
+    setOcrStatusMessage(`Running Groq Vision LPU OCR on "${billItem.name || 'Selected Bill'}"...`);
 
     const imgPreview = billItem.dataUrl || billItem.image_url;
     setBillPreviewUrl(imgPreview);
@@ -842,7 +851,7 @@ export default function PurchaseInwardHub({
     try {
       let base64 = billItem.base64;
       if (!base64 && (billItem.image_url || billItem.dataUrl)) {
-        setOcrStatusMessage('Fetching full-resolution bill image for Vision OCR...');
+        setOcrStatusMessage('Fetching full-resolution bill image for Groq Vision OCR...');
         base64 = await getBase64FromUrl(billItem.image_url || billItem.dataUrl);
       }
 
@@ -851,9 +860,9 @@ export default function PurchaseInwardHub({
       }
 
       setBillBase64(base64);
-      setOcrStatusMessage('Extracting invoice header & line items via Gemini Vision...');
+      setOcrStatusMessage('Extracting invoice header & line items via Groq Vision LPU...');
 
-      const parsed = await dualOcrPipeline.processBill(base64, {
+      const parsed = await groqVisionOcr.processBill(base64, {
         mimeType: billItem.mimeType || 'image/jpeg'
       });
       setRawOcrData(parsed);
@@ -1021,14 +1030,14 @@ export default function PurchaseInwardHub({
         (prev || []).map((b) => (b.id === billItem.id ? { ...b, extracted: true } : b))
       );
 
-      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Gemini Vision!`, 'success');
+      showToast(`⚡ Bill "${billItem.name || 'Mobile Snap'}" extracted successfully via Groq Vision LPU OCR!`, 'success');
 
       setTimeout(() => {
         const reviewEl = document.getElementById('inward-bill-review-section');
         if (reviewEl) reviewEl.scrollIntoView({ behavior: 'smooth' });
       }, 150);
     } catch (err) {
-      console.error('Ensemble OCR failure:', err);
+      console.error('Groq Vision OCR failure:', err);
       setOcrError(err.message || 'Failed to extract text from bill. You can still input details manually.');
     } finally {
       setIsProcessingOcr(false);
@@ -1969,7 +1978,7 @@ export default function PurchaseInwardHub({
                       </span>
                     </div>
                     <span className="text-[11px] text-slate-400 hidden sm:inline">
-                      Process each bill card separately through Ensemble OCR (Gemini + Groq)
+                      Process each bill card separately through Groq Vision LPU OCR
                     </span>
                   </div>
 
@@ -2099,14 +2108,14 @@ export default function PurchaseInwardHub({
                     </div>
                   )}
 
-                  {/* Verified by Ensemble Engine Badge */}
+                  {/* Powered by Groq Vision LPU OCR Badge */}
                   <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 font-medium text-[11px] shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span>Verified by Ensemble Engine (Gemini + Groq Consensus)</span>
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-950/40 border border-orange-500/30 text-orange-400 font-medium text-[11px] shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                      <span>Powered by Groq Vision LPU OCR</span>
                     </div>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      Dual Vision AI • Math Variance Zero • Disambiguation
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      Ultra-Fast LPU Vision • Pure Raw Extraction • JavaScript Math Engine
                     </span>
                   </div>
                 </div>

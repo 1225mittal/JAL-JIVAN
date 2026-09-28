@@ -1,12 +1,13 @@
 /**
- * Direct Multimodal OCR Extraction (Google Gemini Vision Primary & Groq Vision)
- * Re-exports clean, robust extraction methods from dualOcrPipeline.js
+ * Direct Groq Vision OCR Extraction
+ * Re-exports clean, robust extraction methods from groqVisionOcr.js
  */
 
 export {
-  INDIAN_GST_OCR_PROMPT,
-  callGeminiVision,
+  GROQ_VISION_PROMPT,
+  GROQ_VISION_PROMPT as INDIAN_GST_OCR_PROMPT,
   callGroqVision,
+  callGeminiVision,
   processBill,
   runDualOcrPipeline,
   safeParseJsonResponse,
@@ -16,8 +17,9 @@ export {
   isBuyerPattern,
   cleanVendorName,
   isValidGstin,
-  sanitizeItemHsnAndBarcode
-} from './dualOcrPipeline.js';
+  sanitizeItemHsnAndBarcode,
+  normalizeIndianDate
+} from './groqVisionOcr.js';
 
-import dualOcrPipeline from './dualOcrPipeline.js';
-export default dualOcrPipeline;
+import groqVisionOcr from './groqVisionOcr.js';
+export default groqVisionOcr;
