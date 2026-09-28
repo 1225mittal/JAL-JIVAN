@@ -32,6 +32,7 @@ import {
   bulkDeleteInventoryItems,
   bulkUpdateInventoryCategory
 } from '../../lib/supabase';
+import useRealtimeSubscription from '../../hooks/useRealtimeSubscription';
 import BarcodeScannerModal from '../BarcodeScannerModal';
 
 /**
@@ -214,6 +215,38 @@ export default function ItemsInventoryHub({
   useEffect(() => {
     loadData();
   }, []);
+
+  // Live Supabase Realtime subscription across inventory and stock counts
+  useRealtimeSubscription({
+    table: ['purchase_items', 'inventory_items', 'purchase_invoices'],
+    setData: setRawPurchasedItems,
+    prepend: true,
+    onInsert: (newRecord) => {
+      loadData();
+    },
+    onUpdate: (updatedRecord) => {
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === updatedRecord.id
+            ? {
+                ...it,
+                ...updatedRecord,
+                quantity: Number(updatedRecord.quantity ?? updatedRecord.stock_qty ?? it.quantity),
+                stock_qty: Number(updatedRecord.quantity ?? updatedRecord.stock_qty ?? it.stock_qty)
+              }
+            : it
+        )
+      );
+      loadData();
+    },
+    onDelete: (deletedRecord) => {
+      const delId = deletedRecord?.id;
+      if (delId) {
+        setItems((prev) => prev.filter((it) => it.id !== delId));
+      }
+      loadData();
+    }
+  });
 
   // Deduplicate / Group Display
   const displayedItems = useMemo(() => {

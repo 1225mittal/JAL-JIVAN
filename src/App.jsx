@@ -15,6 +15,7 @@ import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
 import Toast from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
+import useRealtimeSubscription from './hooks/useRealtimeSubscription';
 import {
   fetchDrivers,
   addDriver,
@@ -329,6 +330,16 @@ export default function App() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Live Supabase Realtime subscription for Delivery & Dispatch Console
+  useRealtimeSubscription({
+    table: ['orders', 'deliveries', 'settlements'],
+    setData: setOrders,
+    prepend: true,
+    onChange: () => {
+      syncAllData();
+    }
+  });
 
   // Realtime multi-phone synchronization
   useEffect(() => {

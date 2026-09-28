@@ -56,6 +56,7 @@ import ItemsInventoryHub from './items/ItemsInventoryHub';
 import ErrorBoundary from './ErrorBoundary';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
 import dualOcrPipeline from '../lib/dualOcrPipeline';
+import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
 import {
   fetchPurchaseInvoices,
   savePurchaseInvoice,
@@ -149,10 +150,11 @@ export function calculateLineItem(item, manualTaxable = false) {
 
 export default function PurchaseInwardHub({
   onBackToHub,
-  showToast = () => {}
+  showToast = () => {},
+  initialTab = 'new'
 }) {
   // Navigation: 'new' | 'history' | 'vendors' | 'debit_notes' | 'items'
-  const [activeTab, setActiveTab] = useState('new');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Ledger / Invoices History State
@@ -163,6 +165,106 @@ export default function PurchaseInwardHub({
 
   // Side-by-Side Document & Ledger Drawer Modal State
   const [selectedLedgerInvoice, setSelectedLedgerInvoice] = useState(null);
+
+  // Live Realtime Subscriptions for purchase_invoices and purchase_items
+  useRealtimeSubscription({
+    table: ['purchase_invoices', 'purchase_items'],
+    onInsert: (newRecord, { table }) => {
+      if (table === 'purchase_invoices') {
+        setInvoicesHistory((prev) => {
+          if (prev.some((inv) => inv.id === newRecord.id)) return prev;
+          return [newRecord, ...prev];
+        });
+        loadHistory();
+      } else if (table === 'purchase_items') {
+        const invId = newRecord.purchase_invoice_id || newRecord.invoice_id;
+        setInvoicesHistory((prev) =>
+          prev.map((inv) => {
+            if (inv.id === invId) {
+              const curItems = inv.purchase_items || inv.items || [];
+              const exists = curItems.some((it) => it.id === newRecord.id);
+              return {
+                ...inv,
+                purchase_items: exists
+                  ? curItems.map((it) => (it.id === newRecord.id ? { ...it, ...newRecord } : it))
+                  : [newRecord, ...curItems]
+              };
+            }
+            return inv;
+          })
+        );
+        setSelectedLedgerInvoice((prev) => {
+          if (!prev || prev.id !== invId) return prev;
+          const curItems = prev.purchase_items || prev.items || [];
+          const exists = curItems.some((it) => it.id === newRecord.id);
+          return {
+            ...prev,
+            purchase_items: exists
+              ? curItems.map((it) => (it.id === newRecord.id ? { ...it, ...newRecord } : it))
+              : [newRecord, ...curItems]
+          };
+        });
+      }
+    },
+    onUpdate: (updatedRecord, { table }) => {
+      if (table === 'purchase_invoices') {
+        setInvoicesHistory((prev) =>
+          prev.map((inv) => (inv.id === updatedRecord.id ? { ...inv, ...updatedRecord } : inv))
+        );
+        setSelectedLedgerInvoice((prev) =>
+          prev?.id === updatedRecord.id ? { ...prev, ...updatedRecord } : prev
+        );
+      } else if (table === 'purchase_items') {
+        const invId = updatedRecord.purchase_invoice_id || updatedRecord.invoice_id;
+        setInvoicesHistory((prev) =>
+          prev.map((inv) => {
+            if (inv.id === invId) {
+              const curItems = inv.purchase_items || inv.items || [];
+              return {
+                ...inv,
+                purchase_items: curItems.map((it) => (it.id === updatedRecord.id ? { ...it, ...updatedRecord } : it))
+              };
+            }
+            return inv;
+          })
+        );
+        setSelectedLedgerInvoice((prev) => {
+          if (!prev || prev.id !== invId) return prev;
+          const curItems = prev.purchase_items || prev.items || [];
+          return {
+            ...prev,
+            purchase_items: curItems.map((it) => (it.id === updatedRecord.id ? { ...it, ...updatedRecord } : it))
+          };
+        });
+      }
+    },
+    onDelete: (deletedRecord, { table }) => {
+      const delId = deletedRecord?.id;
+      if (!delId) return;
+      if (table === 'purchase_invoices') {
+        setInvoicesHistory((prev) => prev.filter((inv) => inv.id !== delId));
+        setSelectedLedgerInvoice((prev) => (prev?.id === delId ? null : prev));
+      } else if (table === 'purchase_items') {
+        setInvoicesHistory((prev) =>
+          prev.map((inv) => {
+            const curItems = inv.purchase_items || inv.items || [];
+            return {
+              ...inv,
+              purchase_items: curItems.filter((it) => it.id !== delId)
+            };
+          })
+        );
+        setSelectedLedgerInvoice((prev) => {
+          if (!prev) return prev;
+          const curItems = prev.purchase_items || prev.items || [];
+          return {
+            ...prev,
+            purchase_items: curItems.filter((it) => it.id !== delId)
+          };
+        });
+      }
+    }
+  });
   const [ledgerDocZoom, setLedgerDocZoom] = useState(1);
   const [ledgerDocRotation, setLedgerDocRotation] = useState(0);
   const [isDocPanelCollapsed, setIsDocPanelCollapsed] = useState(false);

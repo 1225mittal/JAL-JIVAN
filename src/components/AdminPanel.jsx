@@ -55,6 +55,7 @@ import {
   updateSavedAddress,
   deleteSavedAddress
 } from '../lib/supabase';
+import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
 import { isDriverOnline, formatLastSeen, parseUtcTimestamp, calculateRiderMovementStatus } from '../lib/geoUtils';
 import AddressBook, { AddressDetailModal, aggregateAddressesFromOrders } from './AddressBook';
 import LiveFleetTracker from './LiveFleetTracker';
@@ -530,6 +531,14 @@ export function AdminPanel({
       }
     };
   }, [filterRealRiders]);
+
+  // Live Realtime listener for Delivery & Dispatch Console: orders, deliveries, and settlements
+  useRealtimeSubscription({
+    table: ['orders', 'deliveries', 'settlements'],
+    onChange: () => {
+      onRefresh?.();
+    }
+  });
 
   const handleSaveRewardSettings = async (e) => {
     e?.preventDefault();

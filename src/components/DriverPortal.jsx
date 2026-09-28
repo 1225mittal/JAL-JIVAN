@@ -40,6 +40,7 @@ import {
 import ProofOfDeliveryModal from './ProofOfDeliveryModal';
 import SlipViewerModal from './SlipViewerModal';
 import LiveExpiryScanner from './LiveExpiryScanner';
+import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
 import {
   supabase,
   driverLogin,
@@ -483,43 +484,35 @@ export default function DriverPortal({
     }
   }, []);
 
-  // Direct Supabase Realtime channel subscription for instant pool & order updates
   useEffect(() => {
     fetchOrders(); // Initial fetch
+  }, [fetchOrders]);
 
-    const poolChannel = supabase
-      .channel('driver-pool-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          console.log('Realtime order change detected:', payload);
-          // Instantly refresh pool and active orders
-          fetchOrders();
-
-          // Sound "toing" chime, vibration, and push notification for alerts
-          if (payload.eventType === 'INSERT') {
-            playNewOrderSound();
-            triggerOrderAlert(payload.new);
-          } else if (
-            payload.eventType === 'UPDATE' &&
-            currentDriver &&
-            payload.new?.assigned_driver_id === currentDriver.id &&
-            payload.old?.assigned_driver_id !== currentDriver.id
-          ) {
-            playNewOrderSound();
-            triggerOrderAlert(payload.new);
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
-
-    return () => {
-      supabase.removeChannel(poolChannel);
-    };
-  }, [fetchOrders, triggerOrderAlert, currentDriver]);
+  // Live Realtime subscription for Delivery & Dispatch orders, deliveries, and settlements
+  useRealtimeSubscription({
+    table: ['orders', 'deliveries', 'settlements'],
+    setData: setOrdersList,
+    prepend: true,
+    onInsert: (newOrder) => {
+      playNewOrderSound();
+      triggerOrderAlert(newOrder);
+      fetchOrders();
+    },
+    onUpdate: (updatedOrder, { payload }) => {
+      if (
+        currentDriver &&
+        updatedOrder?.assigned_driver_id === currentDriver.id &&
+        payload?.old?.assigned_driver_id !== currentDriver.id
+      ) {
+        playNewOrderSound();
+        triggerOrderAlert(updatedOrder);
+      }
+      fetchOrders();
+    },
+    onDelete: () => {
+      fetchOrders();
+    }
+  });
 
   // Driver Live Online Heartbeat (every 30 seconds & offline on unload)
   useEffect(() => {

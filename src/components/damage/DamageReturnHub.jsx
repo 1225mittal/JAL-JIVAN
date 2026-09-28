@@ -39,6 +39,7 @@ import {
   fetchDistributors,
   supabase
 } from '../../lib/supabase';
+import useRealtimeSubscription from '../../hooks/useRealtimeSubscription';
 import {
   isClaimWindowActive,
   formatClaimWindowBadge
@@ -99,37 +100,27 @@ export default function DamageReturnHub({ onBackToHub, drivers = [] }) {
 
   useEffect(() => {
     loadData();
-
-    // Supabase Realtime channel subscription
-    let channel = null;
-    if (supabase) {
-      try {
-        channel = supabase
-          .channel('damage-expiry-realtime')
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'damage_expiry_items' },
-            () => {
-              loadData();
-            }
-          )
-          .on(
-            'postgres_changes',
-            { event: '*', schema: 'public', table: 'distributors' },
-            () => {
-              loadData();
-            }
-          )
-          .subscribe();
-      } catch (e) {
-        console.warn('Realtime subscription notice for damages:', e);
-      }
-    }
-
-    return () => {
-      if (channel) supabase.removeChannel(channel);
-    };
   }, []);
+
+  // Live Supabase Realtime subscription on damage_expiry_items, product_damages, and distributors
+  useRealtimeSubscription({
+    table: ['damage_expiry_items', 'product_damages', 'distributors'],
+    setData: setItems,
+    prepend: true,
+    onInsert: () => {
+      loadData();
+    },
+    onUpdate: () => {
+      loadData();
+    },
+    onDelete: (deletedRecord) => {
+      const delId = deletedRecord?.id;
+      if (delId) {
+        setItems((prev) => prev.filter((it) => it.id !== delId));
+      }
+      loadData();
+    }
+  });
 
   // Filtered Items
   const todayDate = new Date().getDate();

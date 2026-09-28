@@ -33,6 +33,7 @@ import {
   supabase,
   isSupabaseConfigured
 } from '../lib/supabase';
+import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
 
 const COMMON_ITEMS = [
   { name: '20L RO Purified Water Jar', defaultValue: 150 },
@@ -112,33 +113,20 @@ export default function DamageManagement({
     loadDamages();
   }, []);
 
-  // Supabase Real-Time subscription on product_damages table
-  useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
-
-    let channel = null;
-    try {
-      channel = supabase
-        .channel('public:product_damages_realtime')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'product_damages' },
-          (payload) => {
-            console.log('Realtime damage change detected:', payload.eventType);
-            loadDamages();
-          }
-        )
-        .subscribe();
-    } catch (e) {
-      console.warn('Realtime subscription on product_damages failed:', e);
-    }
-
-    return () => {
-      if (channel) {
-        supabase.removeChannel(channel);
+  // Live Supabase Realtime subscription on product_damages and damage_expiry_items
+  useRealtimeSubscription({
+    table: ['product_damages', 'damage_expiry_items'],
+    setData: setDamages,
+    prepend: true,
+    onChange: () => {
+      if (onDamagesChange) {
+        setDamages((prev) => {
+          onDamagesChange(prev);
+          return prev;
+        });
       }
-    };
-  }, []);
+    }
+  });
 
   // Auto-fill estimated value on item select
   const handleItemSelect = (e) => {
