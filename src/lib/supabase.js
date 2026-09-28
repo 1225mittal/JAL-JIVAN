@@ -2649,14 +2649,31 @@ export function getLocalPurchaseInvoices() {
       const itemsList = rawItems.map((item) => {
         const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
         const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
-        const taxable = Number(item.taxable_amount || (qty * rate));
-        const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
+        const disc = Number(item.discount_amount || item.discount || 0);
+        const taxable = Number(item.taxable_amount || Math.max(0, (qty * rate) - disc));
+        const cgstPct = Number(item.cgst_pct || 0);
+        const sgstPct = Number(item.sgst_pct || 0);
+        const igstPct = Number(item.igst_pct || 0);
+        let gstPct = Number(item.gst_pct ?? item.gst_rate ?? 0);
+        if (gstPct === 0 && (cgstPct > 0 || sgstPct > 0)) {
+          gstPct = cgstPct + sgstPct;
+        } else if (gstPct === 0 && igstPct > 0) {
+          gstPct = igstPct;
+        }
+
         const cgst = Number(item.cgst_amount || 0);
         const sgst = Number(item.sgst_amount || 0);
         const cess = Number(item.cess_amount || item.cess || 0);
         const totalTaxes = (cgst + sgst > 0) ? (cgst + sgst + cess) : +(taxable * (gstPct / 100)).toFixed(2);
-        const landedUnit = Number(item.landed_cost || item.landed_cost_per_unit || ((taxable + totalTaxes) / qty));
+        const landedUnit = Number(item.landing_cost || item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (taxable + totalTaxes) / qty : 0));
         const lineTotal = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
+        const mrp = Number(item.mrp || 0);
+        let marginAmount = Number(item.margin_amount ?? 0);
+        let marginPercentage = Number(item.margin_percentage ?? item.margin_pct ?? 0);
+        if ((!marginAmount && !marginPercentage) && mrp > 0 && landedUnit > 0) {
+          marginAmount = +(mrp - landedUnit).toFixed(2);
+          marginPercentage = +((marginAmount / mrp) * 100).toFixed(2);
+        }
 
         return {
           ...item,
@@ -2668,12 +2685,18 @@ export function getLocalPurchaseInvoices() {
           taxable,
           gst_pct: gstPct,
           gst_rate: gstPct,
+          cgst_pct: cgstPct,
           cgst_amount: cgst || +(totalTaxes / 2).toFixed(2),
+          sgst_pct: sgstPct,
           sgst_amount: sgst || +(totalTaxes / 2).toFixed(2),
           cess_amount: cess,
           total_taxes: totalTaxes,
           landed_cost: landedUnit,
           landed_cost_per_unit: landedUnit,
+          landing_cost: landedUnit,
+          mrp,
+          margin_amount: marginAmount,
+          margin_percentage: marginPercentage,
           total: lineTotal,
           total_amount: lineTotal,
           price_after_gst: lineTotal
@@ -2716,14 +2739,31 @@ export async function fetchPurchaseInvoices() {
           const itemsList = rawItems.map((item) => {
             const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
             const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
-            const taxable = Number(item.taxable_amount || (qty * rate));
-            const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
+            const disc = Number(item.discount_amount || item.discount || 0);
+            const taxable = Number(item.taxable_amount || Math.max(0, (qty * rate) - disc));
+            const cgstPct = Number(item.cgst_pct || 0);
+            const sgstPct = Number(item.sgst_pct || 0);
+            const igstPct = Number(item.igst_pct || 0);
+            let gstPct = Number(item.gst_pct ?? item.gst_rate ?? 0);
+            if (gstPct === 0 && (cgstPct > 0 || sgstPct > 0)) {
+              gstPct = cgstPct + sgstPct;
+            } else if (gstPct === 0 && igstPct > 0) {
+              gstPct = igstPct;
+            }
+
             const cgst = Number(item.cgst_amount || 0);
             const sgst = Number(item.sgst_amount || 0);
             const cess = Number(item.cess_amount || item.cess || 0);
             const totalTaxes = (cgst + sgst > 0) ? (cgst + sgst + cess) : +(taxable * (gstPct / 100)).toFixed(2);
-            const landedUnit = Number(item.landed_cost || item.landed_cost_per_unit || ((taxable + totalTaxes) / qty));
+            const landedUnit = Number(item.landing_cost || item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (taxable + totalTaxes) / qty : 0));
             const lineTotal = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
+            const mrp = Number(item.mrp || 0);
+            let marginAmount = Number(item.margin_amount ?? 0);
+            let marginPercentage = Number(item.margin_percentage ?? item.margin_pct ?? 0);
+            if ((!marginAmount && !marginPercentage) && mrp > 0 && landedUnit > 0) {
+              marginAmount = +(mrp - landedUnit).toFixed(2);
+              marginPercentage = +((marginAmount / mrp) * 100).toFixed(2);
+            }
 
             return {
               ...item,
@@ -2735,12 +2775,18 @@ export async function fetchPurchaseInvoices() {
               taxable,
               gst_pct: gstPct,
               gst_rate: gstPct,
+              cgst_pct: cgstPct,
               cgst_amount: cgst || +(totalTaxes / 2).toFixed(2),
+              sgst_pct: sgstPct,
               sgst_amount: sgst || +(totalTaxes / 2).toFixed(2),
               cess_amount: cess,
               total_taxes: totalTaxes,
               landed_cost: landedUnit,
               landed_cost_per_unit: landedUnit,
+              landing_cost: landedUnit,
+              mrp,
+              margin_amount: marginAmount,
+              margin_percentage: marginPercentage,
               total: lineTotal,
               total_amount: lineTotal,
               price_after_gst: lineTotal
@@ -2865,16 +2911,32 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
     const purchasePrice = Number(item.purchase_price ?? item.price_before_gst ?? item.rate) || 0;
     const disc = Number(item.discount_amount ?? item.discount) || 0;
     const taxable = Number(item.taxable_amount ?? item.taxable) || Math.max(0, +(qty * purchasePrice - disc).toFixed(2));
-    const gstRate = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
-    const cgstPct = Number(item.cgst_pct ?? (gstRate / 2)) || 0;
-    const sgstPct = Number(item.sgst_pct ?? (gstRate / 2)) || 0;
+    const cgst = Number(item.cgst_pct || 0);
+    const sgst = Number(item.sgst_pct || 0);
+    const igst = Number(item.igst_pct || 0);
+    let gstRate = Number(item.gst_pct ?? item.gst_rate ?? item.gst_percentage ?? 0);
+    if (gstRate === 0 && (cgst > 0 || sgst > 0)) {
+      gstRate = +(cgst + sgst).toFixed(2);
+    } else if (gstRate === 0 && igst > 0) {
+      gstRate = igst;
+    }
+
+    const cgstPct = cgst > 0 ? cgst : +(gstRate / 2).toFixed(2);
+    const sgstPct = sgst > 0 ? sgst : +(gstRate / 2).toFixed(2);
     const cgstAmt = Number(item.cgst_amount) || +(((taxable * cgstPct) / 100)).toFixed(2);
     const sgstAmt = Number(item.sgst_amount) || +(((taxable * sgstPct) / 100)).toFixed(2);
     const cessAmt = Number(item.cess_amount ?? item.cess) || 0;
     const cessPct = Number(item.cess_pct) || 0;
     const totalTaxes = (cgstAmt + sgstAmt > 0) ? (cgstAmt + sgstAmt + cessAmt) : +((taxable * (gstRate / 100))).toFixed(2);
     const total = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
-    const landedCost = Number(item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (total / qty) : total));
+    const landedCost = Number(item.landing_cost || item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (total / qty) : total));
+    const mrp = Number(item.mrp) || 0;
+    let marginAmount = Number(item.margin_amount ?? 0);
+    let marginPercentage = Number(item.margin_percentage ?? item.margin_pct ?? 0);
+    if ((!marginAmount && !marginPercentage) && mrp > 0 && landedCost > 0) {
+      marginAmount = +(mrp - landedCost).toFixed(2);
+      marginPercentage = +((marginAmount / mrp) * 100).toFixed(2);
+    }
 
     return {
       purchase_invoice_id: savedInvoiceId,
@@ -2905,7 +2967,10 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       total: Number(total.toFixed(2)),
       landed_cost: Number(landedCost.toFixed(2)),
       landed_cost_per_unit: Number(landedCost.toFixed(2)),
-      mrp: Number(item.mrp) || 0
+      landing_cost: Number(landedCost.toFixed(2)),
+      mrp: mrp,
+      margin_amount: Number(marginAmount.toFixed(2)),
+      margin_percentage: Number(marginPercentage.toFixed(2))
     };
   });
 
@@ -2972,7 +3037,9 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
           hsn_code: item.hsn_code,
           quantity: item.quantity,
           purchase_price: item.purchase_price,
-          mrp: item.mrp
+          mrp: item.mrp,
+          margin_amount: item.margin_amount,
+          margin_percentage: item.margin_percentage
         }));
         const retryItems = await supabase
           .from('purchase_items')
@@ -4036,7 +4103,7 @@ export async function saveInventoryItem(item) {
     stock_qty: Number(item.stock_qty) || 0,
     min_stock_level: Number(item.min_stock_level) || 10,
     hsn_code: (item.hsn_code || '').toString().trim() || null,
-    gst_pct: Number(item.gst_pct) || 18,
+    gst_pct: Number(item.gst_pct ?? item.gst_rate ?? 0),
     unit: item.unit || 'PCS',
     updated_at: new Date().toISOString()
   };
@@ -4141,7 +4208,15 @@ export async function syncInventoryFromPurchaseItems(itemsData = []) {
     const inwardQty = Number(inwardItem.quantity) || 0;
     const purchaseRate = Number(inwardItem.purchase_price ?? inwardItem.price_before_gst) || 0;
     const mrp = Number(inwardItem.mrp) || 0;
-    const gstPct = Number(inwardItem.gst_pct ?? inwardItem.gst_rate) || 18;
+    const cgstPct = Number(inwardItem.cgst_pct || 0);
+    const sgstPct = Number(inwardItem.sgst_pct || 0);
+    const igstPct = Number(inwardItem.igst_pct || 0);
+    let gstPct = Number(inwardItem.gst_pct ?? inwardItem.gst_rate ?? 0);
+    if (gstPct === 0 && (cgstPct > 0 || sgstPct > 0)) {
+      gstPct = cgstPct + sgstPct;
+    } else if (gstPct === 0 && igstPct > 0) {
+      gstPct = igstPct;
+    }
     const hsn = (inwardItem.hsn_code || '').toString().trim();
     const unit = (inwardItem.unit || 'PCS').toString().trim();
 

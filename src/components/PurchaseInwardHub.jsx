@@ -83,7 +83,9 @@ export const PURCHASE_UNITS = ['PCS', 'KG', 'GM', 'LTR', 'ML', 'BAG', 'BOX', 'PA
  * 4. CGST = Line Taxable Base * (gst_pct / 2) / 100
  * 5. SGST = Line Taxable Base * (gst_pct / 2) / 100
  * 6. Line Total = Line Taxable Base + CGST + SGST + CESS
- * 7. Landed Cost Per Unit = Line Total / qty
+ * 7. Landing Cost (Net Unit Cost) = Line Total / qty
+ * 8. Margin ₹ = MRP - Landing Cost
+ * 9. Margin % = (Margin ₹ / MRP) * 100
  */
 export function calculateLineItem(item, manualTaxable = false) {
   const qty = Math.max(1, Number(item.quantity ?? item.qty) || 1);
@@ -104,10 +106,19 @@ export function calculateLineItem(item, manualTaxable = false) {
     ? Math.max(0, Number(item.taxable_amount) || 0)
     : Math.max(0, +(gross - discAmt).toFixed(2));
 
-  // 4 & 5. CGST and SGST
-  const gstPct = Number(item.gst_pct ?? item.gst_rate) || 0;
-  const cgstPct = +(gstPct / 2).toFixed(2);
-  const sgstPct = +(gstPct / 2).toFixed(2);
+  // 4 & 5. Enforce fallback summing: Total GST% = CGST% + SGST% (e.g. 2.5% + 2.5% = 5%)
+  const cgst = Number(item.cgst_pct || item.cgst || 0);
+  const sgst = Number(item.sgst_pct || item.sgst || 0);
+  const igst = Number(item.igst_pct || item.igst || 0);
+  let gstPct = Number(item.gst_percentage ?? item.gst_rate ?? item.gst_pct ?? 0);
+  if (gstPct === 0 && (cgst > 0 || sgst > 0)) {
+    gstPct = +(cgst + sgst).toFixed(2);
+  } else if (gstPct === 0 && igst > 0) {
+    gstPct = igst;
+  }
+
+  const cgstPct = cgst > 0 ? cgst : +(gstPct / 2).toFixed(2);
+  const sgstPct = sgst > 0 ? sgst : +(gstPct / 2).toFixed(2);
   const cgstAmt = +((taxable * (cgstPct / 100))).toFixed(2);
   const sgstAmt = +((taxable * (sgstPct / 100))).toFixed(2);
 
@@ -115,8 +126,13 @@ export function calculateLineItem(item, manualTaxable = false) {
   const cessAmt = Math.max(0, Number(item.cess_amount ?? item.cess) || 0);
   const lineTotal = +(taxable + cgstAmt + sgstAmt + cessAmt).toFixed(2);
 
-  // 7. Landed Cost Per Unit = Line Total / qty
+  // 7. Landing Cost (Net Unit Cost)
   const landedCost = qty > 0 ? +((lineTotal / qty)).toFixed(2) : lineTotal;
+
+  // 8. Margin (₹ and %)
+  const mrp = Number(item.mrp) || 0;
+  const marginAmount = +(mrp - landedCost).toFixed(2);
+  const marginPercentage = mrp > 0 ? +((marginAmount / mrp) * 100).toFixed(2) : 0;
 
   return {
     ...item,
@@ -133,19 +149,98 @@ export function calculateLineItem(item, manualTaxable = false) {
     taxable,
     gst_pct: gstPct,
     gst_rate: gstPct,
+    gst_percentage: gstPct,
     cgst_pct: cgstPct,
     cgst_amount: cgstAmt,
     sgst_pct: sgstPct,
     sgst_amount: sgstAmt,
+    igst_pct: igst,
     cess_pct: Number(item.cess_pct) || 0,
     cess_amount: cessAmt,
     cess: cessAmt,
     total_amount: lineTotal,
     price_after_gst: lineTotal,
     total: lineTotal,
+    landing_cost: landedCost,
     landed_cost: landedCost,
-    landed_cost_per_unit: landedCost
+    landed_cost_per_unit: landedCost,
+    mrp,
+    margin_amount: marginAmount,
+    margin_percentage: marginPercentage,
+    margin_pct: marginPercentage
   };
+}
+
+/**
+ * Standardized Margin Badge Renderer
+ * - Green badge if Margin > 15% (e.g. +₹18.50 (22.5%))
+ * - Yellow badge if Margin between 5% and 15%
+ * - Red alert pill if Landing Cost > MRP (Negative margin/Loss warning)
+ */
+export function renderMarginBadge(mrp, landingCost, marginAmount, marginPercentage) {
+  const m = Number(mrp) || 0;
+  const lc = Number(landingCost) || 0;
+  const diff = marginAmount !== undefined && !isNaN(Number(marginAmount))
+    ? Number(marginAmount)
+    : +(m - lc).toFixed(2);
+  const pct = marginPercentage !== undefined && !isNaN(Number(marginPercentage))
+    ? Number(marginPercentage)
+    : (m > 0 ? +((diff / m) * 100).toFixed(1) : 0);
+
+  if (m <= 0) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono text-[10px]" title="Set MRP to calculate margin">
+        Set MRP
+      </span>
+    );
+  }
+
+  // Red alert pill if Landing Cost > MRP (Negative margin/Loss warning)
+  if (lc > m || diff < 0) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold font-mono text-[11px] shadow-sm animate-pulse"
+        title={`Warning: Loss of ₹${Math.abs(diff).toFixed(2)} per unit! Landing cost exceeds MRP.`}
+      >
+        <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+        <span>Loss: -₹{Math.abs(diff).toFixed(2)} ({pct.toFixed(1)}%)</span>
+      </span>
+    );
+  }
+
+  // Green badge if Margin > 15%
+  if (pct > 15) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/35 text-emerald-300 font-bold font-mono text-[11px] shadow-sm"
+        title={`Healthy Profit Margin: ₹${diff.toFixed(2)} (${pct.toFixed(1)}%)`}
+      >
+        +₹{diff.toFixed(2)} ({pct.toFixed(1)}%)
+      </span>
+    );
+  }
+
+  // Yellow badge if Margin between 5% and 15%
+  if (pct >= 5) {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/35 text-amber-300 font-bold font-mono text-[11px] shadow-sm"
+        title={`Moderate Margin: ₹${diff.toFixed(2)} (${pct.toFixed(1)}%)`}
+      >
+        +₹{diff.toFixed(2)} ({pct.toFixed(1)}%)
+      </span>
+    );
+  }
+
+  // Low Margin (0% to 5%)
+  return (
+    <span
+      className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[11px] shadow-sm"
+      title={`Low Margin: ₹${diff.toFixed(2)} (${pct.toFixed(1)}%)`}
+    >
+      +₹{diff.toFixed(2)} ({pct.toFixed(1)}%)
+    </span>
+  );
 }
 
 export default function PurchaseInwardHub({
@@ -851,6 +946,17 @@ export default function PurchaseInwardHub({
             // Discard barcode if it matches HSN or is less than 12 digits
             const cleanBarcode = (rawBarcode && rawBarcode !== hsnCode && rawBarcode.length >= 12) ? rawBarcode : '';
 
+            // Split tax columns & GST extraction logic (Stop defaulting to 18%)
+            const cgst = Number(it.cgst_pct || it.cgst || 0);
+            const sgst = Number(it.sgst_pct || it.sgst || 0);
+            const igst = Number(it.igst_pct || it.igst || 0);
+            let totalGst = Number(it.gst_pct ?? it.gst_percentage ?? it.gst_rate ?? 0);
+            if (totalGst === 0 && (cgst > 0 || sgst > 0)) {
+              totalGst = +(cgst + sgst).toFixed(2);
+            } else if (totalGst === 0 && igst > 0) {
+              totalGst = igst;
+            }
+
             const rawItem = {
               id: `temp_${Date.now()}_${idx}`,
               sn,
@@ -865,7 +971,12 @@ export default function PurchaseInwardHub({
               discount_pct: extractedDiscPct,
               discount_type: discType,
               discount_value: discVal,
-              gst_pct: Number(it.gst_pct ?? it.gst_rate) || 18,
+              gst_pct: totalGst,
+              gst_rate: totalGst,
+              gst_percentage: totalGst,
+              cgst_pct: cgst,
+              sgst_pct: sgst,
+              igst_pct: igst,
               cess_amount: Number(it.cess_amount ?? it.cess) || 0
             };
 
@@ -886,7 +997,7 @@ export default function PurchaseInwardHub({
             rate: 70,
             discount_type: '%',
             discount_value: 0,
-            gst_pct: 18,
+            gst_pct: 0,
             cess_amount: 0
           })
         ]);
@@ -938,7 +1049,7 @@ export default function PurchaseInwardHub({
         rate: 0,
         discount_type: '%',
         discount_value: 0,
-        gst_pct: 18,
+        gst_pct: 0,
         cess_amount: 0
       })
     ]);
@@ -1269,16 +1380,29 @@ export default function PurchaseInwardHub({
         const qty = Math.max(1, Number(it.quantity ?? it.qty) || 1);
         const rate = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
         const disc = Number(it.discount_amount ?? it.discount) || 0;
-        const taxable = Number(it.taxable_amount) || Math.max(0, +((qty * rate) - disc).toFixed(2));
-        const gstRate = Number(it.gst_pct ?? it.gst_rate ?? ((Number(it.cgst_pct || 0) + Number(it.sgst_pct || 0)))) || 5;
-        const cgstPct = Number(it.cgst_pct) || (gstRate / 2);
-        const sgstPct = Number(it.sgst_pct) || (gstRate / 2);
+        const taxable = Number(it.taxable_amount ?? it.taxable) || Math.max(0, (qty * rate) - disc);
+        const cgst = Number(it.cgst_pct || 0);
+        const sgst = Number(it.sgst_pct || 0);
+        const igst = Number(it.igst_pct || 0);
+        let gstRate = Number(it.gst_pct ?? it.gst_rate ?? it.gst_percentage ?? 0);
+        if (gstRate === 0 && (cgst > 0 || sgst > 0)) {
+          gstRate = +(cgst + sgst).toFixed(2);
+        } else if (gstRate === 0 && igst > 0) {
+          gstRate = igst;
+        }
+
+        const cgstPct = cgst > 0 ? cgst : +(gstRate / 2).toFixed(2);
+        const sgstPct = sgst > 0 ? sgst : +(gstRate / 2).toFixed(2);
         const cgstAmt = Number(it.cgst_amount) || +((taxable * (cgstPct / 100))).toFixed(2);
         const sgstAmt = Number(it.sgst_amount) || +((taxable * (sgstPct / 100))).toFixed(2);
         const cessAmt = Number(it.cess_amount ?? it.cess) || 0;
         const cessPct = Number(it.cess_pct) || 0;
         const total = Number(it.total_amount ?? it.price_after_gst ?? it.total) || +((taxable + cgstAmt + sgstAmt + cessAmt)).toFixed(2);
         const landedCost = qty > 0 ? +((total / qty)).toFixed(2) : total;
+
+        const mrp = Number(it.mrp) || 0;
+        const marginAmount = +(mrp - landedCost).toFixed(2);
+        const marginPercentage = mrp > 0 ? +((marginAmount / mrp) * 100).toFixed(2) : 0;
 
         return {
           ...it,
@@ -1299,19 +1423,25 @@ export default function PurchaseInwardHub({
           taxable: taxable,
           gst_pct: gstRate,
           gst_rate: gstRate,
+          gst_percentage: gstRate,
           cgst_pct: cgstPct,
           cgst_amount: cgstAmt,
           sgst_pct: sgstPct,
           sgst_amount: sgstAmt,
+          igst_pct: igst,
           cess_pct: cessPct,
           cess_amount: cessAmt,
           cess: cessAmt,
           price_after_gst: total,
           total_amount: total,
           total: total,
+          landing_cost: landedCost,
           landed_cost: landedCost,
           landed_cost_per_unit: landedCost,
-          mrp: Number(it.mrp) || 0
+          mrp,
+          margin_amount: marginAmount,
+          margin_percentage: marginPercentage,
+          margin_pct: marginPercentage
         };
       });
 
@@ -2202,7 +2332,8 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2 min-w-[80px] text-right">CGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">SGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">CESS (₹)</th>
-                          <th className="py-2.5 px-2 min-w-[110px] text-right">Cost/Unit (Tax Incl.)</th>
+                          <th className="py-2.5 px-2 min-w-[105px] text-right">Landing Cost</th>
+                          <th className="py-2.5 px-2.5 min-w-[145px] text-right">Margin (₹ & %)</th>
                           <th className="py-2.5 px-2 min-w-[95px] text-right">Total (₹)</th>
                           <th className="py-2.5 px-2 min-w-[45px] text-center">Action</th>
                         </tr>
@@ -2365,7 +2496,7 @@ export default function PurchaseInwardHub({
                               {/* GST % */}
                               <td className="py-2 px-2 min-w-[75px]">
                                 <select
-                                  value={it.gst_pct ?? it.gst_rate ?? 18}
+                                  value={it.gst_pct ?? it.gst_rate ?? 0}
                                   onChange={(e) => handleItemFieldChange(idx, 'gst_pct', e.target.value)}
                                   className="w-full h-8 px-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-xs focus:outline-none cursor-pointer"
                                 >
@@ -2398,20 +2529,26 @@ export default function PurchaseInwardHub({
                                 />
                               </td>
 
-                              {/* Effective Landed Cost / Unit (After Tax) */}
-                              <td className="py-2 px-2 min-w-[110px] text-right font-mono">
+                              {/* Landing Cost (Net Unit Cost) */}
+                              <td className="py-2 px-2 min-w-[105px] text-right font-mono">
                                 {(() => {
-                                  const rowQty = Number(it.quantity) || 1;
-                                  const rowTotal = Number(it.total_amount ?? it.price_after_gst ?? 0);
-                                  const effectiveCost = rowQty > 0 ? (rowTotal / rowQty) : rowTotal;
+                                  const lc = Number(it.landing_cost ?? it.landed_cost ?? (it.quantity > 0 ? (it.total_amount ?? it.price_after_gst ?? 0) / it.quantity : 0));
                                   return (
                                     <span
-                                      className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] shadow-sm"
-                                      title="Effective Landed Cost per unit including all taxes & cess"
+                                      className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] shadow-sm font-mono"
+                                      title="Landing Cost per unit = Net Purchase Price + GST + Cess"
                                     >
-                                      ₹{effectiveCost.toFixed(2)}
+                                      ₹{lc.toFixed(2)}
                                     </span>
                                   );
+                                })()}
+                              </td>
+
+                              {/* Margin (₹ and %) */}
+                              <td className="py-2 px-2.5 min-w-[145px] text-right font-mono">
+                                {(() => {
+                                  const lc = Number(it.landing_cost ?? it.landed_cost ?? (it.quantity > 0 ? (it.total_amount ?? it.price_after_gst ?? 0) / it.quantity : 0));
+                                  return renderMarginBadge(it.mrp, lc, it.margin_amount, it.margin_percentage);
                                 })()}
                               </td>
 
@@ -2437,7 +2574,7 @@ export default function PurchaseInwardHub({
 
                         {items.length === 0 && (
                           <tr>
-                            <td colSpan="18" className="py-8 text-center text-slate-500">
+                            <td colSpan="19" className="py-8 text-center text-slate-500">
                               No line items entered yet. Click "Add Line Item" or click "⚡ Process This Bill" from the queue above.
                             </td>
                           </tr>
@@ -2497,8 +2634,11 @@ export default function PurchaseInwardHub({
                             ₹{tableColumnTotals.cessSum.toFixed(2)}
                           </td>
 
-                          {/* Cost/Unit Column */}
-                          <td className="py-2.5 px-2 min-w-[110px] text-right font-mono text-slate-500">—</td>
+                          {/* Landing Cost Column */}
+                          <td className="py-2.5 px-2 min-w-[105px] text-right font-mono text-slate-500">—</td>
+
+                          {/* Margin Column */}
+                          <td className="py-2.5 px-2.5 min-w-[145px] text-right font-mono text-slate-500">—</td>
 
                           {/* Total Column */}
                           <td className="py-2.5 px-2 min-w-[95px] text-right font-mono font-black text-emerald-400 text-sm">
@@ -3103,7 +3243,8 @@ export default function PurchaseInwardHub({
                         <th className="py-2.5 px-2 text-right min-w-[85px]">Taxable</th>
                         <th className="py-2.5 px-2 text-right min-w-[65px]">GST %</th>
                         <th className="py-2.5 px-2 text-right min-w-[110px]">Taxes (CGST/SGST)</th>
-                        <th className="py-2.5 px-2 text-right min-w-[110px]">Landed Cost/Unit</th>
+                        <th className="py-2.5 px-2 text-right min-w-[110px]">Landing Cost/Unit</th>
+                        <th className="py-2.5 px-2.5 text-right min-w-[145px]">Margin (₹ & %)</th>
                         <th className="py-2.5 px-3 text-right min-w-[95px]">Total</th>
                       </tr>
                     </thead>
@@ -3113,7 +3254,7 @@ export default function PurchaseInwardHub({
                         if (itemsList.length === 0) {
                           return (
                             <tr>
-                              <td colSpan={14} className="py-8 text-center text-slate-500">
+                              <td colSpan={15} className="py-8 text-center text-slate-500">
                                 No items found in this invoice entry.
                               </td>
                             </tr>
@@ -3128,14 +3269,31 @@ export default function PurchaseInwardHub({
                           const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
                           const disc = Number(item.discount_amount || item.discount || 0);
                           const taxable = Number(item.taxable_amount || Math.max(0, (qty * rate) - disc));
-                          const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
+                          const cgstPct = Number(item.cgst_pct || 0);
+                          const sgstPct = Number(item.sgst_pct || 0);
+                          const igstPct = Number(item.igst_pct || 0);
+                          let gstPct = Number(item.gst_pct ?? item.gst_rate ?? 0);
+                          if (gstPct === 0 && (cgstPct > 0 || sgstPct > 0)) {
+                            gstPct = cgstPct + sgstPct;
+                          } else if (gstPct === 0 && igstPct > 0) {
+                            gstPct = igstPct;
+                          }
+
                           const cgst = Number(item.cgst_amount || 0);
                           const sgst = Number(item.sgst_amount || 0);
                           const cess = Number(item.cess_amount || item.cess || 0);
                           const totalTaxes = (cgst + sgst > 0) ? (cgst + sgst + cess) : +(taxable * (gstPct / 100)).toFixed(2);
-                          const landedUnit = Number(item.landed_cost || item.landed_cost_per_unit || ((taxable + totalTaxes) / qty));
+                          const landedUnit = Number(item.landing_cost || item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (taxable + totalTaxes) / qty : 0));
                           const lineTotal = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
                           const displayRate = rate > 0 ? rate : (taxable > 0 && qty > 0 ? +(taxable / qty).toFixed(2) : 0);
+
+                          const mrp = Number(item.mrp || 0);
+                          let marginAmount = Number(item.margin_amount ?? 0);
+                          let marginPercentage = Number(item.margin_percentage ?? 0);
+                          if ((!marginAmount && !marginPercentage) && mrp > 0 && landedUnit > 0) {
+                            marginAmount = mrp - landedUnit;
+                            marginPercentage = (marginAmount / mrp) * 100;
+                          }
 
                           return (
                             <tr key={item.id || idx} className="hover:bg-slate-800/40 transition-colors">
@@ -3253,6 +3411,11 @@ export default function PurchaseInwardHub({
                                 </span>
                               </td>
 
+                              {/* Margin (₹ & %) */}
+                              <td className="py-2 px-2.5 text-right font-mono">
+                                {renderMarginBadge(mrp, landedUnit, marginAmount, marginPercentage)}
+                              </td>
+
                               {/* Total */}
                               <td className="py-2 px-3 text-right font-mono font-bold text-emerald-400">
                                 ₹{lineTotal.toFixed(2)}
@@ -3279,7 +3442,15 @@ export default function PurchaseInwardHub({
                         const r = Number(it.rate || it.purchase_price || it.price_before_gst || 0);
                         const d = Number(it.discount_amount || it.discount || 0);
                         const t = Number(it.taxable_amount || Math.max(0, (q * r) - d));
-                        const g = Number(it.gst_pct || it.gst_rate || ((Number(it.cgst_pct || 0) + Number(it.sgst_pct || 0))) || 5);
+                        const cgstP = Number(it.cgst_pct || 0);
+                        const sgstP = Number(it.sgst_pct || 0);
+                        const igstP = Number(it.igst_pct || 0);
+                        let g = Number(it.gst_pct ?? it.gst_rate ?? 0);
+                        if (g === 0 && (cgstP > 0 || sgstP > 0)) {
+                          g = cgstP + sgstP;
+                        } else if (g === 0 && igstP > 0) {
+                          g = igstP;
+                        }
                         const c = Number(it.cgst_amount || 0);
                         const s = Number(it.sgst_amount || 0);
                         const cs = Number(it.cess_amount || it.cess || 0);
@@ -3320,6 +3491,7 @@ export default function PurchaseInwardHub({
                               ₹{finalTaxes.toFixed(2)}
                             </td>
                             <td className="py-2.5 px-2 text-center text-slate-500">—</td>
+                            <td className="py-2.5 px-2.5 text-center text-slate-500">—</td>
                             <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400 text-sm">
                               ₹{finalGrandTot.toFixed(2)}
                             </td>

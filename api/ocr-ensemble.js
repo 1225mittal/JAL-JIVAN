@@ -66,7 +66,10 @@ export default async function handler(req, res) {
             unit: 'PCS',
             mrp: 50.00,
             rate: 36.43,
-            discount_pct: 0
+            discount_pct: 0,
+            cgst_pct: 2.5,
+            sgst_pct: 2.5,
+            gst_pct: 5
           },
           {
             name: 'CHANA MASALA 100G',
@@ -75,7 +78,10 @@ export default async function handler(req, res) {
             unit: 'PCS',
             mrp: 65.00,
             rate: 48.20,
-            discount_pct: 0
+            discount_pct: 0,
+            cgst_pct: 2.5,
+            sgst_pct: 2.5,
+            gst_pct: 5
           },
           {
             name: 'KASURI METHI 50G BOX',
@@ -84,7 +90,10 @@ export default async function handler(req, res) {
             unit: 'BOX',
             mrp: 45.00,
             rate: 34.00,
-            discount_pct: 0
+            discount_pct: 0,
+            cgst_pct: 2.5,
+            sgst_pct: 2.5,
+            gst_pct: 5
           },
           {
             name: 'GARAM MASALA 100G',
@@ -93,7 +102,10 @@ export default async function handler(req, res) {
             unit: 'PCS',
             mrp: 70.00,
             rate: 51.10,
-            discount_pct: 0
+            discount_pct: 0,
+            cgst_pct: 2.5,
+            sgst_pct: 2.5,
+            gst_pct: 5
           }
         ]
       });

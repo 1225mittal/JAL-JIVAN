@@ -336,7 +336,9 @@ CREATE TABLE IF NOT EXISTS public.purchase_items (
     gst_rate NUMERIC(5, 2) DEFAULT 0.00,
     cess NUMERIC(10, 2) DEFAULT 0.00,
     discount NUMERIC(10, 2) DEFAULT 0.00,
-    price_after_gst NUMERIC(10, 2) DEFAULT 0.00
+    price_after_gst NUMERIC(10, 2) DEFAULT 0.00,
+    margin_amount NUMERIC(10, 2) DEFAULT 0.00,
+    margin_percentage NUMERIC(5, 2) DEFAULT 0.00
 );
 
 ALTER TABLE public.purchase_invoices ENABLE ROW LEVEL SECURITY;
@@ -410,6 +412,8 @@ ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS sgst_amount NUMERIC(1
 ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cess_pct NUMERIC(5, 2) DEFAULT 0.00;
 ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS cess_amount NUMERIC(10, 2) DEFAULT 0.00;
 ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS margin_amount NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.purchase_items ADD COLUMN IF NOT EXISTS margin_percentage NUMERIC(5, 2) DEFAULT 0.00;
 
 -- 22. Inventory & Stock Master (inventory_items)
 CREATE TABLE IF NOT EXISTS public.inventory_items (

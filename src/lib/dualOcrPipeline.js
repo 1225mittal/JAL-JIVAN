@@ -20,7 +20,11 @@ Return ONLY valid JSON matching this schema:
       "unit": "PCS/NOS/BOX",
       "mrp": 0,
       "rate": 0,
-      "discount_pct": 0
+      "discount_pct": 0,
+      "gst_pct": 0,
+      "cgst_pct": 0,
+      "sgst_pct": 0,
+      "igst_pct": 0
     }
   ]
 }
@@ -28,6 +32,11 @@ Return ONLY valid JSON matching this schema:
 RULES:
 - Extract EVERY row sequentially from row 1 to the final row above the tax totals. Do not truncate.
 - For each row, read the discount percentage from 'Disc. %' or 'Disc' column as \`discount_pct\`. If none, 0.
+- GST EXTRACTION LOGIC:
+  * NEVER default to 18% unless 18% is explicitly printed on that exact item row.
+  * Read split tax columns and sum them: Total GST% = CGST% + SGST% (e.g. 2.5% + 2.5% = 5%, 6% + 6% = 12%, 9% + 9% = 18%, 14% + 14% = 28%).
+  * If interstate IGST% is printed (e.g. 5%, 12%, 18%), use that exact rate for \`gst_pct\` and \`igst_pct\`.
+  * If zero tax or exempted, set \`gst_pct\` to 0.
 - Do NOT calculate line totals or taxes in the JSON (the client will compute them).`;
 
 /**
@@ -175,6 +184,17 @@ export function normalizeParsedInvoice(parsed) {
     const mrp = Number(it.mrp) || +(rate * 1.25).toFixed(2);
     const discPct = Number(it.discount_pct || 0);
 
+    // Split tax columns & GST extraction logic (Stop defaulting to 18%)
+    const cgst = Number(it.cgst_pct || it.cgst_rate || it.cgst || 0);
+    const sgst = Number(it.sgst_pct || it.sgst_rate || it.sgst || 0);
+    const igst = Number(it.igst_pct || it.igst_rate || it.igst || 0);
+    let totalGst = Number(it.gst_pct ?? it.gst_percentage ?? it.gst_rate ?? 0);
+    if (totalGst === 0 && (cgst > 0 || sgst > 0)) {
+      totalGst = +(cgst + sgst).toFixed(2);
+    } else if (totalGst === 0 && igst > 0) {
+      totalGst = igst;
+    }
+
     const { hsn, barcode } = sanitizeItemHsnAndBarcode(rawHsn, it.barcode);
 
     return {
@@ -191,7 +211,13 @@ export function normalizeParsedInvoice(parsed) {
       rate,
       purchase_price: rate,
       price_before_gst: rate,
-      discount_pct: discPct
+      discount_pct: discPct,
+      gst_pct: totalGst,
+      gst_rate: totalGst,
+      gst_percentage: totalGst,
+      cgst_pct: cgst,
+      sgst_pct: sgst,
+      igst_pct: igst
     };
   });
 
