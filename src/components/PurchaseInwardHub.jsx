@@ -527,37 +527,19 @@ export default function PurchaseInwardHub({
   // Web Audio API chime for mobile snap notification
   const playNotificationChime = () => {
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const now = ctx.currentTime;
-
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.type = 'sine';
-      osc1.frequency.setValueAtTime(659.25, now);
-      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12);
-      gain1.gain.setValueAtTime(0.001, now);
-      gain1.gain.linearRampToValueAtTime(0.28, now + 0.03);
-      gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start(now);
-      osc1.stop(now + 0.45);
-
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'triangle';
-      osc2.frequency.setValueAtTime(1318.51, now + 0.1);
-      gain2.gain.setValueAtTime(0.001, now + 0.1);
-      gain2.gain.linearRampToValueAtTime(0.18, now + 0.13);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start(now + 0.1);
-      osc2.stop(now + 0.55);
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
     } catch (e) {
-      // Audio autoplay restrictions handled gracefully
+      console.log("Audio alert suppressed:", e);
     }
   };
 
@@ -648,8 +630,8 @@ export default function PurchaseInwardHub({
     // Supabase Realtime Subscription on purchase_bill_queue
     const isConfigured = typeof isSupabaseConfigured === 'function' ? isSupabaseConfigured() : Boolean(isSupabaseConfigured);
     if (isConfigured && supabase) {
-      const queueChannel = supabase
-        .channel('realtime_bill_queue')
+      const channel = supabase
+        .channel('bill_queue_realtime')
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'purchase_bill_queue' },
@@ -746,7 +728,7 @@ export default function PurchaseInwardHub({
         .subscribe();
 
       return () => {
-        supabase.removeChannel(queueChannel);
+        supabase.removeChannel(channel);
         supabase.removeChannel(globalSyncChannel);
       };
     }
@@ -1471,15 +1453,20 @@ export default function PurchaseInwardHub({
       // 1. Commit to purchase_invoices and purchase_items + auto-sync to inventory_items
       const saved = await savePurchaseInvoice(invoicePayload, formattedItems);
 
-      // 2. Mark queue row status = 'processed' (never permanently delete)
-      if (currentQueueBillId) {
+      // 2. Remove committed bill from uploaded queue (delete from DB and filter out of state)
+      const activeQueueId = currentQueueBillId || activeProcessingBillId;
+      if (activeQueueId) {
         try {
-          await updatePurchaseBillStatus(currentQueueBillId, 'processed');
-          setBillQueue((prev) => prev.filter((b) => b.id !== currentQueueBillId));
+          if (isSupabaseConfigured && supabase) {
+            await supabase.from('purchase_bill_queue').delete().eq('id', activeQueueId);
+          }
+          await updatePurchaseBillStatus(activeQueueId, 'processed').catch(() => {});
         } catch (queueErr) {
-          console.warn('Notice: Queue status update error:', queueErr);
+          console.warn('Notice: Queue deletion/status update error:', queueErr);
         }
+        setBillQueue((prev) => (prev || []).filter((b) => b.id !== activeQueueId));
         setCurrentQueueBillId(null);
+        setActiveProcessingBillId(null);
       }
 
       // 3. Auto-sync vendor profile
@@ -1501,10 +1488,10 @@ export default function PurchaseInwardHub({
         }
       }
 
-      showToast('🎉 Purchase invoice committed & inventory stock synced!', 'success');
+      // 4. Prominent success toast and reset to blank state (stay on current page!)
+      showToast('Bill successfully committed and stock synced!', 'success');
 
       await loadHistory();
-      setActiveTab('history');
       resetUploadState();
     } catch (err) {
       console.error('Save purchase error:', err);
@@ -2433,9 +2420,16 @@ export default function PurchaseInwardHub({
                               <td className="py-2 px-2 min-w-[65px]">
                                 <input
                                   type="number"
-                                  min="1"
-                                  value={it.quantity}
-                                  onChange={(e) => handleItemFieldChange(idx, 'quantity', e.target.value)}
+                                  min="0"
+                                  placeholder="0"
+                                  value={it.quantity === 0 ? '' : it.quantity}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const num = val === '' ? 0 : parseFloat(val);
+                                    handleItemFieldChange(idx, 'quantity', isNaN(num) ? 0 : num);
+                                  }}
                                   className="w-full h-8 px-2 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                                 />
                               </td>
@@ -2460,8 +2454,15 @@ export default function PurchaseInwardHub({
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={it.mrp}
-                                  onChange={(e) => handleItemFieldChange(idx, 'mrp', e.target.value)}
+                                  placeholder="0"
+                                  value={it.mrp === 0 ? '' : it.mrp}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const num = val === '' ? 0 : parseFloat(val);
+                                    handleItemFieldChange(idx, 'mrp', isNaN(num) ? 0 : num);
+                                  }}
                                   className="w-full h-8 px-2 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                                 />
                               </td>
@@ -2471,8 +2472,15 @@ export default function PurchaseInwardHub({
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={it.rate ?? it.price_before_gst}
-                                  onChange={(e) => handleItemFieldChange(idx, 'rate', e.target.value)}
+                                  placeholder="0"
+                                  value={(it.rate ?? it.price_before_gst) === 0 ? '' : (it.rate ?? it.price_before_gst)}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const num = val === '' ? 0 : parseFloat(val);
+                                    handleItemFieldChange(idx, 'rate', isNaN(num) ? 0 : num);
+                                  }}
                                   className="w-full h-8 px-2 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                                 />
                               </td>
@@ -2484,9 +2492,15 @@ export default function PurchaseInwardHub({
                                     type="number"
                                     step="0.01"
                                     min="0"
-                                    value={it.discount_value !== undefined && it.discount_value !== 0 ? it.discount_value : ''}
                                     placeholder="0"
-                                    onChange={(e) => handleItemFieldChange(idx, 'discount_value', e.target.value)}
+                                    value={it.discount_value === 0 ? '' : (it.discount_value || '')}
+                                    onWheel={(e) => e.currentTarget.blur()}
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      const num = val === '' ? 0 : parseFloat(val);
+                                      handleItemFieldChange(idx, 'discount_value', isNaN(num) ? 0 : num);
+                                    }}
                                     className="w-full h-full px-1.5 bg-transparent text-white text-right font-mono text-xs focus:outline-none"
                                     title={it.discount_type === '%' ? `Line Discount: ${it.discount_value || 0}% (₹${Number(it.discount_amount || 0).toFixed(2)})` : `Line Discount: ₹${it.discount_value || 0}`}
                                   />
@@ -2510,8 +2524,15 @@ export default function PurchaseInwardHub({
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={it.taxable_amount}
-                                  onChange={(e) => handleItemFieldChange(idx, 'taxable_amount', e.target.value)}
+                                  placeholder="0"
+                                  value={it.taxable_amount === 0 ? '' : it.taxable_amount}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const num = val === '' ? 0 : parseFloat(val);
+                                    handleItemFieldChange(idx, 'taxable_amount', isNaN(num) ? 0 : num);
+                                  }}
                                   className="w-full h-8 px-2 bg-slate-900/80 border border-slate-800 focus:border-emerald-500 rounded-lg text-slate-200 text-right font-mono text-xs focus:outline-none"
                                 />
                               </td>
@@ -2546,8 +2567,15 @@ export default function PurchaseInwardHub({
                                 <input
                                   type="number"
                                   step="0.01"
-                                  value={it.cess_amount || it.cess || 0}
-                                  onChange={(e) => handleItemFieldChange(idx, 'cess_amount', e.target.value)}
+                                  placeholder="0"
+                                  value={(it.cess_amount || it.cess) === 0 ? '' : (it.cess_amount || it.cess || '')}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    const num = val === '' ? 0 : parseFloat(val);
+                                    handleItemFieldChange(idx, 'cess_amount', isNaN(num) ? 0 : num);
+                                  }}
                                   className="w-full h-8 px-2 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-right font-mono text-xs focus:outline-none"
                                 />
                               </td>
@@ -2738,6 +2766,8 @@ export default function PurchaseInwardHub({
                               min="0"
                               placeholder="0.00"
                               value={invoiceDiscountAmount}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) => handleDiscountAmountChange(e.target.value)}
                               className="w-20 bg-transparent text-right font-mono font-bold text-rose-200 text-xs focus:outline-none"
                               title={globalDiscountType === 'pre_tax' ? 'Discount Amount in ₹ (Subtracts before GST)' : 'Cash Discount Amount in ₹ (Subtracts after GST)'}
@@ -2755,6 +2785,8 @@ export default function PurchaseInwardHub({
                               max="100"
                               placeholder="0"
                               value={invoiceDiscountPct}
+                              onWheel={(e) => e.currentTarget.blur()}
+                              onFocus={(e) => e.target.select()}
                               onChange={(e) => handleDiscountPctChange(e.target.value)}
                               className="w-12 bg-transparent text-right font-mono font-bold text-rose-300 text-xs focus:outline-none"
                               title="Discount Percentage (%)"
