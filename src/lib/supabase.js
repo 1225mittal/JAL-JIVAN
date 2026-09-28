@@ -2642,7 +2642,49 @@ export const STORAGE_PURCHASE_INVOICES = 'jal_jivan_purchase_invoices';
 export function getLocalPurchaseInvoices() {
   try {
     const saved = localStorage.getItem(STORAGE_PURCHASE_INVOICES);
-    return saved ? JSON.parse(saved) : [];
+    const data = saved ? JSON.parse(saved) : [];
+    if (!Array.isArray(data)) return [];
+    return data.map((inv) => {
+      const rawItems = inv.purchase_items || inv.items || [];
+      const itemsList = rawItems.map((item) => {
+        const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
+        const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
+        const taxable = Number(item.taxable_amount || (qty * rate));
+        const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
+        const cgst = Number(item.cgst_amount || 0);
+        const sgst = Number(item.sgst_amount || 0);
+        const cess = Number(item.cess_amount || item.cess || 0);
+        const totalTaxes = (cgst + sgst > 0) ? (cgst + sgst + cess) : +(taxable * (gstPct / 100)).toFixed(2);
+        const landedUnit = Number(item.landed_cost || item.landed_cost_per_unit || ((taxable + totalTaxes) / qty));
+        const lineTotal = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
+
+        return {
+          ...item,
+          qty,
+          quantity: qty,
+          rate: rate > 0 ? rate : (taxable > 0 && qty > 0 ? +(taxable / qty).toFixed(2) : 0),
+          purchase_price: rate > 0 ? rate : (taxable > 0 && qty > 0 ? +(taxable / qty).toFixed(2) : 0),
+          taxable_amount: taxable,
+          taxable,
+          gst_pct: gstPct,
+          gst_rate: gstPct,
+          cgst_amount: cgst || +(totalTaxes / 2).toFixed(2),
+          sgst_amount: sgst || +(totalTaxes / 2).toFixed(2),
+          cess_amount: cess,
+          total_taxes: totalTaxes,
+          landed_cost: landedUnit,
+          landed_cost_per_unit: landedUnit,
+          total: lineTotal,
+          total_amount: lineTotal,
+          price_after_gst: lineTotal
+        };
+      });
+      return {
+        ...inv,
+        purchase_items: itemsList,
+        items: itemsList
+      };
+    });
   } catch {
     return [];
   }
@@ -2668,9 +2710,43 @@ export async function fetchPurchaseInvoices() {
       }
 
       if (Array.isArray(data)) {
-        // Normalize purchase_items and items so both access patterns work smoothly
+        // Normalize purchase_items and items with full fallback calculations so both access patterns work smoothly
         const normalized = data.map((inv) => {
-          const itemsList = inv.purchase_items || inv.items || [];
+          const rawItems = inv.purchase_items || inv.items || [];
+          const itemsList = rawItems.map((item) => {
+            const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
+            const rate = Number(item.rate || item.purchase_price || item.price_before_gst || 0);
+            const taxable = Number(item.taxable_amount || (qty * rate));
+            const gstPct = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
+            const cgst = Number(item.cgst_amount || 0);
+            const sgst = Number(item.sgst_amount || 0);
+            const cess = Number(item.cess_amount || item.cess || 0);
+            const totalTaxes = (cgst + sgst > 0) ? (cgst + sgst + cess) : +(taxable * (gstPct / 100)).toFixed(2);
+            const landedUnit = Number(item.landed_cost || item.landed_cost_per_unit || ((taxable + totalTaxes) / qty));
+            const lineTotal = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
+
+            return {
+              ...item,
+              qty,
+              quantity: qty,
+              rate: rate > 0 ? rate : (taxable > 0 && qty > 0 ? +(taxable / qty).toFixed(2) : 0),
+              purchase_price: rate > 0 ? rate : (taxable > 0 && qty > 0 ? +(taxable / qty).toFixed(2) : 0),
+              taxable_amount: taxable,
+              taxable,
+              gst_pct: gstPct,
+              gst_rate: gstPct,
+              cgst_amount: cgst || +(totalTaxes / 2).toFixed(2),
+              sgst_amount: sgst || +(totalTaxes / 2).toFixed(2),
+              cess_amount: cess,
+              total_taxes: totalTaxes,
+              landed_cost: landedUnit,
+              landed_cost_per_unit: landedUnit,
+              total: lineTotal,
+              total_amount: lineTotal,
+              price_after_gst: lineTotal
+            };
+          });
+
           return {
             ...inv,
             purchase_items: itemsList,
@@ -2783,19 +2859,22 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   let savedRecord = null;
   let savedItems = [];
 
-  // Format line items with detailed GST breakdown
+  // Format line items with explicitly calculated values
   const formattedItems = (itemsData || []).map((item) => {
-    const qty = Number(item.quantity) || 1;
-    const purchasePrice = Number(item.purchase_price ?? item.price_before_gst) || 0;
-    const taxable = Number(item.taxable_amount ?? (qty * purchasePrice - (Number(item.discount) || 0))) || 0;
-    const gstRate = Number(item.gst_pct ?? item.gst_rate) || 0;
+    const qty = Math.max(1, Number(item.qty || item.quantity) || 1);
+    const purchasePrice = Number(item.purchase_price ?? item.price_before_gst ?? item.rate) || 0;
+    const disc = Number(item.discount_amount ?? item.discount) || 0;
+    const taxable = Number(item.taxable_amount ?? item.taxable) || Math.max(0, +(qty * purchasePrice - disc).toFixed(2));
+    const gstRate = Number(item.gst_pct || item.gst_rate || ((Number(item.cgst_pct || 0) + Number(item.sgst_pct || 0))) || 5);
     const cgstPct = Number(item.cgst_pct ?? (gstRate / 2)) || 0;
     const sgstPct = Number(item.sgst_pct ?? (gstRate / 2)) || 0;
-    const cgstAmt = Number(item.cgst_amount ?? ((taxable * cgstPct) / 100)) || 0;
-    const sgstAmt = Number(item.sgst_amount ?? ((taxable * sgstPct) / 100)) || 0;
+    const cgstAmt = Number(item.cgst_amount) || +(((taxable * cgstPct) / 100)).toFixed(2);
+    const sgstAmt = Number(item.sgst_amount) || +(((taxable * sgstPct) / 100)).toFixed(2);
     const cessAmt = Number(item.cess_amount ?? item.cess) || 0;
     const cessPct = Number(item.cess_pct) || 0;
-    const total = Number(item.total_amount ?? item.price_after_gst ?? (taxable + cgstAmt + sgstAmt + cessAmt)) || 0;
+    const totalTaxes = (cgstAmt + sgstAmt > 0) ? (cgstAmt + sgstAmt + cessAmt) : +((taxable * (gstRate / 100))).toFixed(2);
+    const total = Number(item.total || item.total_amount || item.price_after_gst || (taxable + totalTaxes));
+    const landedCost = Number(item.landed_cost || item.landed_cost_per_unit || (qty > 0 ? (total / qty) : total));
 
     return {
       purchase_invoice_id: savedInvoiceId,
@@ -2804,9 +2883,12 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       hsn_code: (item.hsn_code || '').toString().trim() || null,
       unit: (item.unit || 'PCS').toString().trim(),
       quantity: qty,
+      qty: qty,
       purchase_price: purchasePrice,
+      rate: purchasePrice,
       price_before_gst: purchasePrice,
       taxable_amount: Number(taxable.toFixed(2)),
+      taxable: Number(taxable.toFixed(2)),
       gst_pct: gstRate,
       gst_rate: gstRate,
       cgst_pct: cgstPct,
@@ -2816,10 +2898,13 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
       cess_pct: cessPct,
       cess_amount: Number(cessAmt.toFixed(2)),
       cess: Number(cessAmt.toFixed(2)),
-      discount: Number(item.discount) || 0,
+      discount: disc,
+      discount_amount: disc,
       price_after_gst: Number(total.toFixed(2)),
       total_amount: Number(total.toFixed(2)),
-      landed_cost_per_unit: qty > 0 ? Number((total / qty).toFixed(2)) : total,
+      total: Number(total.toFixed(2)),
+      landed_cost: Number(landedCost.toFixed(2)),
+      landed_cost_per_unit: Number(landedCost.toFixed(2)),
       mrp: Number(item.mrp) || 0
     };
   });
