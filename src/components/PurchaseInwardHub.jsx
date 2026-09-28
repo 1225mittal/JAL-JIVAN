@@ -1824,6 +1824,7 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2 min-w-[80px] text-right">SGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">CESS (₹)</th>
                           <th className="py-2.5 px-2 min-w-[110px] text-right">Cost/Unit (Tax Incl.)</th>
+                          <th className="py-2.5 px-2 min-w-[115px] text-right">Amt Before Tax (₹)</th>
                           <th className="py-2.5 px-2 min-w-[95px] text-right">Total (₹)</th>
                           <th className="py-2.5 px-2 min-w-[45px] text-center">Action</th>
                         </tr>
@@ -2000,6 +2001,17 @@ export default function PurchaseInwardHub({
                                 })()}
                               </td>
 
+                              {/* Amount Before Tax (Pre-Tax Amount) */}
+                              <td className="py-2 px-2 min-w-[115px] text-right font-mono text-slate-200 font-semibold">
+                                {(() => {
+                                  const rowQty = Math.max(0, Number(it.quantity ?? it.qty) || 1);
+                                  const rowRate = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
+                                  const rowDisc = Number(it.discount_amount ?? it.discount) || 0;
+                                  const preTaxAmt = Number(it.taxable_amount) || Math.max(0, +((rowQty * rowRate) - rowDisc).toFixed(2));
+                                  return `₹${preTaxAmt.toFixed(2)}`;
+                                })()}
+                              </td>
+
                               {/* Total */}
                               <td className="py-2 px-2 min-w-[95px] text-right font-mono font-bold text-emerald-400">
                                 ₹{Number(it.total_amount ?? it.price_after_gst ?? 0).toFixed(2)}
@@ -2022,7 +2034,7 @@ export default function PurchaseInwardHub({
 
                         {items.length === 0 && (
                           <tr>
-                            <td colSpan="15" className="py-8 text-center text-slate-500">
+                            <td colSpan="16" className="py-8 text-center text-slate-500">
                               No line items entered yet. Click "Add Line Item" or click "⚡ Process This Bill" from the queue above.
                             </td>
                           </tr>
