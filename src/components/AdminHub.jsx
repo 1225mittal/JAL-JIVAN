@@ -65,16 +65,16 @@ export default function AdminHub({ onNavigate }) {
       path: '/admin/sales',
       title: 'Sales & Billing',
       category: 'Commercial',
-      tag: 'Planned',
-      isLive: false,
+      tag: 'Active / Live',
+      isLive: true,
       icon: Receipt,
-      accentColor: 'from-blue-600 to-indigo-600',
-      tagColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-      description: 'Counter POS, Invoices, Thermal Receipts, Customer Returns, E-Way Bill',
+      accentColor: 'from-emerald-600 to-teal-600',
+      tagColor: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/20',
+      description: 'Counter POS, Barcode Quick Scanning, Gemini Voice Billing, 3-Inch Thermal Receipts',
       features: [
-        'Counter POS & Barcode Quick Scan Billing',
-        'GST Compliant 3-Inch Thermal Invoices',
-        'Customer Return Bottle Deposit Adjustments'
+        'Dual-Pane 65/35 High-Efficiency Counter Desk',
+        'Barcode (F1), Smart Search (F2) & Voice Billing (Space)',
+        'Live Profit Radar, Dynamic UPI QR & 3" Thermal Print (F8)'
       ]
     },
     {

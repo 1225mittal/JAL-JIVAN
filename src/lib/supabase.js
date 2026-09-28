@@ -4460,3 +4460,143 @@ export async function saveDebitNote(debitNote) {
   saveLocalDebitNotes(updated);
   return payload;
 }
+
+// ==========================================
+// RETAIL SALES & POS INVOICES (sales_invoices)
+// ==========================================
+export const STORAGE_SALES_INVOICES = 'jal_jivan_sales_invoices';
+
+export function getLocalSalesInvoices() {
+  try {
+    const saved = localStorage.getItem(STORAGE_SALES_INVOICES);
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export function saveLocalSalesInvoices(invoices) {
+  try {
+    localStorage.setItem(STORAGE_SALES_INVOICES, JSON.stringify(invoices || []));
+  } catch (e) {
+    console.error('Failed to save sales invoices locally:', e);
+  }
+}
+
+export async function fetchSalesInvoices() {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('sales_invoices')
+        .select('*, sales_invoice_items(*)')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        saveLocalSalesInvoices(data);
+        return data;
+      }
+    } catch (err) {
+      console.warn('fetchSalesInvoices exception:', err.message);
+    }
+  }
+  return getLocalSalesInvoices();
+}
+
+export async function saveSalesInvoice(invoiceData, itemsData = []) {
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toTimeString().split(' ')[0];
+  const invId = invoiceData.id || `INV-${Date.now()}`;
+  const invNumber = invoiceData.invoice_number || `BILL-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(Math.floor(1000 + Math.random() * 9000))}`;
+
+  const payload = {
+    id: invId,
+    invoice_number: invNumber,
+    created_at: now.toISOString(),
+    invoice_date: invoiceData.invoice_date || dateStr,
+    invoice_time: invoiceData.invoice_time || timeStr,
+    customer_name: (invoiceData.customer_name || 'Walk-in Customer').trim(),
+    customer_phone: (invoiceData.customer_phone || '').trim(),
+    payment_mode: invoiceData.payment_mode || 'CASH',
+    subtotal: Number(invoiceData.subtotal || invoiceData.taxable_amount || 0),
+    total_tax: Number(invoiceData.total_tax || 0),
+    cgst_amount: Number(invoiceData.cgst_amount || 0),
+    sgst_amount: Number(invoiceData.sgst_amount || 0),
+    round_off: Number(invoiceData.round_off || 0),
+    grand_total: Number(invoiceData.grand_total || 0),
+    tendered_amount: Number(invoiceData.tendered_amount || 0),
+    change_returned: Number(invoiceData.change_returned || 0),
+    split_cash: Number(invoiceData.split_cash || 0),
+    split_upi: Number(invoiceData.split_upi || 0),
+    profit_amount: Number(invoiceData.profit_amount || 0),
+    status: invoiceData.status || 'completed',
+    items: itemsData
+  };
+
+  let savedRecord = null;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('sales_invoices')
+        .insert(payload)
+        .select()
+        .single();
+      if (!error && data) {
+        savedRecord = data;
+
+        // Insert item rows if table exists
+        if (itemsData.length > 0) {
+          const itemRows = itemsData.map((it) => ({
+            invoice_id: invId,
+            barcode: it.barcode || null,
+            item_name: it.item_name || 'Item',
+            hsn_code: it.hsn_code || null,
+            quantity: Number(it.quantity || it.qty || 1),
+            unit: it.unit || 'PCS',
+            mrp: Number(it.mrp || 0),
+            cost_price: Number(it.cost_price || 0),
+            rate: Number(it.rate || it.selling_price || 0),
+            discount_pct: Number(it.discount_pct || 0),
+            discount_amount: Number(it.discount_amount || 0),
+            taxable_amount: Number(it.taxable_amount || 0),
+            gst_pct: Number(it.gst_pct || 0),
+            cgst_amount: Number(it.cgst_amount || 0),
+            sgst_amount: Number(it.sgst_amount || 0),
+            total_amount: Number(it.total || it.total_amount || 0)
+          }));
+          await supabase.from('sales_invoice_items').insert(itemRows).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('saveSalesInvoice supabase notice:', err.message);
+    }
+  }
+
+  // Deduct inventory stock
+  try {
+    for (const it of itemsData) {
+      const soldQty = Number(it.quantity || it.qty || 1);
+      const barcode = (it.barcode || '').trim();
+      const name = (it.item_name || '').trim();
+
+      // Decrement in Supabase if configured
+      if (isSupabaseConfigured && supabase && barcode) {
+        supabase.rpc('decrement_inventory_stock', {
+          item_barcode: barcode,
+          qty_to_deduct: soldQty
+        }).catch(() => {});
+      }
+    }
+  } catch (stockErr) {
+    console.warn('Stock decrement notice:', stockErr);
+  }
+
+  // Update local storage cache
+  const finalSaved = savedRecord || payload;
+  const existing = getLocalSalesInvoices();
+  const updated = [finalSaved, ...existing.filter((inv) => inv.id !== invId)];
+  saveLocalSalesInvoices(updated);
+
+  return finalSaved;
+}
+

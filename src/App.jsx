@@ -8,6 +8,7 @@ import PurchaseInwardHub from './components/PurchaseInwardHub';
 import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
 import ItemsInventoryHub from './components/items/ItemsInventoryHub';
 import PlannedModuleView from './components/PlannedModuleView';
+import SalesBillingHub from './pages/SalesBillingHub';
 import DriverPortal from './components/DriverPortal';
 import MobileInwardCapture from './components/purchase/MobileInwardCapture';
 import AddDriverModal from './components/AddDriverModal';
@@ -59,6 +60,9 @@ export const getInitialModule = () => {
   }
   if (path.includes('/admin/staff') || queryModule === 'staff') {
     return 'staff';
+  }
+  if (path.includes('/admin/sales') || queryModule === 'sales') {
+    return 'sales';
   }
   if (path.includes('/admin/items') || path.includes('/admin/inventory') || queryModule === 'items' || queryModule === 'inventory') {
     return 'items';
@@ -813,6 +817,13 @@ export default function App() {
           ) : routeState.module === 'staff' ? (
             <ErrorBoundary title="Staff Directory Hub">
               <StaffDirectoryHub
+                onBackToHub={handleBackToHub}
+                showToast={showToast}
+              />
+            </ErrorBoundary>
+          ) : routeState.module === 'sales' ? (
+            <ErrorBoundary title="Retail Sales & POS Billing">
+              <SalesBillingHub
                 onBackToHub={handleBackToHub}
                 showToast={showToast}
               />

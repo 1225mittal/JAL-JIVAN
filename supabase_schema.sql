@@ -463,5 +463,62 @@ ALTER TABLE public.debit_notes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public access debit_notes" ON public.debit_notes;
 CREATE POLICY "Public access debit_notes" ON public.debit_notes FOR ALL USING (true) WITH CHECK (true);
 
+-- 24. Retail Sales & POS Billing (sales_invoices & sales_invoice_items)
+CREATE TABLE IF NOT EXISTS public.sales_invoices (
+    id TEXT PRIMARY KEY DEFAULT ('INV-' || to_char(now(), 'YYYYMMDD') || '-' || substr(md5(random()::text), 1, 6)),
+    invoice_number TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    invoice_date DATE DEFAULT CURRENT_DATE,
+    invoice_time TIME DEFAULT CURRENT_TIME,
+    customer_name TEXT DEFAULT 'Walk-in Customer',
+    customer_phone TEXT DEFAULT '',
+    payment_mode TEXT DEFAULT 'CASH' CHECK (payment_mode IN ('CASH', 'UPI', 'SPLIT', 'KHATA')),
+    subtotal NUMERIC(12, 2) DEFAULT 0.00,
+    total_tax NUMERIC(12, 2) DEFAULT 0.00,
+    cgst_amount NUMERIC(10, 2) DEFAULT 0.00,
+    sgst_amount NUMERIC(10, 2) DEFAULT 0.00,
+    round_off NUMERIC(6, 2) DEFAULT 0.00,
+    grand_total NUMERIC(12, 2) DEFAULT 0.00,
+    tendered_amount NUMERIC(12, 2) DEFAULT 0.00,
+    change_returned NUMERIC(12, 2) DEFAULT 0.00,
+    split_cash NUMERIC(12, 2) DEFAULT 0.00,
+    split_upi NUMERIC(12, 2) DEFAULT 0.00,
+    profit_amount NUMERIC(12, 2) DEFAULT 0.00,
+    status TEXT DEFAULT 'completed' CHECK (status IN ('completed', 'cancelled', 'parked')),
+    items JSONB DEFAULT '[]'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS public.sales_invoice_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    invoice_id TEXT REFERENCES public.sales_invoices(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    barcode TEXT,
+    item_name TEXT NOT NULL,
+    hsn_code TEXT,
+    quantity NUMERIC(10, 2) DEFAULT 1,
+    unit TEXT DEFAULT 'PCS',
+    mrp NUMERIC(10, 2) DEFAULT 0.00,
+    cost_price NUMERIC(10, 2) DEFAULT 0.00,
+    rate NUMERIC(10, 2) DEFAULT 0.00,
+    discount_pct NUMERIC(5, 2) DEFAULT 0.00,
+    discount_amount NUMERIC(10, 2) DEFAULT 0.00,
+    taxable_amount NUMERIC(12, 2) DEFAULT 0.00,
+    gst_pct NUMERIC(5, 2) DEFAULT 0.00,
+    cgst_amount NUMERIC(10, 2) DEFAULT 0.00,
+    sgst_amount NUMERIC(10, 2) DEFAULT 0.00,
+    total_amount NUMERIC(12, 2) DEFAULT 0.00
+);
+
+ALTER TABLE public.sales_invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_invoice_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public access sales_invoices" ON public.sales_invoices;
+CREATE POLICY "Public access sales_invoices" ON public.sales_invoices FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access sales_invoice_items" ON public.sales_invoice_items;
+CREATE POLICY "Public access sales_invoice_items" ON public.sales_invoice_items FOR ALL USING (true) WITH CHECK (true);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.sales_invoices;
+
 
 

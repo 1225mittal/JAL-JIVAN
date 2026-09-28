@@ -171,3 +171,90 @@ export function playOrderCompletedSound() {
     console.warn('playOrderCompletedSound error:', err);
   }
 }
+
+/**
+ * Play authentic supermarket barcode laser scanner beep (2100Hz 65ms square wave)
+ */
+export function playBarcodeScanBeep() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(2093.00, now); // C7 crisp high beep
+
+    gain.gain.setValueAtTime(0.4, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.075);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.075);
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
+ * Play supermarket POS cash register settlement chime (Cha-Ching bell)
+ */
+export function playCashRegisterChime() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+    const now = ctx.currentTime;
+    // Fast dual bell
+    [
+      { freq: 987.77, delay: 0, dur: 0.15 },     // B5
+      { freq: 1318.51, delay: 0.08, dur: 0.40 }  // E6
+    ].forEach(({ freq, delay, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + delay);
+      gain.gain.setValueAtTime(0.5, now + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + delay + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + delay);
+      osc.stop(now + delay + dur);
+    });
+  } catch (err) {
+    // ignore
+  }
+}
+
+/**
+ * Play subtle voice billing listening prompt chime
+ */
+export function playVoiceListenChime() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.12);
+    gain.gain.setValueAtTime(0.3, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.18);
+  } catch (err) {
+    // ignore
+  }
+}
+
