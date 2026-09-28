@@ -88,7 +88,7 @@ export function calculateLineItem(item, manualTaxable = false) {
   const qty = Math.max(1, Number(item.quantity ?? item.qty) || 1);
   const rate = Math.max(0, Number(item.rate ?? item.price_before_gst ?? item.purchase_price) || 0);
   const discType = item.discount_type === '₹' ? '₹' : '%';
-  const discVal = Math.max(0, Number(item.discount_value ?? item.discount) || 0);
+  const discVal = Math.max(0, Number(item.discount_value ?? item.discount_pct ?? item.discount) || 0);
 
   // 1. Gross Line Amount = qty * rate
   const gross = +(qty * rate).toFixed(2);
@@ -730,14 +730,17 @@ export default function PurchaseInwardHub({
             const rate = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
 
             // Extract explicitly printed line discount (percentage or flat amount)
+            const extractedDiscPct = Number(it.discount_pct || it.discount || 0);
+            const extractedDiscAmount = Number(it.discount_amount || 0);
+
             let discType = '%';
             let discVal = 0;
-            if (Number(it.discount_pct) > 0) {
+            if (extractedDiscPct > 0) {
               discType = '%';
-              discVal = Number(it.discount_pct);
-            } else if (Number(it.discount_amount ?? it.discount) > 0) {
+              discVal = extractedDiscPct;
+            } else if (extractedDiscAmount > 0) {
               discType = '₹';
-              discVal = Number(it.discount_amount ?? it.discount);
+              discVal = extractedDiscAmount;
             }
 
             const hsnCode = (it.hsn ?? it.hsn_code ?? '').toString().trim();
@@ -756,6 +759,7 @@ export default function PurchaseInwardHub({
               quantity: qty,
               mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
               rate: rate,
+              discount_pct: extractedDiscPct,
               discount_type: discType,
               discount_value: discVal,
               gst_pct: Number(it.gst_pct ?? it.gst_rate) || 18,

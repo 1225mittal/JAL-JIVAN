@@ -27,6 +27,7 @@ Extract all data from this Indian purchase bill / tax invoice image with extreme
      * CRITICAL: Do NOT extract the buyer's name, GSTIN, or address into the vendor/seller fields!
 
 2. ROW-BY-ROW TABULAR ALIGNMENT (DOT-MATRIX / TABULAR INVOICES):
+   - Extract ALL rows present on the invoice without stopping or summarizing. If there are 30-50 rows, extract every single row.
    - Indian FMCG invoices often use dense dot-matrix tables. Read line items STRICTLY row by horizontal row.
    - Anchor each line item using the Serial Number (SN: 1, 2, 3... 14):
      * Do NOT skip any rows or merge adjacent rows.
@@ -42,6 +43,7 @@ Extract all data from this Indian purchase bill / tax invoice image with extreme
    - Distinguish letters from numbers in Bill Numbers (e.g., uppercase "T000820", not "10006320" or "T00082O").
 
 5. LINE ITEM & INVOICE LEVEL DISCOUNT HANDLING:
+   - Look specifically for the item discount column (e.g., 'Disc. %', 'Disc%', 'Trade Disc'). Extract this value as \`discount_pct\` (number only, e.g. 1 for 1%). If no discount is printed for a row, set \`discount_pct\` to 0.
    - Extract cash discounts or trade discounts (e.g., "Discount 2%", "Cash Disc", "Trade Disc"):
      * Include "discount_pct": number and "discount_amount": number.
      * Deduct discount from taxable base before computing SGST, CGST, and Roundoff.
@@ -69,6 +71,7 @@ Return ONLY a valid JSON object matching EXACTLY this structure with no markdown
       "unit": "PCS",
       "mrp": 50.00,
       "rate": 36.43,
+      "discount_pct": 0,
       "taxable_amount": 1748.64,
       "gst_pct": 5,
       "cgst_pct": 2.5,
@@ -197,8 +200,11 @@ export function evaluateModelMath(data) {
 
     const qty = Math.max(0, Number(it.qty ?? it.quantity) || 1);
     const rate = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
-    const disc = Math.max(0, Number(it.discount_amount ?? it.discount) || 0);
     const discPct = Number(it.discount_pct) || 0;
+    let disc = Math.max(0, Number(it.discount_amount ?? it.discount) || 0);
+    if (!disc && discPct > 0) {
+      disc = +((qty * rate * (discPct / 100))).toFixed(2);
+    }
 
     let taxable = Number(it.taxable_amount);
     if (isNaN(taxable) || taxable <= 0) {
@@ -647,7 +653,7 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
         }
       ],
       temperature: 0.1,
-      max_tokens: 3000
+      max_tokens: 8192
     })
   });
 
@@ -701,7 +707,8 @@ export async function callGeminiVision(imageBase64, { apiKey = '', mimeType = 'i
         ],
         generationConfig: {
           temperature: 0.1,
-          responseMimeType: 'application/json'
+          responseMimeType: 'application/json',
+          maxOutputTokens: 8192
         }
       };
 

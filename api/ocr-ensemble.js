@@ -226,7 +226,8 @@ export default async function handler(req, res) {
             ],
             generationConfig: {
               temperature: 0.1,
-              responseMimeType: 'application/json'
+              responseMimeType: 'application/json',
+              maxOutputTokens: 8192
             }
           };
 
@@ -274,7 +275,7 @@ export default async function handler(req, res) {
               }
             ],
             temperature: 0.1,
-            max_tokens: 3000
+            max_tokens: 8192
           })
         });
 
