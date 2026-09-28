@@ -12,6 +12,11 @@ import {
   Trash2,
   Save,
   RotateCcw,
+  RotateCw,
+  Maximize2,
+  Minimize2,
+  ChevronLeft,
+  EyeOff,
   Sparkles,
   Building2,
   Receipt,
@@ -83,6 +88,9 @@ export default function PurchaseInwardHub({
   // Side-by-Side Document & Ledger Drawer Modal State
   const [selectedLedgerInvoice, setSelectedLedgerInvoice] = useState(null);
   const [ledgerDocZoom, setLedgerDocZoom] = useState(1);
+  const [ledgerDocRotation, setLedgerDocRotation] = useState(0);
+  const [isDocPanelCollapsed, setIsDocPanelCollapsed] = useState(false);
+  const [isDocPanelExpanded, setIsDocPanelExpanded] = useState(false);
   const [assigningBarcodeRowId, setAssigningBarcodeRowId] = useState(null);
   const [newBarcodeInput, setNewBarcodeInput] = useState('');
   const [isAssigningBarcode, setIsAssigningBarcode] = useState(false);
@@ -2397,6 +2405,9 @@ export default function PurchaseInwardHub({
                             onClick={() => {
                               setSelectedLedgerInvoice(inv);
                               setLedgerDocZoom(1);
+                              setLedgerDocRotation(0);
+                              setIsDocPanelCollapsed(false);
+                              setIsDocPanelExpanded(false);
                               setAssigningBarcodeRowId(null);
                             }}
                             className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
@@ -2524,183 +2535,388 @@ export default function PurchaseInwardHub({
               </div>
             </div>
 
-            {/* Split Body: Side-by-side */}
+            {/* Split Body: Side-by-side with Asymmetric Ratio */}
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-              {/* Left Pane: Original Bill Document Viewer */}
-              <div className="w-full lg:w-1/2 border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950 flex flex-col shrink-0 overflow-hidden">
-                <div className="p-2.5 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-300 flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Archived Bill Document</span>
-                  </span>
-
-                  {/* Zoom Controls */}
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setLedgerDocZoom((z) => Math.max(0.5, z - 0.25))}
-                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
-                      title="Zoom Out"
-                    >
-                      <ZoomOut className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="font-mono text-[10px] text-slate-400 px-1">
-                      {Math.round(ledgerDocZoom * 100)}%
+              {/* Left Pane: Original Bill Document Viewer (Collapsible, 25-30% width by default) */}
+              {!isDocPanelCollapsed && (
+                <div
+                  className={`w-full ${
+                    isDocPanelExpanded
+                      ? 'lg:w-1/2'
+                      : 'lg:w-[320px] xl:w-[360px] 2xl:w-[400px]'
+                  } border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-950 flex flex-col shrink-0 overflow-hidden transition-all duration-300`}
+                >
+                  <div className="p-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs gap-1.5 shrink-0">
+                    <span className="font-bold text-slate-300 flex items-center gap-1.5 truncate">
+                      <FileText className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">Archived Bill</span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setLedgerDocZoom((z) => Math.min(3, z + 0.25))}
-                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
-                      title="Zoom In"
-                    >
-                      <ZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                    {(selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url) && (
-                      <a
-                        href={selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 ml-1.5"
-                        title="Open Full Image"
+
+                    {/* Toolbar: Rotate, Zoom, Compact/Expand, Fullscreen, Collapse */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {/* 90-degree Rotation Button */}
+                      <button
+                        type="button"
+                        onClick={() => setLedgerDocRotation((r) => (r + 90) % 360)}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 text-xs transition flex items-center gap-1"
+                        title="Rotate 90° Clockwise"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
+                        <RotateCw className="w-3.5 h-3.5" />
+                        <span className="hidden xl:inline text-[10px] font-semibold">90°</span>
+                      </button>
+
+                      {/* Zoom Controls */}
+                      <button
+                        type="button"
+                        onClick={() => setLedgerDocZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="font-mono text-[10px] text-slate-400 px-0.5 min-w-[32px] text-center">
+                        {Math.round(ledgerDocZoom * 100)}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setLedgerDocZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition"
+                        title="Zoom In"
+                      >
+                        <ZoomIn className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Reset Zoom & Rotation */}
+                      {(ledgerDocZoom !== 1 || ledgerDocRotation !== 0) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLedgerDocZoom(1);
+                            setLedgerDocRotation(0);
+                          }}
+                          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs transition"
+                          title="Reset Zoom & Rotation"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {/* Toggle Compact / Expanded Width */}
+                      <button
+                        type="button"
+                        onClick={() => setIsDocPanelExpanded((e) => !e)}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs transition"
+                        title={isDocPanelExpanded ? 'Compact Bill View (~30%)' : 'Expand Bill View (~50%)'}
+                      >
+                        {isDocPanelExpanded ? (
+                          <Minimize2 className="w-3.5 h-3.5" />
+                        ) : (
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+
+                      {/* Open Full Image in New Tab */}
+                      {(selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url) && (
+                        <a
+                          href={selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 transition"
+                          title="Open Full Image"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
+
+                      {/* Collapse / Hide Bill Panel */}
+                      <button
+                        type="button"
+                        onClick={() => setIsDocPanelCollapsed(true)}
+                        className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs transition"
+                        title="Collapse Bill Panel (Full Table Width)"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Document Display Area with smooth zoom/pan & rotation */}
+                  <div className="flex-1 overflow-auto p-3 flex items-center justify-center bg-slate-950/95 relative select-none">
+                    {(selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url) ? (
+                      <div className="relative max-w-full max-h-full flex items-center justify-center overflow-hidden">
+                        <img
+                          src={selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url}
+                          alt="Archived Bill"
+                          style={{
+                            transform: `scale(${ledgerDocZoom}) rotate(${ledgerDocRotation}deg)`,
+                            transformOrigin: 'center center',
+                            transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}
+                          className="max-w-full max-h-full object-contain rounded-lg shadow-2xl border border-slate-800"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-center text-slate-500 text-xs space-y-2 p-6">
+                        <ImageIcon className="w-12 h-12 mx-auto text-slate-700" />
+                        <p>No original document scan was stored for this legacy invoice.</p>
+                      </div>
                     )}
                   </div>
                 </div>
+              )}
 
-                {/* Document Display Area */}
-                <div className="flex-1 overflow-auto p-4 flex items-center justify-center">
-                  {(selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url) ? (
-                    <img
-                      src={selectedLedgerInvoice.bill_image_urls?.[0] || selectedLedgerInvoice.bill_image_url}
-                      alt="Archived Bill"
-                      style={{ transform: `scale(${ledgerDocZoom})`, transformOrigin: 'top center' }}
-                      className="max-w-full rounded-lg shadow-lg border border-slate-800 transition-transform duration-200"
-                    />
-                  ) : (
-                    <div className="text-center text-slate-500 text-xs space-y-2">
-                      <ImageIcon className="w-12 h-12 mx-auto text-slate-700" />
-                      <p>No original document scan was stored for this legacy invoice.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Right Pane: Itemized Ledger Lines & Detailed GST */}
-              <div className="flex-1 flex flex-col bg-slate-900/60 overflow-hidden">
-                <div className="p-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-xs">
-                  <span className="font-bold text-white flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Itemized Ledger Lines & Barcodes</span>
-                  </span>
-                  <span className="text-[11px] text-slate-400">
+              {/* Right Pane: Full Itemized Ledger Lines & Barcodes (Expanded to 70-75% or 100%) */}
+              <div className="flex-1 min-w-0 flex flex-col bg-slate-900/60 overflow-hidden">
+                <div className="p-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between text-xs gap-2 shrink-0">
+                  <div className="flex items-center gap-2">
+                    {/* Collapsed Panel Quick Re-open Button */}
+                    {isDocPanelCollapsed && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDocPanelCollapsed(false)}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                        title="Show Archived Bill Document"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>Show Bill Scan</span>
+                      </button>
+                    )}
+                    <span className="font-bold text-white flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Itemized Ledger Lines & Barcodes</span>
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] text-slate-300 font-mono">
+                        {(selectedLedgerInvoice.purchase_items || selectedLedgerInvoice.items || []).length} items
+                      </span>
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
                     Click "No Barcode" to assign universal SKU code
                   </span>
                 </div>
 
-                <div className="flex-1 overflow-auto p-3">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead>
-                      <tr className="bg-slate-950 border-b border-slate-800 text-[10px] font-bold uppercase text-slate-400 tracking-wider">
-                        <th className="py-2 px-2.5">#</th>
-                        <th className="py-2 px-2.5">Barcode / EAN</th>
-                        <th className="py-2 px-2.5 min-w-[140px]">Item Description</th>
-                        <th className="py-2 px-2">HSN</th>
-                        <th className="py-2 px-2 text-right">Qty</th>
-                        <th className="py-2 px-2 text-right">Rate</th>
-                        <th className="py-2 px-2 text-right">GST %</th>
-                        <th className="py-2 px-2 text-right">Total</th>
+                {/* Table Container with Horizontal & Vertical Scrolling and Sticky Headers */}
+                <div className="flex-1 overflow-x-auto overflow-y-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap border-collapse">
+                    <thead className="sticky top-0 z-20 bg-slate-950/95 backdrop-blur-sm shadow-md border-b border-slate-800">
+                      <tr className="text-[10px] font-bold uppercase text-slate-400 tracking-wider">
+                        <th className="py-2.5 px-2.5 text-center min-w-[45px]">S.No</th>
+                        <th className="py-2.5 px-2.5 min-w-[150px]">Barcode</th>
+                        <th className="py-2.5 px-3 min-w-[180px]">Item Name</th>
+                        <th className="py-2.5 px-2 min-w-[70px]">HSN</th>
+                        <th className="py-2.5 px-2 text-right min-w-[65px]">QTY</th>
+                        <th className="py-2.5 px-2 text-center min-w-[65px]">Unit</th>
+                        <th className="py-2.5 px-2 text-right min-w-[75px]">MRP</th>
+                        <th className="py-2.5 px-2 text-right min-w-[80px]">Rate</th>
+                        <th className="py-2.5 px-2 text-right min-w-[85px]">Taxable</th>
+                        <th className="py-2.5 px-2 text-right min-w-[65px]">GST %</th>
+                        <th className="py-2.5 px-2 text-right min-w-[110px]">Taxes (CGST/SGST)</th>
+                        <th className="py-2.5 px-2 text-right min-w-[110px]">Landed Cost/Unit</th>
+                        <th className="py-2.5 px-3 text-right min-w-[95px]">Total</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70 text-slate-200">
-                      {(selectedLedgerInvoice.purchase_items || selectedLedgerInvoice.items || []).map((item, idx) => {
-                        const hasBarcode = Boolean(item.barcode);
-                        const isEditingBarcode = assigningBarcodeRowId === item.id;
+                      {(() => {
+                        const itemsList = selectedLedgerInvoice.purchase_items || selectedLedgerInvoice.items || [];
+                        if (itemsList.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={13} className="py-8 text-center text-slate-500">
+                                No items found in this invoice entry.
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return itemsList.map((item, idx) => {
+                          const hasBarcode = Boolean(item.barcode);
+                          const isEditingBarcode = assigningBarcodeRowId === item.id;
+                          const qty = Math.max(0, Number(item.quantity ?? item.qty) || 1);
+                          const rate = Number(item.rate ?? item.purchase_price ?? 0);
+                          const disc = Number(item.discount_amount ?? item.discount) || 0;
+                          const taxable = Number(item.taxable_amount) || Math.max(0, +(qty * rate - disc).toFixed(2));
+                          const gstPct = Number(item.gst_pct ?? item.gst_rate ?? 0);
+                          const cgst = Number(item.cgst_amount || 0);
+                          const sgst = Number(item.sgst_amount || 0);
+                          const cess = Number(item.cess_amount || item.cess || 0);
+                          const lineTax = (cgst + sgst + cess) > 0
+                            ? (cgst + sgst + cess)
+                            : +(taxable * (gstPct / 100)).toFixed(2);
+                          const total = Number(item.total_amount ?? item.price_after_gst ?? (taxable + lineTax));
+                          const landedCost = Number(item.landed_cost_per_unit) || (qty > 0 ? +(total / qty).toFixed(2) : total);
 
-                        return (
-                          <tr key={item.id || idx} className="hover:bg-slate-800/40">
-                            <td className="py-2 px-2.5 text-slate-500">{idx + 1}</td>
+                          return (
+                            <tr key={item.id || idx} className="hover:bg-slate-800/40 transition-colors">
+                              {/* S.No */}
+                              <td className="py-2 px-2 text-center text-slate-400 font-mono text-[11px] font-semibold">
+                                {idx + 1}
+                              </td>
 
-                            {/* Barcode Column & Quick Assignment */}
-                            <td className="py-2 px-2.5">
-                              {hasBarcode ? (
-                                <span className="font-mono text-[11px] font-bold text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25">
-                                  {item.barcode}
+                              {/* Barcode Column & Quick Assignment */}
+                              <td className="py-2 px-2.5">
+                                {hasBarcode ? (
+                                  <span className="font-mono text-[11px] font-bold text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/25">
+                                    {item.barcode}
+                                  </span>
+                                ) : isEditingBarcode ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={newBarcodeInput}
+                                      onChange={(e) => setNewBarcodeInput(e.target.value)}
+                                      placeholder="Enter barcode"
+                                      className="w-32 h-7 px-2 bg-slate-950 border border-amber-500 rounded text-xs font-mono text-white focus:outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={isAssigningBarcode}
+                                      onClick={() => handleAssignBarcodeToLedgerItem(item)}
+                                      className="px-2 py-1 bg-amber-500 text-slate-950 font-bold rounded text-[10px] hover:bg-amber-400 transition cursor-pointer"
+                                    >
+                                      Assign
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setAssigningBarcodeRowId(null)}
+                                      className="p-1 text-slate-400 hover:text-white"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAssigningBarcodeRowId(item.id);
+                                      setNewBarcodeInput('');
+                                    }}
+                                    className="px-2 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span>⚠️ No Barcode</span>
+                                  </button>
+                                )}
+                              </td>
+
+                              {/* Item Name */}
+                              <td className="py-2 px-3 font-bold text-white max-w-[220px] truncate" title={item.item_name}>
+                                {item.item_name}
+                              </td>
+
+                              {/* HSN */}
+                              <td className="py-2 px-2 font-mono text-slate-400 text-[11px]">
+                                {item.hsn_code || '—'}
+                              </td>
+
+                              {/* QTY */}
+                              <td className="py-2 px-2 text-right font-bold font-mono text-emerald-400">
+                                {qty}
+                              </td>
+
+                              {/* Unit */}
+                              <td className="py-2 px-2 text-center font-medium text-slate-400 text-[11px] uppercase">
+                                {item.unit || 'PCS'}
+                              </td>
+
+                              {/* MRP */}
+                              <td className="py-2 px-2 text-right font-mono text-slate-300">
+                                ₹{Number(item.mrp || 0).toFixed(2)}
+                              </td>
+
+                              {/* Rate */}
+                              <td className="py-2 px-2 text-right font-mono text-slate-300">
+                                ₹{rate.toFixed(2)}
+                              </td>
+
+                              {/* Taxable */}
+                              <td className="py-2 px-2 text-right font-mono font-semibold text-slate-200">
+                                ₹{taxable.toFixed(2)}
+                              </td>
+
+                              {/* GST % */}
+                              <td className="py-2 px-2 text-right font-mono text-slate-400">
+                                {gstPct}%
+                              </td>
+
+                              {/* Taxes (CGST/SGST) */}
+                              <td className="py-2 px-2 text-right font-mono">
+                                <span className="text-amber-400 font-semibold" title={`CGST: ₹${cgst.toFixed(2)} | SGST: ₹${sgst.toFixed(2)}${cess > 0 ? ` | CESS: ₹${cess.toFixed(2)}` : ''}`}>
+                                  ₹{lineTax.toFixed(2)}
                                 </span>
-                              ) : isEditingBarcode ? (
-                                <div className="flex items-center gap-1.5">
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    value={newBarcodeInput}
-                                    onChange={(e) => setNewBarcodeInput(e.target.value)}
-                                    placeholder="Enter or scan barcode"
-                                    className="w-32 h-7 px-2 bg-slate-950 border border-amber-500 rounded text-xs font-mono text-white focus:outline-none"
-                                  />
-                                  <button
-                                    type="button"
-                                    disabled={isAssigningBarcode}
-                                    onClick={() => handleAssignBarcodeToLedgerItem(item)}
-                                    className="px-2 py-1 bg-amber-500 text-slate-950 font-bold rounded text-[10px] hover:bg-amber-400 transition"
-                                  >
-                                    Assign
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setAssigningBarcodeRowId(null)}
-                                    className="p-1 text-slate-400 hover:text-white"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setAssigningBarcodeRowId(item.id);
-                                    setNewBarcodeInput('');
-                                  }}
-                                  className="px-2 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
-                                >
-                                  <AlertTriangle className="w-3 h-3" />
-                                  <span>⚠️ No Barcode - Click to Assign</span>
-                                </button>
-                              )}
-                            </td>
+                                {(cgst > 0 || sgst > 0) && (
+                                  <div className="text-[9px] text-slate-500 font-normal">
+                                    ({cgst.toFixed(1)} + {sgst.toFixed(1)})
+                                  </div>
+                                )}
+                              </td>
 
-                            <td className="py-2 px-2.5 font-bold text-white max-w-xs truncate" title={item.item_name}>
-                              {item.item_name}
-                            </td>
+                              {/* Landed Cost/Unit */}
+                              <td className="py-2 px-2 text-right font-mono">
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 font-bold text-[10px]">
+                                  ₹{landedCost.toFixed(2)}
+                                </span>
+                              </td>
 
-                            <td className="py-2 px-2 font-mono text-slate-400 text-[11px]">
-                              {item.hsn_code || '—'}
-                            </td>
+                              {/* Total */}
+                              <td className="py-2 px-3 text-right font-mono font-bold text-emerald-400">
+                                ₹{total.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
 
-                            <td className="py-2 px-2 text-right font-bold text-emerald-400">
-                              {item.quantity} {item.unit ? <span className="text-[10px] text-slate-400 font-normal">{item.unit}</span> : ''}
-                            </td>
+                    {/* Dedicated Column Totals Summary Footer */}
+                    {(() => {
+                      const itemsList = selectedLedgerInvoice.purchase_items || selectedLedgerInvoice.items || [];
+                      if (itemsList.length === 0) return null;
+                      const totalQty = itemsList.reduce((acc, it) => acc + (Math.max(0, Number(it.quantity ?? it.qty) || 0)), 0);
+                      const totalTaxable = Number(selectedLedgerInvoice.total_taxable_amount) || itemsList.reduce((acc, it) => {
+                        const q = Math.max(0, Number(it.quantity ?? it.qty) || 1);
+                        const r = Number(it.rate ?? it.purchase_price ?? 0);
+                        const d = Number(it.discount_amount ?? it.discount) || 0;
+                        return acc + (Number(it.taxable_amount) || Math.max(0, +(q * r - d).toFixed(2)));
+                      }, 0);
+                      const totalTaxes = Number(selectedLedgerInvoice.total_tax_amount) || itemsList.reduce((acc, it) => {
+                        const c = Number(it.cgst_amount || 0);
+                        const s = Number(it.sgst_amount || 0);
+                        const cs = Number(it.cess_amount || it.cess || 0);
+                        return acc + (c + s + cs);
+                      }, 0);
+                      const grandTot = Number(selectedLedgerInvoice.grand_total || 0);
 
-                            <td className="py-2 px-2 text-right font-mono text-slate-300">
-                              ₹{Number(item.purchase_price ?? item.rate ?? 0).toFixed(2)}
+                      return (
+                        <tfoot className="sticky bottom-0 z-20 bg-slate-950/95 backdrop-blur-sm border-t-2 border-emerald-500/40 font-semibold shadow-inner">
+                          <tr>
+                            <td colSpan={4} className="py-2.5 px-3 text-left font-bold text-xs uppercase tracking-wider text-emerald-400">
+                              TOTALS ({itemsList.length} items)
                             </td>
-
-                            <td className="py-2 px-2 text-right font-mono text-slate-400">
-                              {item.gst_pct ?? item.gst_rate ?? 0}%
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-emerald-300">
+                              {totalQty}
                             </td>
-
-                            <td className="py-2 px-2 text-right font-mono font-bold text-emerald-400">
-                              ₹{Number(item.total_amount ?? item.price_after_gst ?? (Number(item.purchase_price || 0) * Number(item.quantity || 1))).toFixed(2)}
+                            <td className="py-2.5 px-2 text-center text-slate-500">—</td>
+                            <td className="py-2.5 px-2 text-right text-slate-500">—</td>
+                            <td className="py-2.5 px-2 text-right text-slate-500">—</td>
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-200">
+                              ₹{totalTaxable.toFixed(2)}
+                            </td>
+                            <td className="py-2.5 px-2 text-center text-slate-500">—</td>
+                            <td className="py-2.5 px-2 text-right font-mono font-bold text-amber-400">
+                              ₹{totalTaxes.toFixed(2)}
+                            </td>
+                            <td className="py-2.5 px-2 text-center text-slate-500">—</td>
+                            <td className="py-2.5 px-3 text-right font-mono font-black text-emerald-400 text-sm">
+                              ₹{grandTot.toFixed(2)}
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
+                        </tfoot>
+                      );
+                    })()}
                   </table>
                 </div>
 
                 {/* Footer Tax Summary */}
-                <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2">
+                <div className="p-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs flex-wrap gap-2 shrink-0">
                   <span className="text-slate-400">
                     Total Taxable: <strong className="text-white">₹{Number(selectedLedgerInvoice.total_taxable_amount || 0).toFixed(2)}</strong>
                   </span>
