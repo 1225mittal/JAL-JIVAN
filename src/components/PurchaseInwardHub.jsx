@@ -120,19 +120,28 @@ export function calculateLineItem(item, manualTaxable = false) {
     ? Math.max(0, Number(item.taxable_amount) || 0)
     : Math.max(0, +(gross - discAmt).toFixed(2));
 
-  // 4 & 5. Enforce fallback summing: Total GST% = CGST% + SGST% (e.g. 2.5% + 2.5% = 5%)
-  const cgst = Number(item.cgst_pct || item.cgst || 0);
-  const sgst = Number(item.sgst_pct || item.sgst || 0);
-  const igst = Number(item.igst_pct || item.igst || 0);
-  let gstPct = Number(item.gst_percentage ?? item.gst_rate ?? item.gst_pct ?? 0);
-  if (gstPct === 0 && (cgst > 0 || sgst > 0)) {
-    gstPct = +(cgst + sgst).toFixed(2);
-  } else if (gstPct === 0 && igst > 0) {
-    gstPct = igst;
+  // 4 & 5. GST calculation: Check explicit gst_pct or gst_percentage or gst_rate first
+  let gstPct = 0;
+  if (item.gst_pct !== undefined && item.gst_pct !== null && item.gst_pct !== '') {
+    gstPct = Number(item.gst_pct) || 0;
+  } else if (item.gst_percentage !== undefined && item.gst_percentage !== null && item.gst_percentage !== '') {
+    gstPct = Number(item.gst_percentage) || 0;
+  } else if (item.gst_rate !== undefined && item.gst_rate !== null && item.gst_rate !== '') {
+    gstPct = Number(item.gst_rate) || 0;
+  } else {
+    // Only fallback to cgst + sgst if no explicit GST% was defined
+    const cgst = Number(item.cgst_pct || item.cgst || 0);
+    const sgst = Number(item.sgst_pct || item.sgst || 0);
+    const igst = Number(item.igst_pct || item.igst || 0);
+    if (cgst > 0 || sgst > 0) {
+      gstPct = +(cgst + sgst).toFixed(2);
+    } else if (igst > 0) {
+      gstPct = igst;
+    }
   }
 
-  const cgstPct = cgst > 0 ? cgst : +(gstPct / 2).toFixed(2);
-  const sgstPct = sgst > 0 ? sgst : +(gstPct / 2).toFixed(2);
+  const cgstPct = +(gstPct / 2).toFixed(2);
+  const sgstPct = +(gstPct / 2).toFixed(2);
   const cgstAmt = +((taxable * (cgstPct / 100))).toFixed(2);
   const sgstAmt = +((taxable * (sgstPct / 100))).toFixed(2);
 
@@ -1028,8 +1037,94 @@ export default function PurchaseInwardHub({
     }
   };
 
+  // Dedicated GST change handler with immediate tax, landed cost, and margin recalculation
+  const handleGstChange = (index, newGst) => {
+    setItems((prevItems) => {
+      const updated = [...prevItems];
+      const row = { ...updated[index] };
+      
+      row.gst_pct = newGst;
+      row.gst_percentage = newGst;
+      row.gst_rate = newGst;
+      row.cgst_pct = +(newGst / 2).toFixed(2);
+      row.sgst_pct = +(newGst / 2).toFixed(2);
+
+      // Recalculate CGST, SGST, Cess and Line Total
+      const qty = Number(row.qty ?? row.quantity ?? 1) || 1;
+      const rate = Number(row.rate ?? row.price_before_gst ?? row.purchase_price ?? 0) || 0;
+      const discAmt = Number(row.discount_amount ?? row.discount ?? 0) || 0;
+      const taxable = parseFloat(row.taxable_amount !== undefined && row.taxable_amount !== null && row.taxable_amount !== '' ? row.taxable_amount : Math.max(0, (qty * rate) - discAmt)) || 0;
+      const taxAmount = taxable * (newGst / 100);
+      const cessAmt = Math.max(0, Number(row.cess_amount ?? row.cess) || 0);
+
+      row.taxable_amount = taxable;
+      row.taxable = taxable;
+      row.cgst_amount = +(taxAmount / 2).toFixed(2);
+      row.sgst_amount = +(taxAmount / 2).toFixed(2);
+      row.total = +(taxable + taxAmount + cessAmt).toFixed(2);
+      row.total_amount = row.total;
+      row.price_after_gst = row.total;
+      
+      // Update landed cost and margin
+      row.landed_cost = +(row.total / qty).toFixed(2);
+      row.landing_cost = row.landed_cost;
+      row.landed_cost_per_unit = row.landed_cost;
+      const mrp = Number(row.mrp) || 0;
+      row.margin_amount = +(mrp - row.landed_cost).toFixed(2);
+      row.margin_percentage = mrp > 0 ? +((row.margin_amount / mrp) * 100).toFixed(1) : 0;
+      row.margin_pct = row.margin_percentage;
+
+      updated[index] = row;
+      return updated;
+    });
+  };
+
+  // Bulk Apply GST Slab to all items in current bill
+  const handleApplyGstToAll = (newGst) => {
+    setItems((prevItems) => {
+      return (prevItems || []).map((prevRow) => {
+        const row = { ...prevRow };
+        row.gst_pct = newGst;
+        row.gst_percentage = newGst;
+        row.gst_rate = newGst;
+        row.cgst_pct = +(newGst / 2).toFixed(2);
+        row.sgst_pct = +(newGst / 2).toFixed(2);
+
+        const qty = Number(row.qty ?? row.quantity ?? 1) || 1;
+        const rate = Number(row.rate ?? row.price_before_gst ?? row.purchase_price ?? 0) || 0;
+        const discAmt = Number(row.discount_amount ?? row.discount ?? 0) || 0;
+        const taxable = parseFloat(row.taxable_amount !== undefined && row.taxable_amount !== null && row.taxable_amount !== '' ? row.taxable_amount : Math.max(0, (qty * rate) - discAmt)) || 0;
+        const taxAmount = taxable * (newGst / 100);
+        const cessAmt = Math.max(0, Number(row.cess_amount ?? row.cess) || 0);
+
+        row.taxable_amount = taxable;
+        row.taxable = taxable;
+        row.cgst_amount = +(taxAmount / 2).toFixed(2);
+        row.sgst_amount = +(taxAmount / 2).toFixed(2);
+        row.total = +(taxable + taxAmount + cessAmt).toFixed(2);
+        row.total_amount = row.total;
+        row.price_after_gst = row.total;
+
+        row.landed_cost = +(row.total / qty).toFixed(2);
+        row.landing_cost = row.landed_cost;
+        row.landed_cost_per_unit = row.landed_cost;
+        const mrp = Number(row.mrp) || 0;
+        row.margin_amount = +(mrp - row.landed_cost).toFixed(2);
+        row.margin_percentage = mrp > 0 ? +((row.margin_amount / mrp) * 100).toFixed(1) : 0;
+        row.margin_pct = row.margin_percentage;
+
+        return row;
+      });
+    });
+    showToast(`Set all items to ${newGst}% GST slab`, 'success');
+  };
+
   // Recalculate row totals with pure arithmetic engine
   const handleItemFieldChange = (index, field, value) => {
+    if (field === 'gst_pct' || field === 'gst_percentage' || field === 'gst_rate') {
+      handleGstChange(index, parseFloat(value) || 0);
+      return;
+    }
     setItems((prev) => {
       const next = [...prev];
       const target = { ...next[index], [field]: value };
@@ -1389,15 +1484,9 @@ export default function PurchaseInwardHub({
         const cgst = Number(it.cgst_pct || 0);
         const sgst = Number(it.sgst_pct || 0);
         const igst = Number(it.igst_pct || 0);
-        let gstRate = Number(it.gst_pct ?? it.gst_rate ?? it.gst_percentage ?? 0);
-        if (gstRate === 0 && (cgst > 0 || sgst > 0)) {
-          gstRate = +(cgst + sgst).toFixed(2);
-        } else if (gstRate === 0 && igst > 0) {
-          gstRate = igst;
-        }
-
-        const cgstPct = cgst > 0 ? cgst : +(gstRate / 2).toFixed(2);
-        const sgstPct = sgst > 0 ? sgst : +(gstRate / 2).toFixed(2);
+        let gstRate = Number(it.gst_pct ?? it.gst_percentage ?? it.gst_rate ?? 0);
+        const cgstPct = +(gstRate / 2).toFixed(2);
+        const sgstPct = +(gstRate / 2).toFixed(2);
         const cgstAmt = Number(it.cgst_amount) || +((taxable * (cgstPct / 100))).toFixed(2);
         const sgstAmt = Number(it.sgst_amount) || +((taxable * (sgstPct / 100))).toFixed(2);
         const cessAmt = Number(it.cess_amount ?? it.cess) || 0;
@@ -2276,14 +2365,30 @@ export default function PurchaseInwardHub({
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleAddItemRow}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Line Item</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                      <div className="flex items-center gap-1 bg-slate-950/90 border border-slate-700/80 rounded-lg px-2.5 py-1 text-xs">
+                        <span className="text-slate-400 font-medium text-[11px] mr-0.5">Set All GST:</span>
+                        {[0, 5, 12, 18, 28].map((slab) => (
+                          <button
+                            key={slab}
+                            type="button"
+                            onClick={() => handleApplyGstToAll(slab)}
+                            className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700/80 hover:border-emerald-500/40 transition cursor-pointer"
+                          >
+                            {slab}%
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddItemRow}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Line Item</span>
+                      </button>
+                    </div>
                   </div>
 
                   {/* Bill Verification & Discrepancy Alert */}
@@ -2338,7 +2443,23 @@ export default function PurchaseInwardHub({
                           <th className="py-2.5 px-2 min-w-[80px] text-right">Rate (₹)</th>
                           <th className="py-2.5 px-2 min-w-[110px] text-right">DISC</th>
                           <th className="py-2.5 px-2 min-w-[90px] text-right">Taxable (₹)</th>
-                          <th className="py-2.5 px-2 min-w-[75px] text-right">GST %</th>
+                          <th className="py-2.5 px-2 min-w-[95px] text-right">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span>GST %</span>
+                              <div className="flex items-center gap-1" title="Quick apply slab to all rows">
+                                {[5, 12, 18].map((slab) => (
+                                  <button
+                                    key={slab}
+                                    type="button"
+                                    onClick={() => handleApplyGstToAll(slab)}
+                                    className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500/30 text-slate-300 hover:text-emerald-300 font-mono transition cursor-pointer border border-slate-700/50"
+                                  >
+                                    {slab}%
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">CGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[80px] text-right">SGST (₹)</th>
                           <th className="py-2.5 px-2 min-w-[75px] text-right">CESS (₹)</th>
@@ -2540,15 +2661,18 @@ export default function PurchaseInwardHub({
                               {/* GST % */}
                               <td className="py-2 px-2 min-w-[75px]">
                                 <select
-                                  value={it.gst_pct ?? it.gst_rate ?? 0}
-                                  onChange={(e) => handleItemFieldChange(idx, 'gst_pct', e.target.value)}
-                                  className="w-full h-8 px-1.5 bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg text-white text-xs focus:outline-none cursor-pointer"
+                                  value={Number(it.gst_pct ?? it.gst_percentage ?? 0)}
+                                  onChange={(e) => {
+                                    const newGst = parseFloat(e.target.value) || 0;
+                                    handleGstChange(idx, newGst);
+                                  }}
+                                  className="w-full bg-slate-900 border border-slate-700 text-white rounded px-2 py-1 text-xs focus:ring-1 focus:ring-emerald-500 cursor-pointer"
                                 >
-                                  <option value="0">0%</option>
-                                  <option value="5">5%</option>
-                                  <option value="12">12%</option>
-                                  <option value="18">18%</option>
-                                  <option value="28">28%</option>
+                                  <option value={0}>0%</option>
+                                  <option value={5}>5%</option>
+                                  <option value={12}>12%</option>
+                                  <option value={18}>18%</option>
+                                  <option value={28}>28%</option>
                                 </select>
                               </td>
 
