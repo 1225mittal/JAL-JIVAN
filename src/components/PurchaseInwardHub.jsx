@@ -966,6 +966,47 @@ export default function PurchaseInwardHub({
     };
   }, [items, invoiceDiscountAmount, invoiceDiscountPct, rawOcrData]);
 
+  // Direct Column Totals for Table <tfoot> Row
+  const tableColumnTotals = useMemo(() => {
+    let qtySum = 0;
+    let taxableSum = 0;
+    let cgstSum = 0;
+    let sgstSum = 0;
+    let cessSum = 0;
+    let preTaxSum = 0;
+    let grossSum = 0;
+
+    (items || []).forEach((it) => {
+      if (!it) return;
+      const q = Math.max(0, Number(it.quantity ?? it.qty) || 0);
+      const r = Math.max(0, Number(it.rate ?? it.price_before_gst ?? it.purchase_price) || 0);
+      const disc = Number(it.discount_amount ?? it.discount) || 0;
+      const taxable = Number(it.taxable_amount) || Math.max(0, +((q * r) - disc).toFixed(2));
+      const cgst = Number(it.cgst_amount) || 0;
+      const sgst = Number(it.sgst_amount) || 0;
+      const cess = Number(it.cess_amount || it.cess) || 0;
+      const gross = Number(it.total_amount ?? it.price_after_gst) || 0;
+
+      qtySum += q;
+      taxableSum += taxable;
+      cgstSum += cgst;
+      sgstSum += sgst;
+      cessSum += cess;
+      preTaxSum += taxable;
+      grossSum += gross;
+    });
+
+    return {
+      qtySum,
+      taxableSum: +taxableSum.toFixed(2),
+      cgstSum: +cgstSum.toFixed(2),
+      sgstSum: +sgstSum.toFixed(2),
+      cessSum: +cessSum.toFixed(2),
+      preTaxSum: +preTaxSum.toFixed(2),
+      grossSum: +grossSum.toFixed(2)
+    };
+  }, [items]);
+
   // Save Purchase Entry to Supabase (Permanent Archival & Stock Sync)
   const handleSavePurchaseEntry = async () => {
     if (!sellerData.name.trim()) {
@@ -1811,6 +1852,7 @@ export default function PurchaseInwardHub({
                     <table className="w-full text-left text-xs whitespace-nowrap">
                       <thead>
                         <tr className="bg-slate-900 border-b border-slate-800 text-[11px] font-bold uppercase text-slate-400 tracking-wider">
+                          <th className="py-2.5 px-2 min-w-[50px] text-center">#</th>
                           <th className="py-2.5 px-2.5 min-w-[150px]">Barcode / EAN</th>
                           <th className="py-2.5 px-2.5 min-w-[200px]">Item Name</th>
                           <th className="py-2.5 px-2 min-w-[75px]">HSN</th>
@@ -1842,6 +1884,13 @@ export default function PurchaseInwardHub({
                                   : 'hover:bg-slate-900/60'
                               }`}
                             >
+                              {/* Serial Number (S.No / #) */}
+                              <td className="py-2 px-2 min-w-[50px] text-center">
+                                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 rounded-md bg-slate-800/80 text-slate-300 font-mono font-bold text-[11px] border border-slate-700/50 shadow-inner">
+                                  {it.sn || (idx + 1)}
+                                </span>
+                              </td>
+
                               {/* Universal Barcode Field + Scanner Button */}
                               <td className="py-2 px-2.5 min-w-[150px]">
                                 <div className="flex items-center gap-1.5">
@@ -2034,12 +2083,78 @@ export default function PurchaseInwardHub({
 
                         {items.length === 0 && (
                           <tr>
-                            <td colSpan="16" className="py-8 text-center text-slate-500">
+                            <td colSpan="17" className="py-8 text-center text-slate-500">
                               No line items entered yet. Click "Add Line Item" or click "⚡ Process This Bill" from the queue above.
                             </td>
                           </tr>
                         )}
                       </tbody>
+
+                      {/* Dedicated Column Totals Summary Footer */}
+                      <tfoot className="bg-slate-900/95 border-t-2 border-emerald-500/50 font-semibold sticky bottom-0 backdrop-blur-sm z-10 shadow-lg">
+                        <tr>
+                          {/* S.No / Barcode / Item Name / HSN (4 Columns Spanned) */}
+                          <td colSpan={4} className="py-2.5 px-3 text-left font-bold text-xs uppercase tracking-wider text-emerald-400">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                              <span>TOTALS {items.length > 0 && `(${items.length} ${items.length === 1 ? 'ITEM' : 'ITEMS'})`}</span>
+                            </div>
+                          </td>
+
+                          {/* QTY Column */}
+                          <td className="py-2.5 px-2 min-w-[65px] text-right font-mono font-bold text-white text-xs">
+                            <span className="text-emerald-300 font-black">{tableColumnTotals.qtySum}</span>
+                          </td>
+
+                          {/* Unit Column */}
+                          <td className="py-2.5 px-2 min-w-[75px] text-center text-slate-500">—</td>
+
+                          {/* MRP Column */}
+                          <td className="py-2.5 px-2 min-w-[75px] text-right text-slate-500">—</td>
+
+                          {/* Rate Column */}
+                          <td className="py-2.5 px-2 min-w-[80px] text-right text-slate-500">—</td>
+
+                          {/* Taxable Amount Column */}
+                          <td className="py-2.5 px-2 min-w-[90px] text-right font-mono font-bold text-slate-200">
+                            ₹{tableColumnTotals.taxableSum.toFixed(2)}
+                          </td>
+
+                          {/* GST % Column */}
+                          <td className="py-2.5 px-2 min-w-[75px] text-center text-slate-500">—</td>
+
+                          {/* CGST Column */}
+                          <td className="py-2.5 px-2 min-w-[80px] text-right font-mono font-bold text-amber-400">
+                            ₹{tableColumnTotals.cgstSum.toFixed(2)}
+                          </td>
+
+                          {/* SGST Column */}
+                          <td className="py-2.5 px-2 min-w-[80px] text-right font-mono font-bold text-amber-400">
+                            ₹{tableColumnTotals.sgstSum.toFixed(2)}
+                          </td>
+
+                          {/* CESS Column */}
+                          <td className="py-2.5 px-2 min-w-[75px] text-right font-mono font-bold text-cyan-400">
+                            ₹{tableColumnTotals.cessSum.toFixed(2)}
+                          </td>
+
+                          {/* Cost/Unit Column */}
+                          <td className="py-2.5 px-2 min-w-[110px] text-right font-mono text-slate-500">—</td>
+
+                          {/* Amount Before Tax Column */}
+                          <td className="py-2.5 px-2 min-w-[115px] text-right font-mono font-bold text-slate-200">
+                            ₹{tableColumnTotals.preTaxSum.toFixed(2)}
+                          </td>
+
+                          {/* Total Column */}
+                          <td className="py-2.5 px-2 min-w-[95px] text-right font-mono font-black text-emerald-400 text-sm">
+                            ₹{tableColumnTotals.grossSum.toFixed(2)}
+                          </td>
+
+                          {/* Action Column */}
+                          <td className="py-2.5 px-2 min-w-[45px] text-center"></td>
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
 
