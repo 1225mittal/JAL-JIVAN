@@ -64,6 +64,20 @@ export function inferCategory(name = '') {
   return 'General FMCG';
 }
 
+/**
+ * Format GST% cleanly: snap standard slabs (0, 5, 12, 18, 28) and format floating rates
+ */
+export const formatGst = (val) => {
+  const num = parseFloat(val) || 0;
+  // Snap close floating values (e.g. 5.000169... -> 5%)
+  const rounded = Math.round(num);
+  // If it's close to standard GST slabs (0, 5, 12, 18, 28), show as whole number
+  if ([0, 5, 12, 18, 28].includes(rounded) && Math.abs(num - rounded) < 0.2) {
+    return `${rounded}%`;
+  }
+  return `${num.toFixed(1)}%`;
+};
+
 export default function ItemsInventoryHub({
   onBackToHub = null,
   showToast = () => {}
@@ -168,16 +182,30 @@ export default function ItemsInventoryHub({
         const qty = Math.max(0, Number(it.quantity ?? it.stock_qty) || 0);
         const purchasePrice = Number(it.purchase_price ?? it.cost_price) || 0;
         const inv = it.purchase_invoice_id ? invoiceMap.get(it.purchase_invoice_id) : null;
-        const gstPct = Number(it.gst_percentage ?? it.gst_pct) || (inv?.taxPct ?? 5);
+        const cgst = Number(it.cgst_pct || 0);
+        const sgst = Number(it.sgst_pct || 0);
+        const igst = Number(it.igst_pct || 0);
+        let gstPct = Number(it.gst_percentage ?? it.gst_pct ?? it.gst_rate ?? 0);
+        if (gstPct === 0 && (cgst > 0 || sgst > 0)) {
+          gstPct = +(cgst + sgst).toFixed(2);
+        } else if (gstPct === 0 && igst > 0) {
+          gstPct = igst;
+        } else if (gstPct === 0 && inv?.taxPct) {
+          gstPct = Number(inv.taxPct.toFixed(2));
+        }
 
         // Landed Cost = price_after_gst (or purchase_price * (1 + gst_pct / 100))
-        let unitLandedCost = Number(it.price_after_gst) > 0
-          ? Number(it.price_after_gst)
+        let unitLandedCost = Number(it.landing_cost || it.landed_cost || it.price_after_gst) > 0
+          ? Number(it.landing_cost || it.landed_cost || it.price_after_gst)
           : (inv?.landedRatio ? Number((purchasePrice * inv.landedRatio).toFixed(4)) : Number((purchasePrice * (1 + gstPct / 100)).toFixed(4)));
 
         if (isNaN(unitLandedCost) || unitLandedCost <= 0) {
           unitLandedCost = purchasePrice;
         }
+
+        const salePrice = Number(it.selling_price || it.mrp || 0);
+        const marginAmount = Number(it.margin_amount ?? (salePrice - unitLandedCost));
+        const marginPct = Number(it.margin_percentage ?? (salePrice > 0 ? ((marginAmount / salePrice) * 100).toFixed(1) : 0));
 
         return {
           id: it.id || `pi_${idx}`,
@@ -193,9 +221,15 @@ export default function ItemsInventoryHub({
           cost_price: purchasePrice,
           purchase_price: purchasePrice,
           unit_landed_cost: unitLandedCost,
+          landed_cost: unitLandedCost,
+          landing_cost: unitLandedCost,
+          purchase_price_with_tax: unitLandedCost,
           price_after_gst: unitLandedCost,
           mrp: Number(it.mrp) || 0,
-          selling_price: Number(it.selling_price || it.mrp || 0),
+          selling_price: salePrice,
+          margin_amount: marginAmount,
+          margin_percentage: marginPct,
+          margin_pct: marginPct,
           gst_pct: gstPct,
           gst_percentage: gstPct,
           unit: it.unit || 'PCS',
@@ -260,15 +294,26 @@ export default function ItemsInventoryHub({
       const key = (item.item_name || '').trim().toLowerCase();
       const qty = Number(item.stock_qty ?? item.quantity) || 0;
       const cost = Number(item.cost_price ?? item.purchase_price) || 0;
-      const landed = Number(item.unit_landed_cost ?? item.price_after_gst) || cost;
+      const landed = Number(item.unit_landed_cost ?? item.landed_cost ?? item.price_after_gst) || cost;
       const mrp = Number(item.mrp) || 0;
+      const selling = Number(item.selling_price || item.mrp || 0);
+      const gst = Number(item.gst_percentage ?? item.gst_pct ?? 0);
 
       if (!map.has(key)) {
         map.set(key, {
           ...item,
           stock_qty: qty,
           quantity: qty,
+          cost_price: cost,
+          purchase_price: cost,
           unit_landed_cost: landed,
+          landed_cost: landed,
+          purchase_price_with_tax: landed,
+          price_after_gst: landed,
+          mrp: mrp,
+          selling_price: selling,
+          gst_pct: gst,
+          gst_percentage: gst,
           inward_batches: 1,
           all_ids: [item.id],
           latest_created_at: item.created_at
@@ -282,9 +327,22 @@ export default function ItemsInventoryHub({
 
         if (!existing.barcode && item.barcode) existing.barcode = item.barcode;
         if (!existing.hsn_code && item.hsn_code) existing.hsn_code = item.hsn_code;
-        if (cost > 0) existing.cost_price = cost;
-        if (landed > 0) existing.unit_landed_cost = landed;
+        if (cost > 0) {
+          existing.cost_price = cost;
+          existing.purchase_price = cost;
+        }
+        if (landed > 0) {
+          existing.unit_landed_cost = landed;
+          existing.landed_cost = landed;
+          existing.purchase_price_with_tax = landed;
+          existing.price_after_gst = landed;
+        }
         if (mrp > 0) existing.mrp = mrp;
+        if (selling > 0) existing.selling_price = selling;
+        if (gst > 0) {
+          existing.gst_pct = gst;
+          existing.gst_percentage = gst;
+        }
         if (new Date(item.created_at) > new Date(existing.latest_created_at)) {
           existing.latest_created_at = item.created_at;
         }
@@ -336,7 +394,15 @@ export default function ItemsInventoryHub({
       let aVal = a?.[sortField] ?? '';
       let bVal = b?.[sortField] ?? '';
 
-      if (typeof aVal === 'number' || typeof bVal === 'number') {
+      if (sortField === 'margin' || sortField === 'margin_amount') {
+        const getMargin = (it) => {
+          const landed = parseFloat(it?.unit_landed_cost || it?.landed_cost || it?.price_after_gst || it?.purchase_price_with_tax || it?.cost_price || 0);
+          const sale = parseFloat(it?.selling_price || it?.mrp || 0);
+          return sale - landed;
+        };
+        aVal = getMargin(a);
+        bVal = getMargin(b);
+      } else if (typeof aVal === 'number' || typeof bVal === 'number') {
         aVal = Number(aVal) || 0;
         bVal = Number(bVal) || 0;
       } else {
@@ -897,6 +963,15 @@ export default function ItemsInventoryHub({
                 </th>
                 <th className="py-3 px-2 text-right">MRP (₹)</th>
                 <th className="py-3 px-2 text-right">Selling Price</th>
+                <th
+                  onClick={() => handleSort('margin')}
+                  className="py-3 px-2 text-right cursor-pointer hover:text-white transition min-w-[125px]"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    <span>Margin (₹ / %)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-600" />
+                  </div>
+                </th>
                 <th className="py-3 px-2 text-right">GST %</th>
                 <th className="py-3 px-3 text-center">Actions</th>
               </tr>
@@ -1015,9 +1090,42 @@ export default function ItemsInventoryHub({
                       ₹{Number(item.selling_price || item.mrp || 0).toFixed(2)}
                     </td>
 
+                    {/* Margin (₹ / %) */}
+                    <td className="py-2.5 px-2.5 text-right font-mono">
+                      {(() => {
+                        const landed_cost = parseFloat(item.unit_landed_cost || item.landed_cost || item.price_after_gst || item.purchase_price_with_tax || item.cost_price || item.purchase_price || 0);
+                        const sale_price = parseFloat(item.selling_price || item.mrp || 0);
+                        const margin_amount = sale_price - landed_cost;
+                        const margin_pct = sale_price > 0 ? ((margin_amount / sale_price) * 100).toFixed(1) : 0;
+
+                        if (margin_amount > 0) {
+                          return (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold font-mono text-[11px] shadow-sm">
+                              +₹{margin_amount.toFixed(2)} ({margin_pct}%)
+                            </span>
+                          );
+                        }
+                        if (margin_amount < 0) {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 font-bold font-mono text-[11px] shadow-sm animate-pulse" title="Negative margin / Loss warning">
+                              <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span>-₹{Math.abs(margin_amount).toFixed(2)} ({margin_pct}%)</span>
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="font-mono text-slate-500 text-[11px]">
+                            ₹0.00 (0%)
+                          </span>
+                        );
+                      })()}
+                    </td>
+
                     {/* GST % */}
-                    <td className="py-2.5 px-2 text-right font-mono text-slate-400">
-                      {item.gst_pct || 0}%
+                    <td className="py-2.5 px-2 text-right font-mono">
+                      <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-800 text-slate-300">
+                        {formatGst(item.gst_percentage ?? item.gst_pct)}
+                      </span>
                     </td>
 
                     {/* Actions */}
@@ -1047,7 +1155,7 @@ export default function ItemsInventoryHub({
 
               {filteredItems.length === 0 && (
                 <tr>
-                  <td colSpan="11" className="py-12 text-center text-slate-500">
+                  <td colSpan="12" className="py-12 text-center text-slate-500">
                     <Package className="w-8 h-8 mx-auto text-slate-600 mb-2" />
                     <p className="font-semibold">No items match your filter criteria.</p>
                     <button

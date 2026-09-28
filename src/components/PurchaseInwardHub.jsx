@@ -75,6 +75,20 @@ import {
 export const PURCHASE_UNITS = ['PCS', 'KG', 'GM', 'LTR', 'ML', 'BAG', 'BOX', 'PACK', 'TIN'];
 
 /**
+ * Format GST% cleanly: snap standard slabs (0, 5, 12, 18, 28) and format floating rates
+ */
+export const formatGst = (val) => {
+  const num = parseFloat(val) || 0;
+  // Snap close floating values (e.g. 5.000169... -> 5%)
+  const rounded = Math.round(num);
+  // If it's close to standard GST slabs (0, 5, 12, 18, 28), show as whole number
+  if ([0, 5, 12, 18, 28].includes(rounded) && Math.abs(num - rounded) < 0.2) {
+    return `${rounded}%`;
+  }
+  return `${num.toFixed(1)}%`;
+};
+
+/**
  * Pure Mathematical Calculation Engine for Purchase Inward Line Items
  * Computes:
  * 1. Gross Line Amount = qty * rate
@@ -3390,8 +3404,10 @@ export default function PurchaseInwardHub({
                               </td>
 
                               {/* GST % */}
-                              <td className="py-2 px-2 text-right font-mono text-slate-400">
-                                {gstPct}%
+                              <td className="py-2 px-2 text-right font-mono">
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-800 text-slate-300">
+                                  {formatGst(gstPct)}
+                                </span>
                               </td>
 
                               {/* Taxes (CGST/SGST) */}
@@ -3512,8 +3528,17 @@ export default function PurchaseInwardHub({
                   itemsList.forEach((it) => {
                     const q = Math.max(1, Number(it.qty || it.quantity) || 1);
                     const r = Number(it.rate || it.purchase_price || it.price_before_gst || 0);
-                    const t = Number(it.taxable_amount || (q * r));
-                    const g = Number(it.gst_pct || it.gst_rate || ((Number(it.cgst_pct || 0) + Number(it.sgst_pct || 0))) || 5);
+                    const d = Number(it.discount_amount || it.discount || 0);
+                    const t = Number(it.taxable_amount || Math.max(0, (q * r) - d));
+                    const cgstP = Number(it.cgst_pct || 0);
+                    const sgstP = Number(it.sgst_pct || 0);
+                    const igstP = Number(it.igst_pct || 0);
+                    let g = Number(it.gst_pct ?? it.gst_rate ?? 0);
+                    if (g === 0 && (cgstP > 0 || sgstP > 0)) {
+                      g = cgstP + sgstP;
+                    } else if (g === 0 && igstP > 0) {
+                      g = igstP;
+                    }
                     const c = Number(it.cgst_amount || 0);
                     const s = Number(it.sgst_amount || 0);
                     const cs = Number(it.cess_amount || it.cess || 0);
