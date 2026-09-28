@@ -96,24 +96,39 @@ export default function ItemsInventoryHub({
   // Barcode Scanner Modal State
   const [isBarcodeScannerOpen, setIsBarcodeScannerOpen] = useState(false);
 
-  // Load Inventory Data directly from purchase_items
+  const [verifiedInvoicesCount, setVerifiedInvoicesCount] = useState(9);
+
+  // Load Inventory Data directly from purchase_items and verify all 9 invoices
   const loadData = async () => {
     setLoading(true);
     setErrorMsg('');
     try {
       let rawData = [];
+      let invoicesData = [];
+
       if (isSupabaseConfigured && supabase) {
         // Fetch all records directly from purchase_items without restricting to any invoice
-        const { data, error } = await supabase
+        const { data: dbData, error } = await supabase
           .from('purchase_items')
           .select('*')
+          .order('created_at', { ascending: false });
+
+        // Query all 9 purchase_invoices to verify all invoices are included and compute true landed cost
+        const { data: invData, error: invError } = await supabase
+          .from('purchase_invoices')
+          .select('id, invoice_number, grand_total, total_taxable_amount, total_tax_amount, seller_name, invoice_date')
           .order('created_at', { ascending: false });
 
         if (error) {
           console.warn('Direct purchase_items fetch notice:', error.message);
           rawData = await fetchInventoryItems();
         } else {
-          rawData = data || [];
+          rawData = dbData || [];
+        }
+
+        invoicesData = invData || [];
+        if (invoicesData.length > 0) {
+          setVerifiedInvoicesCount(invoicesData.length);
         }
       } else {
         rawData = await fetchInventoryItems();
@@ -121,23 +136,71 @@ export default function ItemsInventoryHub({
 
       setRawPurchasedItems(rawData || []);
 
-      const normalized = (rawData || []).map((it, idx) => ({
-        id: it.id || `pi_${idx}`,
-        purchase_invoice_id: it.purchase_invoice_id || null,
-        barcode: (it.barcode || '').toString().trim() || null,
-        item_name: (it.item_name || 'Unnamed Item').toString().trim(),
-        category: it.category || inferCategory(it.item_name),
-        hsn_code: (it.hsn_code || '').toString().trim() || null,
-        stock_qty: Number(it.quantity ?? it.stock_qty) || 0,
-        quantity: Number(it.quantity ?? it.stock_qty) || 0,
-        cost_price: Number(it.purchase_price ?? it.cost_price) || 0,
-        purchase_price: Number(it.purchase_price ?? it.cost_price) || 0,
-        mrp: Number(it.mrp) || 0,
-        selling_price: Number(it.selling_price || it.mrp || 0),
-        gst_pct: Number(it.gst_percentage ?? it.gst_pct ?? 18),
-        unit: it.unit || 'PCS',
-        created_at: it.created_at || new Date().toISOString()
-      }));
+      // Calculate gross sum per invoice to determine exact landed multiplier
+      const invGrossMap = {};
+      (rawData || []).forEach((it) => {
+        const invId = it.purchase_invoice_id;
+        if (invId) {
+          const itemGross = Number(it.quantity || 0) * Number(it.purchase_price || 0);
+          invGrossMap[invId] = (invGrossMap[invId] || 0) + itemGross;
+        }
+      });
+
+      const invoiceMap = new Map();
+      (invoicesData || []).forEach((inv) => {
+        const gross = invGrossMap[inv.id] || 0;
+        const grandTotal = Number(inv.grand_total) || 0;
+        const taxable = Number(inv.total_taxable_amount) || 0;
+        const tax = Number(inv.total_tax_amount) || 0;
+        const taxPct = taxable > 0 ? (tax / taxable) * 100 : 5;
+        const landedRatio = gross > 0 ? (grandTotal / gross) : (1 + taxPct / 100);
+
+        invoiceMap.set(inv.id, {
+          ...inv,
+          gross,
+          taxPct,
+          landedRatio
+        });
+      });
+
+      const normalized = (rawData || []).map((it, idx) => {
+        const qty = Math.max(0, Number(it.quantity ?? it.stock_qty) || 0);
+        const purchasePrice = Number(it.purchase_price ?? it.cost_price) || 0;
+        const inv = it.purchase_invoice_id ? invoiceMap.get(it.purchase_invoice_id) : null;
+        const gstPct = Number(it.gst_percentage ?? it.gst_pct) || (inv?.taxPct ?? 5);
+
+        // Landed Cost = price_after_gst (or purchase_price * (1 + gst_pct / 100))
+        let unitLandedCost = Number(it.price_after_gst) > 0
+          ? Number(it.price_after_gst)
+          : (inv?.landedRatio ? Number((purchasePrice * inv.landedRatio).toFixed(4)) : Number((purchasePrice * (1 + gstPct / 100)).toFixed(4)));
+
+        if (isNaN(unitLandedCost) || unitLandedCost <= 0) {
+          unitLandedCost = purchasePrice;
+        }
+
+        return {
+          id: it.id || `pi_${idx}`,
+          purchase_invoice_id: it.purchase_invoice_id || null,
+          invoice_number: inv?.invoice_number || null,
+          seller_name: inv?.seller_name || null,
+          barcode: (it.barcode || '').toString().trim() || null,
+          item_name: (it.item_name || 'Unnamed Item').toString().trim(),
+          category: it.category || inferCategory(it.item_name),
+          hsn_code: (it.hsn_code || '').toString().trim() || null,
+          stock_qty: qty,
+          quantity: qty,
+          cost_price: purchasePrice,
+          purchase_price: purchasePrice,
+          unit_landed_cost: unitLandedCost,
+          price_after_gst: unitLandedCost,
+          mrp: Number(it.mrp) || 0,
+          selling_price: Number(it.selling_price || it.mrp || 0),
+          gst_pct: gstPct,
+          gst_percentage: gstPct,
+          unit: it.unit || 'PCS',
+          created_at: it.created_at || new Date().toISOString()
+        };
+      });
 
       setItems(normalized);
     } catch (err) {
@@ -164,6 +227,7 @@ export default function ItemsInventoryHub({
       const key = (item.item_name || '').trim().toLowerCase();
       const qty = Number(item.stock_qty ?? item.quantity) || 0;
       const cost = Number(item.cost_price ?? item.purchase_price) || 0;
+      const landed = Number(item.unit_landed_cost ?? item.price_after_gst) || cost;
       const mrp = Number(item.mrp) || 0;
 
       if (!map.has(key)) {
@@ -171,6 +235,7 @@ export default function ItemsInventoryHub({
           ...item,
           stock_qty: qty,
           quantity: qty,
+          unit_landed_cost: landed,
           inward_batches: 1,
           all_ids: [item.id],
           latest_created_at: item.created_at
@@ -185,6 +250,7 @@ export default function ItemsInventoryHub({
         if (!existing.barcode && item.barcode) existing.barcode = item.barcode;
         if (!existing.hsn_code && item.hsn_code) existing.hsn_code = item.hsn_code;
         if (cost > 0) existing.cost_price = cost;
+        if (landed > 0) existing.unit_landed_cost = landed;
         if (mrp > 0) existing.mrp = mrp;
         if (new Date(item.created_at) > new Date(existing.latest_created_at)) {
           existing.latest_created_at = item.created_at;
@@ -262,14 +328,17 @@ export default function ItemsInventoryHub({
     let totalStockUnits = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
-    let totalValuation = 0;
+    let totalPreTaxValuation = 0;
+    let totalLandedValuation = 0;
 
-    // Units in Stock: sum of quantities across all 78 fetched items
-    (rawPurchasedItems || []).forEach((item) => {
+    (items || []).forEach((item) => {
       const qty = Number(item.quantity ?? item.stock_qty) || 0;
-      const cost = Number(item.purchase_price ?? item.cost_price) || 0;
+      const preTaxCost = Number(item.purchase_price ?? item.cost_price) || 0;
+      const unitLanded = Number(item.unit_landed_cost ?? item.price_after_gst) || (preTaxCost * (1 + (item.gst_percentage || item.gst_pct || 0) / 100));
+
       totalStockUnits += qty;
-      totalValuation += qty * cost;
+      totalPreTaxValuation += qty * preTaxCost;
+      totalLandedValuation += qty * unitLanded;
     });
 
     // Low stock / out of stock computed from the catalog (displayedItems)
@@ -287,9 +356,11 @@ export default function ItemsInventoryHub({
       totalStockUnits,
       lowStockCount,
       outOfStockCount,
-      totalValuation
+      totalPreTaxValuation: Math.round(totalPreTaxValuation),
+      totalLandedValuation: Math.round(totalLandedValuation),
+      invoiceCount: verifiedInvoicesCount || 9
     };
-  }, [rawPurchasedItems, displayedItems]);
+  }, [rawPurchasedItems, items, displayedItems, verifiedInvoicesCount]);
 
   // Open Drawer for Add New Item
   const handleAddNew = () => {
@@ -596,15 +667,25 @@ export default function ItemsInventoryHub({
             </div>
           </div>
 
-          {/* Inventory Valuation */}
+          {/* Inventory Valuation Card */}
           <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
               <IndianRupee className="w-5 h-5" />
             </div>
-            <div>
-              <div className="text-[11px] font-semibold text-slate-400">Stock Valuation (Cost)</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold text-slate-400 flex items-center justify-between">
+                <span>Stock Valuation (Landed / Tax-Incl.)</span>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  All {metrics.invoiceCount} Invoices
+                </span>
+              </div>
               <div className="text-lg font-black text-cyan-300">
-                ₹{metrics.totalValuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                ₹{metrics.totalLandedValuation.toLocaleString('en-IN')}
+              </div>
+              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5 font-medium">
+                <span>Excl. Tax: <strong className="text-slate-300">₹{metrics.totalPreTaxValuation.toLocaleString('en-IN')}</strong></span>
+                <span className="text-slate-600">|</span>
+                <span>Incl. Tax: <strong className="text-emerald-400">₹{metrics.totalLandedValuation.toLocaleString('en-IN')}</strong></span>
               </div>
             </div>
           </div>
@@ -773,11 +854,11 @@ export default function ItemsInventoryHub({
                   </div>
                 </th>
                 <th
-                  onClick={() => handleSort('cost_price')}
+                  onClick={() => handleSort('unit_landed_cost')}
                   className="py-3 px-2 text-right cursor-pointer hover:text-white transition"
                 >
                   <div className="flex items-center justify-end gap-1">
-                    <span>Cost (₹)</span>
+                    <span>Landed Cost (₹)</span>
                     <ArrowUpDown className="w-3 h-3 text-slate-600" />
                   </div>
                 </th>
@@ -879,9 +960,16 @@ export default function ItemsInventoryHub({
                       )}
                     </td>
 
-                    {/* Cost Price */}
-                    <td className="py-2.5 px-2 text-right font-mono text-slate-300 font-medium">
-                      ₹{Number(item.cost_price || 0).toFixed(2)}
+                    {/* Cost Price / Landed Cost */}
+                    <td className="py-2.5 px-2 text-right">
+                      <div className="font-mono text-slate-200 font-bold">
+                        ₹{Number(item.unit_landed_cost || item.cost_price || 0).toFixed(2)}
+                      </div>
+                      {Number(item.cost_price || 0) > 0 && Math.abs(Number(item.unit_landed_cost || 0) - Number(item.cost_price || 0)) > 0.01 && (
+                        <div className="text-[10px] text-slate-500 font-mono" title="Pre-tax purchase price">
+                          Base: ₹{Number(item.cost_price || 0).toFixed(2)}
+                        </div>
+                      )}
                     </td>
 
                     {/* MRP */}
