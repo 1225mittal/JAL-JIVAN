@@ -120,19 +120,13 @@ export function calculateLineItem(item, manualTaxable = false) {
     ? Math.max(0, Number(item.taxable_amount) || 0)
     : Math.max(0, +(gross - discAmt).toFixed(2));
 
-  // 4 & 5. GST calculation: Check explicit gst_pct or gst_percentage or gst_rate first
-  let gstPct = 0;
-  if (item.gst_pct !== undefined && item.gst_pct !== null && item.gst_pct !== '') {
-    gstPct = Number(item.gst_pct) || 0;
-  } else if (item.gst_percentage !== undefined && item.gst_percentage !== null && item.gst_percentage !== '') {
-    gstPct = Number(item.gst_percentage) || 0;
-  } else if (item.gst_rate !== undefined && item.gst_rate !== null && item.gst_rate !== '') {
-    gstPct = Number(item.gst_rate) || 0;
-  } else {
-    // Only fallback to cgst + sgst if no explicit GST% was defined
-    const cgst = Number(item.cgst_pct || item.cgst || 0);
-    const sgst = Number(item.sgst_pct || item.sgst || 0);
-    const igst = Number(item.igst_pct || item.igst || 0);
+  // 4 & 5. Safely extract tax rates without throwing ReferenceError
+  const cgst = parseFloat(item.cgst_pct ?? item.cgst_rate ?? item.cgst ?? 0) || 0;
+  const sgst = parseFloat(item.sgst_pct ?? item.sgst_rate ?? item.sgst ?? 0) || 0;
+  const igst = parseFloat(item.igst_pct ?? item.igst_rate ?? item.igst ?? 0) || 0;
+
+  let gstPct = parseFloat(item.gst_pct ?? item.gst_percentage ?? item.gst_rate ?? 0) || 0;
+  if (gstPct === 0) {
     if (cgst > 0 || sgst > 0) {
       gstPct = +(cgst + sgst).toFixed(2);
     } else if (igst > 0) {
@@ -934,68 +928,86 @@ export default function PurchaseInwardHub({
       }
 
       // Populate Line Items with detailed GST fields & pure arithmetic calculation
-      if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+      const rawItems = parsed.items;
+      if (Array.isArray(rawItems) && rawItems.length > 0) {
         setItems(
-          parsed.items.map((it, idx) => {
-            const sn = Number(it.sn) || (idx + 1);
-            const qty = Math.max(1, Number(it.qty ?? it.quantity) || 1);
-            const rate = Math.max(0, Number(it.rate ?? it.purchase_price ?? it.price_before_gst) || 0);
+          rawItems.map((item, index) => {
+            const qty = parseFloat(item.qty || item.quantity || 1) || 1;
+            const rate = parseFloat(item.rate || item.purchase_price || item.price_before_gst || 0) || 0;
+            const mrp = parseFloat(item.mrp || 0) || (rate > 0 ? +(rate * 1.25).toFixed(2) : rate);
+            const discountPct = parseFloat(item.discount_pct || item.disc || item.discount || 0) || 0;
+            const discountAmount = parseFloat(item.discount_amount || 0) || 0;
 
-            // Extract explicitly printed line discount (percentage or flat amount)
-            const extractedDiscPct = Number(it.discount_pct || it.discount || 0);
-            const extractedDiscAmount = Number(it.discount_amount || 0);
+            // Safely extract tax rates without throwing ReferenceError
+            const cgst = parseFloat(item.cgst_pct ?? item.cgst_rate ?? item.cgst ?? 0) || 0;
+            const sgst = parseFloat(item.sgst_pct ?? item.sgst_rate ?? item.sgst ?? 0) || 0;
+            const igst = parseFloat(item.igst_pct ?? item.igst_rate ?? item.igst ?? 0) || 0;
 
-            let discType = '%';
-            let discVal = 0;
-            if (extractedDiscPct > 0) {
-              discType = '%';
-              discVal = extractedDiscPct;
-            } else if (extractedDiscAmount > 0) {
-              discType = '₹';
-              discVal = extractedDiscAmount;
+            let totalGst = parseFloat(item.gst_pct ?? item.gst_percentage ?? item.gst_rate ?? 0) || 0;
+
+            if (totalGst === 0) {
+              if (cgst > 0 || sgst > 0) {
+                totalGst = cgst + sgst;
+              } else if (igst > 0) {
+                totalGst = igst;
+              }
             }
 
-            const hsnCode = (it.hsn ?? it.hsn_code ?? '').toString().trim();
-            const rawBarcode = (it.barcode || '').toString().trim();
-            // Discard barcode if it matches HSN or is less than 12 digits
+            const hsnCode = (item.hsn ?? item.hsn_code ?? '').toString().trim();
+            const rawBarcode = (item.barcode || '').toString().trim();
             const cleanBarcode = (rawBarcode && rawBarcode !== hsnCode && rawBarcode.length >= 12) ? rawBarcode : '';
 
-            // Split tax columns & GST extraction logic (Stop defaulting to 18%)
-            const cgst = Number(it.cgst_pct || it.cgst || 0);
-            const sgst = Number(it.sgst_pct || it.sgst || 0);
-            const igst = Number(it.igst_pct || it.igst || 0);
-            let totalGst = Number(it.gst_pct ?? it.gst_percentage ?? it.gst_rate ?? 0);
-            if (totalGst === 0 && (cgst > 0 || sgst > 0)) {
-              totalGst = +(cgst + sgst).toFixed(2);
-            } else if (totalGst === 0 && igst > 0) {
-              totalGst = igst;
-            }
+            const gross = qty * rate;
+            const discountAmt = discountPct > 0 ? (gross * discountPct) / 100 : discountAmount;
+            const taxable = Math.max(0, gross - discountAmt);
+            const taxAmount = (taxable * totalGst) / 100;
+            const lineTotal = taxable + taxAmount;
+            const landedCost = lineTotal / qty;
+            const marginAmount = mrp - landedCost;
+            const marginPct = mrp > 0 ? ((marginAmount / mrp) * 100) : 0;
 
-            const rawItem = {
-              id: `temp_${Date.now()}_${idx}`,
-              sn,
+            return {
+              id: item.id || `item_${Date.now()}_${index}`,
+              sn: Number(item.sn) || (index + 1),
               barcode: cleanBarcode,
-              item_name: (it.name || it.item_name || it.description || `Item ${sn}`).toString().trim(),
-              hsn_code: hsnCode,
+              item_name: item.item_name || item.name || item.description || `Item ${index + 1}`,
+              name: item.item_name || item.name || `Item ${index + 1}`,
               hsn: hsnCode,
-              unit: (it.unit || 'PCS').toString().toUpperCase().trim(),
+              hsn_code: hsnCode,
+              qty,
               quantity: qty,
-              mrp: Number(it.mrp) || +(rate * 1.25).toFixed(2),
-              rate: rate,
-              discount_pct: extractedDiscPct,
-              discount_type: discType,
-              discount_value: discVal,
+              unit: (item.unit || 'PCS').toString().toUpperCase().trim(),
+              mrp: +mrp.toFixed(2),
+              rate: +rate.toFixed(2),
+              purchase_price: +rate.toFixed(2),
+              price_before_gst: +rate.toFixed(2),
+              discount_pct: discountPct,
+              discount_type: discountPct > 0 ? '%' : (discountAmount > 0 ? '₹' : '%'),
+              discount_value: discountPct > 0 ? discountPct : discountAmount,
+              discount_amount: +discountAmt.toFixed(2),
+              discount: +discountAmt.toFixed(2),
+              taxable_amount: +taxable.toFixed(2),
+              taxable: +taxable.toFixed(2),
               gst_pct: totalGst,
               gst_rate: totalGst,
               gst_percentage: totalGst,
-              cgst_pct: cgst,
-              sgst_pct: sgst,
+              cgst_pct: cgst > 0 ? cgst : +(totalGst / 2).toFixed(2),
+              sgst_pct: sgst > 0 ? sgst : +(totalGst / 2).toFixed(2),
               igst_pct: igst,
-              cess_amount: Number(it.cess_amount ?? it.cess) || 0
+              cgst_amount: +(taxAmount / 2).toFixed(2),
+              sgst_amount: +(taxAmount / 2).toFixed(2),
+              cess: 0,
+              cess_amount: 0,
+              total: +lineTotal.toFixed(2),
+              total_amount: +lineTotal.toFixed(2),
+              price_after_gst: +lineTotal.toFixed(2),
+              landed_cost: +landedCost.toFixed(2),
+              landing_cost: +landedCost.toFixed(2),
+              landed_cost_per_unit: +landedCost.toFixed(2),
+              margin_amount: +marginAmount.toFixed(2),
+              margin_percentage: +marginPct.toFixed(1),
+              margin_pct: +marginPct.toFixed(1)
             };
-
-            // Pure arithmetic calculation engine - independent of printed line totals
-            return calculateLineItem(rawItem);
           })
         );
       } else {
