@@ -605,137 +605,83 @@ export default function PurchaseInwardHub({
     );
   };
 
-  // Load pending queue from Supabase on mount
+  // Persistent Supabase Realtime Queue Listener & Initial Fetch
   useEffect(() => {
-    const fetchPendingQueue = async () => {
+    // 1. Initial fetch of active queue bills
+    const fetchQueue = async () => {
+      if (!supabase) return;
       try {
-        const queuedBills = await fetchPurchaseBillQueue();
-        if (queuedBills && queuedBills.length > 0) {
-          setBillQueue(
-            queuedBills.map((b, idx) => ({
-              ...b,
-              name: b.name || `Mobile Snap #${idx + 1}`,
-              dataUrl: b.image_url,
-              uploadedAt: b.created_at || new Date().toISOString(),
-              attachedToPrevious: false
-            }))
-          );
+        const { data, error } = await supabase
+          .from('purchase_bill_queue')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!error && data) {
+          setBillQueue(data);
         }
       } catch (err) {
-        console.warn('Failed to load pending queue from Supabase:', err);
+        console.warn('Failed to fetch initial queue:', err);
       }
     };
 
-    fetchPendingQueue();
+    fetchQueue();
     loadHistory();
     loadVendors();
 
-    // Supabase Realtime Subscription on purchase_bill_queue
-    const isConfigured = typeof isSupabaseConfigured === 'function' ? isSupabaseConfigured() : Boolean(isSupabaseConfigured);
-    if (isConfigured && supabase) {
-      const channel = supabase
-        .channel('bill_queue_realtime')
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'purchase_bill_queue' },
-          (payload) => {
-            if (!payload?.new) return;
-            const newRow = payload.new;
-            const formatted = {
-              ...newRow,
-              name: newRow.name || `Mobile Snap #${Date.now().toString().slice(-4)}`,
-              image_url: newRow.image_url,
-              dataUrl: newRow.image_url,
-              uploadedAt: newRow.created_at || new Date().toISOString(),
-              created_at: newRow.created_at || new Date().toISOString(),
-              status: newRow.status || 'pending_ocr',
-              attachedToPrevious: false
-            };
+    if (!supabase) return;
 
-            setBillQueue((prev) => {
-              if (prev.some((b) => b.id === formatted.id || (formatted.image_url && (b.image_url === formatted.image_url || b.dataUrl === formatted.image_url)))) {
-                return prev;
-              }
-              return [formatted, ...prev];
-            });
-
-            markRecentlyArrived(formatted.id);
-            playNotificationChime();
-            showToast('📸 New bill snapped from mobile added to queue!', 'success');
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'purchase_bill_queue' },
-          (payload) => {
-            if (!payload?.new) return;
-            const updated = payload.new;
-            setBillQueue((prev) =>
-              updated.status === 'pending_ocr'
-                ? (prev || []).map((b) =>
-                    b.id === updated.id
-                      ? {
-                          ...b,
-                          ...updated,
-                          image_url: updated.image_url,
-                          dataUrl: updated.image_url
-                        }
-                      : b
-                  )
-                : (prev || []).filter((b) => b.id !== updated.id)
-            );
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'purchase_bill_queue' },
-          (payload) => {
-            if (payload?.old?.id) {
-              setBillQueue((prev) => prev.filter((b) => b.id !== payload.old.id));
-            }
-          }
-        )
-        .subscribe();
-
-      // Dual Fallback via Realtime Broadcast on global_inward_sync
-      const globalSyncChannel = supabase
-        .channel('global_inward_sync')
-        .on('broadcast', { event: 'NEW_BILL_SNAPPED' }, ({ payload }) => {
-          if (!payload) return;
-          const imgUrl = payload.image_url || payload.imageUrl || payload.dataUrl;
-          if (!imgUrl) return;
-
-          const newBill = {
-            ...payload,
-            id: payload.id || ('bill_' + Date.now()),
-            name: payload.name || `Mobile Snap #${Date.now().toString().slice(-4)}`,
-            image_url: imgUrl,
-            dataUrl: imgUrl,
-            uploadedAt: payload.created_at || new Date().toISOString(),
-            created_at: payload.created_at || new Date().toISOString(),
-            status: payload.status || 'pending_ocr',
-            attachedToPrevious: false
-          };
-
+    // 2. Realtime listener for incoming phone uploads
+    const channel = supabase
+      .channel('public:purchase_bill_queue')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'purchase_bill_queue' },
+        (payload) => {
+          console.log('⚡ New mobile snap received:', payload.new);
           setBillQueue((prev) => {
-            if (prev.some((b) => b.id === newBill.id || (imgUrl && (b.image_url === imgUrl || b.dataUrl === imgUrl)))) {
-              return prev;
-            }
-            return [newBill, ...prev];
+            // Avoid duplicate entries if already added
+            if (prev.some((b) => b.id === payload.new.id)) return prev;
+            return [payload.new, ...prev];
           });
 
-          markRecentlyArrived(newBill.id);
-          playNotificationChime();
-          showToast('📸 New bill snapped from mobile added to queue!', 'success');
-        })
-        .subscribe();
+          // Audible chime alert when mobile snap lands
+          try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+            osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1);
+            gain.gain.setValueAtTime(0.2, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.35);
+          } catch (e) {
+            console.warn('Audio alert not supported/allowed:', e);
+          }
 
-      return () => {
-        supabase.removeChannel(channel);
-        supabase.removeChannel(globalSyncChannel);
-      };
-    }
-  }, []);
+          if (payload.new?.id) {
+            markRecentlyArrived(payload.new.id);
+          }
+          showToast('📸 New bill snapped from mobile added to queue!', 'success');
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'purchase_bill_queue' },
+        (payload) => {
+          // Live remove card when deleted/committed
+          setBillQueue((prev) => prev.filter((b) => b.id !== payload.old?.id));
+        }
+      )
+      .subscribe((status) => {
+        console.log('Realtime Queue Subscription Status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []); // Empty dependency array ensures permanent channel attachment
 
   // Handle Multi-File / Image / PDF Upload
   const handleFileChange = async (e) => {
