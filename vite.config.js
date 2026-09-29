@@ -158,7 +158,7 @@ export default defineConfig(({ mode }) => {
                   if (!process.env.GEMINI_API_KEY) {
                     process.env.GEMINI_API_KEY = env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY || ''
                   }
-                  const { default: handler } = await import('./api/ocr-ensemble.js')
+                  const { default: handler } = await import('./api/groq-ocr.js')
                   res.status = (code) => { res.statusCode = code; return res }
                   res.json = (data) => {
                     res.setHeader('Content-Type', 'application/json')

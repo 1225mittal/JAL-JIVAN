@@ -2206,9 +2206,18 @@ export default function PurchaseInwardHub({
               )}
 
               {ocrError && (
-                <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{ocrError}</span>
+                <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{ocrError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOcrError('')}
+                    className="text-rose-400 hover:text-rose-200 text-xs px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 transition cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
                 </div>
               )}
 

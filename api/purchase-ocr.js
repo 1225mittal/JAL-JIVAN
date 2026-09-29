@@ -1,2 +1,2 @@
-import handler from './ocr-ensemble.js';
+import handler from './groq-ocr.js';
 export default handler;

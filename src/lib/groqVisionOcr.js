@@ -265,8 +265,9 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
     || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '')
     || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '');
 
+  // If no direct client API key is provided, seamlessly route through backend serverless endpoint
   if (!effectiveKey) {
-    throw new Error('GROQ_API_KEY is not configured. Please set VITE_GROQ_API_KEY in your environment.');
+    return processBill(imageBase64, { mimeType });
   }
 
   const cleanImage = imageBase64.startsWith('data:')
@@ -331,36 +332,49 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
 }
 
 /**
- * Primary Bill OCR Entry Point: Exclusively Groq Vision
+ * Primary Bill OCR Entry Point: Exclusively Groq Vision routed via /api/groq-ocr
  */
 export async function processBill(imageBase64, options = {}) {
-  // If backend route is preferred and available
-  if (typeof window !== 'undefined' && !options.useDirectClient) {
-    try {
-      const endpoint = '/api/purchase-ocr';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64,
-          mimeType: options.mimeType || 'image/jpeg',
-          groqApiKey: options.apiKey || options.groqApiKey
-        })
-      });
+  const cleanImage = imageBase64.startsWith('data:')
+    ? imageBase64
+    : `data:${options.mimeType || 'image/jpeg'};base64,${imageBase64}`;
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result && (Array.isArray(result.items) || result.vendor_name || result.invoice_no)) {
-          return normalizeParsedInvoice(result);
-        }
-      }
-    } catch (apiErr) {
-      console.warn('Backend OCR route unavailable, proceeding with direct client Groq Vision:', apiErr.message);
-    }
+  // If a client API key is explicitly provided, we can call directly
+  if (options.apiKey || options.useDirectClient) {
+    return callGroqVision(cleanImage, options);
   }
 
-  // Direct client execution via Groq Vision exclusively
-  return callGroqVision(imageBase64, options);
+  // Primary: Call the backend serverless endpoint /api/groq-ocr
+  try {
+    const response = await fetch('/api/groq-ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: cleanImage,
+        mimeType: options.mimeType || 'image/jpeg'
+      })
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      if (result && (Array.isArray(result.items) || result.vendor_name || result.invoice_no)) {
+        return normalizeParsedInvoice(result);
+      }
+    } else {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || `Server OCR request failed (${response.status})`);
+    }
+  } catch (apiErr) {
+    if (apiErr.message && !apiErr.message.includes('fetch')) {
+      throw apiErr;
+    }
+    console.warn('/api/groq-ocr call error, checking client fallback:', apiErr.message);
+    const clientKey = (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '');
+    if (clientKey) {
+      return callGroqVision(cleanImage, { apiKey: clientKey, mimeType: options.mimeType });
+    }
+    throw apiErr;
+  }
 }
 
 /**
