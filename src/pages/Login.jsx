@@ -29,7 +29,7 @@ export default function Login({ onLoginSuccess }) {
   const [activeTab, setActiveTab] = useState('owner');
 
   // Tab 1: Store Owner
-  const [email, setEmail] = useState('');
+  const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -42,29 +42,32 @@ export default function Login({ onLoginSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
 
   // ==========================================
-  // 1. STORE OWNER (EMAIL & PASSWORD)
+  // 1. STORE OWNER (PHONE & PASSWORD ONLY)
   // ==========================================
   const handleOwnerLogin = async (e) => {
     e?.preventDefault();
     setErrorMsg('');
 
-    const rawInput = email.trim();
+    const rawInput = mobile.trim();
     const cleanPassword = password.trim();
 
-    if (!rawInput) {
-      setErrorMsg('Please enter your mobile number or registered email address.');
-      return;
-    }
-    if (!cleanPassword) {
-      setErrorMsg('Please enter your password.');
+    if (!rawInput || !cleanPassword) {
+      setErrorMsg('Invalid mobile number or password.');
       return;
     }
 
-    // Decouple Super Admin from Store Login
-    if (rawInput.toLowerCase().includes('superadmin')) {
-      setErrorMsg('Invalid store credentials. Master administrative accounts must use the discrete HQ enclave.');
-      return;
+    // Format phone: Clean input of spaces and dashes. If it doesn't start with '+91', format it as `+91${cleanNumber}`.
+    let cleanNumber = rawInput.replace(/[\s-]/g, '');
+    let formattedPhone = cleanNumber;
+    if (!formattedPhone.startsWith('+91')) {
+      if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+        formattedPhone = `+${formattedPhone}`;
+      } else {
+        formattedPhone = `+91${formattedPhone.replace(/^\+/, '')}`;
+      }
     }
+
+    const cleanDigits = formattedPhone.replace(/\D/g, '').slice(-10);
 
     setIsLoading(true);
 
@@ -72,73 +75,52 @@ export default function Login({ onLoginSuccess }) {
       let resolvedProfile = null;
       let resolvedStore = null;
       let authSession = null;
+      let storeSlug = null;
 
-      const isEmail = rawInput.includes('@');
-      const cleanMobile = rawInput.replace(/\D/g, '');
-      const derivedEmail = `${cleanMobile}@store.jaljivan.internal`;
-      let authLookupEmail = isEmail ? rawInput.toLowerCase() : derivedEmail;
-
-      // 1. Try Supabase Auth signInWithPassword
+      // 1. Authenticate strictly using phone:
       if (isSupabaseConfigured && supabase?.auth) {
         try {
-          if (!isEmail && cleanMobile) {
-            const { data: phoneProfile } = await supabase
-              .from('user_profiles')
-              .select('email, phone, store_id')
-              .or(`phone.eq.${cleanMobile},phone.eq.+91${cleanMobile}`)
-              .maybeSingle();
-
-            if (phoneProfile?.email) {
-              authLookupEmail = phoneProfile.email;
-            }
-          }
-
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: authLookupEmail,
+          const { data, error } = await supabase.auth.signInWithPassword({
+            phone: formattedPhone,
             password: cleanPassword
           });
 
-          if (!authError && authData?.user) {
-            authSession = authData.session;
+          if (!error && data?.user) {
+            authSession = data.session;
+
+            // Query user_profiles joining stores for this data.user.id to get store.slug
             const { data: profData, error: profError } = await supabase
               .from('user_profiles')
               .select('*, stores(*)')
-              .eq('id', authData.user.id)
+              .eq('id', data.user.id)
               .single();
 
             if (!profError && profData) {
               resolvedProfile = profData;
               if (profData.stores) {
                 resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+                storeSlug = resolvedStore?.slug;
+              }
+              if (!storeSlug && profData.store_id) {
+                const { data: sData } = await supabase
+                  .from('stores')
+                  .select('*')
+                  .eq('id', profData.store_id)
+                  .single();
+                if (sData) {
+                  resolvedStore = sData;
+                  storeSlug = sData.slug;
+                }
               }
             } else {
               resolvedProfile = {
-                id: authData.user.id,
-                email: authData.user.email,
-                full_name: authData.user.user_metadata?.full_name || 'Store Owner',
+                id: data.user.id,
+                phone: formattedPhone,
+                full_name: data.user.user_metadata?.full_name || 'Store Owner',
                 role: 'store_owner',
-                store_id: authData.user.user_metadata?.store_id || 'store_mittal_dept',
+                store_id: data.user.user_metadata?.store_id || 'store_mittal_dept',
                 is_active: true
               };
-            }
-          } else if (authError && !isEmail && authLookupEmail !== derivedEmail) {
-            const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
-              email: derivedEmail,
-              password: cleanPassword
-            });
-            if (!retryError && retryData?.user) {
-              authSession = retryData.session;
-              const { data: profData } = await supabase
-                .from('user_profiles')
-                .select('*, stores(*)')
-                .eq('id', retryData.user.id)
-                .single();
-              if (profData) {
-                resolvedProfile = profData;
-                if (profData.stores) {
-                  resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
-                }
-              }
             }
           }
         } catch (supabaseErr) {
@@ -149,17 +131,18 @@ export default function Login({ onLoginSuccess }) {
       // 2. Demo / Fallback Store Owner Credentials (offline or test instances)
       if (!resolvedProfile) {
         const isOwnerCreds =
-          (rawInput === 'owner@mittalstore.com' || cleanMobile === '9876543210' || rawInput === 'mittal' || rawInput === 'admin' || rawInput === 'mittal@store.com') &&
+          (cleanDigits === '8860221124' || cleanDigits === '9876543210' || rawInput === 'mittal') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
         if (isOwnerCreds) {
           resolvedProfile = DEFAULT_USER_PROFILE;
           resolvedStore = DEFAULT_STORE;
+          storeSlug = DEFAULT_STORE.slug;
         }
       }
 
       if (!resolvedProfile) {
-        setErrorMsg('Invalid mobile number/email or password. Please verify your credentials.');
+        setErrorMsg('Invalid mobile number or password.');
         setIsLoading(false);
         return;
       }
@@ -171,13 +154,18 @@ export default function Login({ onLoginSuccess }) {
             .select('*')
             .eq('id', resolvedProfile.store_id)
             .single();
-          if (storeData) resolvedStore = storeData;
+          if (storeData) {
+            resolvedStore = storeData;
+            storeSlug = storeData.slug;
+          }
         } catch (e) {}
       }
 
       if (!resolvedStore) {
         resolvedStore = DEFAULT_STORE;
       }
+
+      const finalSlug = storeSlug || resolvedStore?.slug || 'mittal-store';
 
       // Save authenticated session in AuthContext & localStorage
       loginUser({
@@ -187,9 +175,8 @@ export default function Login({ onLoginSuccess }) {
         session: authSession
       });
 
-      // Requirement 1: Redirect directly to scoped store path: /${store.slug}
-      const storeSlugVal = resolvedStore?.slug || 'mittal-store';
-      const redirectPath = `/${storeSlugVal}`;
+      // Redirect directly to scoped store path: /${store.slug}
+      const redirectPath = `/${finalSlug}`;
 
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
@@ -199,7 +186,7 @@ export default function Login({ onLoginSuccess }) {
       }
     } catch (err) {
       console.error('Login process exception:', err);
-      setErrorMsg(err.message || 'Authentication failed. Please try again.');
+      setErrorMsg('Invalid mobile number or password.');
     } finally {
       setIsLoading(false);
     }
@@ -427,26 +414,26 @@ export default function Login({ onLoginSuccess }) {
         )}
 
         {/* ======================================================== */}
-        {/* TAB 1: STORE OWNER (EMAIL + PASSWORD) */}
+        {/* TAB 1: STORE OWNER (PHONE + PASSWORD) */}
         {/* ======================================================== */}
         {activeTab === 'owner' && (
           <form onSubmit={handleOwnerLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                Mobile Number or Email
+                Mobile Number
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                   <Phone className="w-4 h-4" />
                 </div>
                 <input
-                  id="login-email-input"
-                  type="text"
+                  id="login-phone-input"
+                  type="tel"
                   required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="9876543210 or name@store.com"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-950/70 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition placeholder:text-slate-600"
+                  value={mobile}
+                  onChange={(e) => setMobile(e.target.value)}
+                  placeholder="e.g. 8860221124"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-950/70 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition placeholder:text-slate-600 font-mono"
                 />
               </div>
             </div>
@@ -491,7 +478,7 @@ export default function Login({ onLoginSuccess }) {
                 <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <span>Sign In as Store Owner</span>
+                  <span>Sign In to Store</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

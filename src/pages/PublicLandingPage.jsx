@@ -36,8 +36,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [modalTab, setModalTab] = useState('signin'); // 'signin' | 'signup'
 
-  // Tab 1: Store Owner Sign In State (accepts Mobile Number or Email)
-  const [signInIdentifier, setSignInIdentifier] = useState('');
+  // Tab 1: Store Owner Sign In State (Strictly Mobile Number & Password)
+  const [signInMobile, setSignInMobile] = useState('');
   const [signInPassword, setSignInPassword] = useState('');
   const [showSignInPassword, setShowSignInPassword] = useState(false);
 
@@ -66,19 +66,32 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   };
 
   // ==========================================
-  // 1. STORE OWNER SIGN IN HANDLER (MOBILE OR EMAIL + PASSWORD)
+  // 1. STORE OWNER SIGN IN HANDLER (PHONE & PASSWORD ONLY)
   // ==========================================
   const handleOwnerSignIn = async (e) => {
     e.preventDefault();
     setLoginError('');
 
-    const rawInput = signInIdentifier.trim();
+    const rawInput = signInMobile.trim();
     const cleanPassword = signInPassword.trim();
 
     if (!rawInput || !cleanPassword) {
-      setLoginError('Please enter your mobile number or email, and password.');
+      setLoginError('Invalid mobile number or password.');
       return;
     }
+
+    // Format phone: Clean input of spaces and dashes. If it doesn't start with '+91', format it as `+91${cleanNumber}`.
+    let cleanNumber = rawInput.replace(/[\s-]/g, '');
+    let formattedPhone = cleanNumber;
+    if (!formattedPhone.startsWith('+91')) {
+      if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
+        formattedPhone = `+${formattedPhone}`;
+      } else {
+        formattedPhone = `+91${formattedPhone.replace(/^\+/, '')}`;
+      }
+    }
+
+    const cleanDigits = formattedPhone.replace(/\D/g, '').slice(-10);
 
     setIsSubmitting(true);
 
@@ -86,75 +99,57 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       let resolvedProfile = null;
       let resolvedStore = null;
       let authSession = null;
+      let storeSlug = null;
 
-      const isEmail = rawInput.includes('@');
-      const cleanMobile = rawInput.replace(/\D/g, '');
-      const derivedEmail = `${cleanMobile}@store.jaljivan.internal`;
-
-      // 1. Authenticate with Supabase Auth
+      // Authenticate strictly using phone:
       if (isSupabaseConfigured && supabase?.auth) {
         try {
-          let authLookupEmail = isEmail ? rawInput.toLowerCase() : derivedEmail;
-
-          // If mobile number entered, look up registered profile to get primary email
-          if (!isEmail && cleanMobile) {
-            const { data: phoneProfile } = await supabase
-              .from('user_profiles')
-              .select('email, phone, store_id')
-              .or(`phone.eq.${cleanMobile},phone.eq.+91${cleanMobile}`)
-              .maybeSingle();
-
-            if (phoneProfile?.email) {
-              authLookupEmail = phoneProfile.email;
-            }
-          }
-
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: authLookupEmail,
+          const { data, error } = await supabase.auth.signInWithPassword({
+            phone: formattedPhone,
             password: cleanPassword
           });
 
-          if (!authError && authData?.user) {
-            authSession = authData.session;
+          if (!error && data?.user) {
+            authSession = data.session;
+
+            // Query user_profiles joining stores for this data.user.id to get store.slug
             const { data: profData } = await supabase
               .from('user_profiles')
               .select('*, stores(*)')
-              .eq('id', authData.user.id)
+              .eq('id', data.user.id)
               .single();
 
             if (profData) {
               resolvedProfile = profData;
               if (profData.stores) {
                 resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+                storeSlug = resolvedStore?.slug;
               }
-            }
-          } else if (authError && !isEmail && authLookupEmail !== derivedEmail) {
-            // Secondary fallback attempt with derived email
-            const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
-              email: derivedEmail,
-              password: cleanPassword
-            });
-            if (!retryError && retryData?.user) {
-              authSession = retryData.session;
-              const { data: profData } = await supabase
-                .from('user_profiles')
-                .select('*, stores(*)')
-                .eq('id', retryData.user.id)
-                .single();
-              if (profData) {
-                resolvedProfile = profData;
-                if (profData.stores) {
-                  resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+              if (!storeSlug && profData.store_id) {
+                const { data: sData } = await supabase
+                  .from('stores')
+                  .select('*')
+                  .eq('id', profData.store_id)
+                  .single();
+                if (sData) {
+                  resolvedStore = sData;
+                  storeSlug = sData.slug;
                 }
               }
+            } else {
+              resolvedProfile = {
+                id: data.user.id,
+                phone: formattedPhone,
+                role: 'store_owner'
+              };
             }
           }
-        } catch (err) {
-          console.warn('Auth notice:', err);
+        } catch (authErr) {
+          console.warn('Supabase auth notice:', authErr);
         }
       }
 
-      // 2. Check local stores cache (offline / local resilience)
+      // Check local stores cache (offline / local resilience)
       if (!resolvedProfile) {
         try {
           const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
@@ -164,33 +159,33 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
             const foundOwner = staffList.find(
               (st) =>
                 st.role === 'store_owner' &&
-                ((isEmail && st.email?.toLowerCase() === rawInput.toLowerCase()) ||
-                  (!isEmail && (st.phone === cleanMobile || st.phone?.replace(/\D/g, '') === cleanMobile)) ||
-                  st.email === derivedEmail)
+                (st.phone === formattedPhone || st.phone === cleanDigits || st.phone?.replace(/\D/g, '').slice(-10) === cleanDigits)
             );
             if (foundOwner) {
               resolvedProfile = foundOwner;
               resolvedStore = s;
+              storeSlug = s.slug;
               break;
             }
           }
         } catch (e) {}
       }
 
-      // 3. Offline / Demo Store Owner fallback
+      // Offline / Demo Store Owner fallback
       if (!resolvedProfile) {
         const isOwnerCreds =
-          (rawInput === 'owner@mittalstore.com' || cleanMobile === '9876543210' || rawInput === 'mittal' || rawInput === 'admin') &&
+          (cleanDigits === '8860221124' || cleanDigits === '9876543210' || rawInput === 'mittal') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
         if (isOwnerCreds) {
           resolvedProfile = DEFAULT_USER_PROFILE;
           resolvedStore = DEFAULT_STORE;
+          storeSlug = DEFAULT_STORE.slug;
         }
       }
 
       if (!resolvedProfile) {
-        setLoginError('Invalid credentials. Please verify your mobile number/email and password.');
+        setLoginError('Invalid mobile number or password.');
         setIsSubmitting(false);
         return;
       }
@@ -202,13 +197,18 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
             .select('*')
             .eq('id', resolvedProfile.store_id)
             .single();
-          if (storeData) resolvedStore = storeData;
+          if (storeData) {
+            resolvedStore = storeData;
+            storeSlug = storeData.slug;
+          }
         } catch (e) {}
       }
 
       if (!resolvedStore) {
         resolvedStore = DEFAULT_STORE;
       }
+
+      const finalSlug = storeSlug || resolvedStore?.slug || 'mittal-store';
 
       loginUser({
         profile: resolvedProfile,
@@ -217,9 +217,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         session: authSession
       });
 
-      const storeSlug = resolvedStore?.slug || 'mittal-store';
-      const redirectPath = `/${storeSlug}`;
-
+      const redirectPath = `/${finalSlug}`;
       setIsLoginModalOpen(false);
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
@@ -229,14 +227,14 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         window.location.href = redirectPath;
       }
     } catch (err) {
-      setLoginError(err.message || 'Authentication error.');
+      setLoginError('Invalid mobile number or password.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   // ==========================================
-  // 2. REGISTER NEW STORE (ONLY 4 COMPULSORY FIELDS + 7-DAY TRIAL)
+  // 2. REGISTER NEW STORE (STRICTLY 4 FIELDS + 7-DAY TRIAL, PHONE ONLY)
   // ==========================================
   const handleStoreRegister = async (e) => {
     e.preventDefault();
@@ -244,7 +242,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
 
     const cleanStoreName = regStoreName.trim();
     const cleanOwnerName = regOwnerName.trim();
-    const cleanMobile = regMobile.replace(/\D/g, '').trim();
+    const cleanMobileDigits = regMobile.replace(/[\s-]/g, '').replace(/\D/g, '').slice(-10);
     const cleanPassword = regPassword.trim();
 
     // 1. Strict Validations for 4 Compulsory Fields
@@ -256,7 +254,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       setLoginError('Please enter the store owner full name.');
       return;
     }
-    if (!cleanMobile || cleanMobile.length < 10) {
+    if (!cleanMobileDigits || cleanMobileDigits.length < 10) {
       setLoginError('Please enter a valid 10-digit mobile number.');
       return;
     }
@@ -264,6 +262,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       setLoginError('Please set a secure password (minimum 6 characters).');
       return;
     }
+
+    const formattedMobile = `+91${cleanMobileDigits}`;
 
     setIsSubmitting(true);
 
@@ -293,44 +293,44 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         } catch (e) {}
       }
 
-      // 3. Supabase Auth signup with mobile-derived email
-      const authEmail = `${cleanMobile}@store.jaljivan.internal`;
+      // 3. Supabase Auth signup strictly using phone & password (NO EMAIL)
       let authUser = null;
       let authSession = null;
 
       if (isSupabaseConfigured && supabase?.auth) {
         try {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: authEmail,
-            password: cleanPassword,
-            options: {
-              data: {
-                full_name: cleanOwnerName,
-                phone: cleanMobile,
-                role: 'store_owner'
-              }
-            }
+          const { data, error } = await supabase.auth.signUp({
+            phone: `+91${cleanMobileDigits}`,
+            password: cleanPassword
           });
 
-          if (signUpError) {
-            console.warn('Supabase signUp notice:', signUpError.message);
-            // If already registered, attempt signIn to link session
-            if (signUpError.message?.toLowerCase().includes('already registered')) {
-              const { data: signInData } = await supabase.auth.signInWithPassword({
-                email: authEmail,
+          if (error) {
+            console.warn('Supabase signUp notice:', error.message);
+            // If already registered, attempt signIn strictly using phone
+            if (error.message?.toLowerCase().includes('already registered')) {
+              const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+                phone: formattedMobile,
                 password: cleanPassword
               });
               if (signInData?.user) {
                 authUser = signInData.user;
                 authSession = signInData.session;
+              } else if (signInErr) {
+                setLoginError('Mobile number already registered. Please sign in to your store.');
+                setIsSubmitting(false);
+                return;
               }
+            } else {
+              setLoginError(error.message);
+              setIsSubmitting(false);
+              return;
             }
           } else {
-            authUser = signUpData?.user;
-            authSession = signUpData?.session;
+            authUser = data?.user;
+            authSession = data?.session;
           }
         } catch (err) {
-          console.warn('Auth notice:', err);
+          console.warn('Auth exception during signup:', err);
         }
       }
 
@@ -341,8 +341,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         id: newStoreId,
         name: cleanStoreName,
         slug: generatedSlug,
-        phone: cleanMobile,
-        contact_phone: cleanMobile,
+        phone: formattedMobile,
+        contact_phone: formattedMobile,
         status: 'active',
         trial_ends_at: trialEndsAt,
         enabled_modules: {
@@ -354,13 +354,12 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         created_at: new Date().toISOString()
       };
 
-      // 5. Create user_profiles row
+      // 5. Create user_profiles row (phone only, NO EMAIL)
       const newUserId = authUser?.id || `user_owner_${generatedSlug}_${Date.now()}`;
       const newUserProfile = {
         id: newUserId,
         full_name: cleanOwnerName,
-        email: authEmail,
-        phone: cleanMobile,
+        phone: formattedMobile,
         role: 'store_owner',
         store_id: newStoreId,
         is_active: true,
@@ -376,7 +375,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         }
       }
 
-      // 6. Pre-seed local storage directory & staff for immediate reactivity
+      // 6. Pre-seed local storage directory & staff for immediate reactivity (phone only, NO EMAIL)
       try {
         const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
         const updatedList = [newStoreRecord, ...localStores.filter((s) => s.slug !== generatedSlug)];
@@ -388,8 +387,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
             id: `staff_owner_${newStoreId}`,
             store_id: newStoreId,
             full_name: cleanOwnerName,
-            email: authEmail,
-            phone: cleanMobile,
+            phone: formattedMobile,
             role: 'store_owner',
             pin: '2026',
             is_active: true,
@@ -399,7 +397,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         localStorage.setItem(staffKey, JSON.stringify(initialStaff));
       } catch (e) {}
 
-      // 7. Log in the newly registered store owner
+      // 7. Instant Session Init & Redirect
       loginUser({
         profile: newUserProfile,
         store: newStoreRecord,
@@ -407,9 +405,9 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         session: authSession
       });
 
-      // 8. Redirect directly to /${generatedSlug} with all modules enabled
       const redirectPath = `/${generatedSlug}`;
       setIsLoginModalOpen(false);
+
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
       } else if (onNavigate) {
@@ -837,7 +835,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                   <p className="text-xs text-slate-400">
                     {modalTab === 'signup'
                       ? '7-Day All-Access Free Trial • Instant Deployment'
-                      : 'Sign in with your mobile number or email'}
+                      : 'Sign in with your mobile number and password'}
                   </p>
                 </div>
               </div>
@@ -900,18 +898,18 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 <form onSubmit={handleOwnerSignIn} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Mobile Number or Email
+                      Mobile Number
                     </label>
                     <div className="relative">
                       <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
-                        type="text"
-                        autoComplete="username"
+                        type="tel"
+                        autoComplete="tel"
                         required
-                        value={signInIdentifier}
-                        onChange={(e) => setSignInIdentifier(e.target.value)}
-                        placeholder="9876543210 or name@store.com"
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
+                        value={signInMobile}
+                        onChange={(e) => setSignInMobile(e.target.value)}
+                        placeholder="e.g. 8860221124"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
                   </div>
@@ -995,10 +993,10 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                     </div>
                   </div>
 
-                  {/* 2. Owner Full Name */}
+                  {/* 2. Owner Name */}
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Owner Full Name <span className="text-emerald-400">*</span>
+                      Owner Name <span className="text-emerald-400">*</span>
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1022,20 +1020,19 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                       <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="tel"
-                        maxLength={10}
                         required
                         value={regMobile}
-                        onChange={(e) => setRegMobile(e.target.value.replace(/\D/g, ''))}
-                        placeholder="9876543210 (10 digits)"
+                        onChange={(e) => setRegMobile(e.target.value)}
+                        placeholder="e.g. 8860221124"
                         className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
                   </div>
 
-                  {/* 4. Set Password */}
+                  {/* 4. Password */}
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Set Password <span className="text-emerald-400">*</span>
+                      Password <span className="text-emerald-400">*</span>
                     </label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1081,7 +1078,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                       <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
                     ) : (
                       <>
-                        <span>Deploy Store & Launch Dashboard</span>
+                        <span>Deploy Store</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </>
                     )}
@@ -1098,7 +1095,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                         }}
                         className="text-emerald-400 hover:underline font-bold"
                       >
-                        Sign In
+                        Sign In to Store
                       </button>
                     </p>
                   </div>
