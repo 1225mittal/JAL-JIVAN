@@ -12,6 +12,7 @@ import {
   Upload
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 
 // In-memory HTML5 Canvas pre-processor for High-Contrast Document Scanner Mode
 function preprocessDocumentCanvas(file, options = {}) {
@@ -162,6 +163,10 @@ function preprocessDocumentCanvas(file, options = {}) {
 }
 
 export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
+  let auth = null;
+  try {
+    auth = useAuth();
+  } catch (e) {}
   // Extract session ID from prop or URL
   const [sessionId, setSessionId] = useState(() => {
     if (propSessionId) return propSessionId;
@@ -246,13 +251,27 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
       setUploadProgress('Linking bill to live inward queue...');
 
       // 4. Insert into Supabase purchase_bill_queue with:
-      //    { image_url: data.url, status: 'PENDING' }
+      //    { image_url: data.url, status: 'PENDING', store_id: userProfile.store_id }
       //    (DO NOT store base64 string in Supabase)
+      const targetStoreId =
+        auth?.userProfile?.store_id ||
+        auth?.currentStore?.id ||
+        (typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('store_id') ||
+            new URLSearchParams(window.location.search).get('store') ||
+            'store_mittal_dept'
+          : 'store_mittal_dept');
+
       let snappedBill = null;
       try {
+        const queuePayload = {
+          image_url: r2Url,
+          status: 'PENDING',
+          store_id: targetStoreId
+        };
         const { data, error } = await supabase
           .from('purchase_bill_queue')
-          .insert([{ image_url: r2Url, status: 'PENDING' }])
+          .insert([queuePayload])
           .select()
           .single();
 
@@ -270,6 +289,7 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
           id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
           image_url: r2Url,
           status: 'PENDING',
+          store_id: targetStoreId,
           created_at: new Date().toISOString()
         };
       }

@@ -2831,6 +2831,7 @@ export async function savePurchaseInvoice(invoiceData, itemsData = []) {
   // invoice_number, invoice_date, seller_name, seller_gst, seller_fssai, seller_contact, seller_address,
   // total_taxable_amount, total_tax_amount, grand_total, bill_image_url, raw_ocr_data, account_no, ifsc
   const invoicePayload = {
+    store_id: invoiceData.store_id || null,
     invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
     invoice_date: invoiceData.invoice_date || nowIso.split('T')[0],
     seller_name: invoiceData.seller_name || '',

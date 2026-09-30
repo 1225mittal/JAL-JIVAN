@@ -57,6 +57,7 @@ import ErrorBoundary from './ErrorBoundary';
 import { renderPdfFirstPageToImage } from '../lib/pdfToImage';
 import groqVisionOcr from '../lib/groqVisionOcr';
 import useRealtimeSubscription from '../hooks/useRealtimeSubscription';
+import { useAuth } from '../context/AuthContext';
 import {
   fetchPurchaseInvoices,
   savePurchaseInvoice,
@@ -267,6 +268,14 @@ export default function PurchaseInwardHub({
   showToast = () => {},
   initialTab = 'new'
 }) {
+  let auth = null;
+  try {
+    auth = useAuth();
+  } catch (e) {}
+  const currentStore = auth?.currentStore;
+  const userProfile = auth?.userProfile;
+  const activeStoreId = userProfile?.store_id || currentStore?.id || 'store_mittal_dept';
+
   // Navigation: 'new' | 'history' | 'vendors' | 'debit_notes' | 'items'
   const [activeTab, setActiveTab] = useState(initialTab);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -740,7 +749,7 @@ export default function PurchaseInwardHub({
           try {
             const { data: qData } = await supabase
               .from('purchase_bill_queue')
-              .insert([{ image_url: effectiveImageUrl, status: 'PENDING' }])
+              .insert([{ image_url: effectiveImageUrl, status: 'PENDING', store_id: activeStoreId }])
               .select()
               .single();
             if (qData?.id) {
@@ -1416,6 +1425,7 @@ export default function PurchaseInwardHub({
       const uniqueBillUrls = Array.from(new Set(billImageUrls));
 
       const invoicePayload = {
+        store_id: activeStoreId,
         invoice_number: invoiceData.invoice_number || `INV-${Date.now()}`,
         invoice_date: invoiceData.invoice_date || new Date().toISOString().split('T')[0],
         seller_name: (sellerData.name || '').trim(),
@@ -1780,76 +1790,80 @@ export default function PurchaseInwardHub({
 
             {/* Navigation Tabs */}
             <nav className="space-y-1 text-xs font-bold">
-              {/* Tab 1: Add New Purchase */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('new')}
-                className={`w-full flex items-center ${
-                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
-                } rounded-xl transition text-left cursor-pointer relative ${
-                  activeTab === 'new'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                }`}
-                title="Add New Purchase"
-              >
-                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
-                  <Plus className="w-4 h-4 shrink-0" />
-                  {!isSidebarCollapsed && <span>📥 Add New Purchase</span>}
-                </div>
-                {billQueue.length > 0 && (
-                  isSidebarCollapsed ? (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black flex items-center justify-center shadow">
-                      {billQueue.length}
-                    </span>
+              {/* Tab 1: Add New Purchase / OCR Hub (conditional on store.enabled_modules.inward_ocr) */}
+              {currentStore?.enabled_modules?.inward_ocr !== false && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('new')}
+                  className={`w-full flex items-center ${
+                    isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                  } rounded-xl transition text-left cursor-pointer relative ${
+                    activeTab === 'new'
+                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                  title="Add New Purchase"
+                >
+                  <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                    <Plus className="w-4 h-4 shrink-0" />
+                    {!isSidebarCollapsed && <span>📥 Add New Purchase</span>}
+                  </div>
+                  {billQueue.length > 0 && (
+                    isSidebarCollapsed ? (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-slate-950 text-[9px] font-black flex items-center justify-center shadow">
+                        {billQueue.length}
+                      </span>
+                    ) : (
+                      <span
+                        className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          activeTab === 'new' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400'
+                        }`}
+                      >
+                        {billQueue.length}
+                      </span>
+                    )
+                  )}
+                </button>
+              )}
+
+              {/* Tab 2: Invoices Ledger (conditional on store.enabled_modules.ledger) */}
+              {currentStore?.enabled_modules?.ledger !== false && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('history');
+                    loadHistory();
+                  }}
+                  className={`w-full flex items-center ${
+                    isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
+                  } rounded-xl transition text-left cursor-pointer relative ${
+                    activeTab === 'history'
+                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                  title={`Invoices Ledger (${invoicesHistory.length})`}
+                >
+                  <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
+                    <FileSpreadsheet className="w-4 h-4 shrink-0" />
+                    {!isSidebarCollapsed && <span>📜 Invoices Ledger</span>}
+                  </div>
+                  {isSidebarCollapsed ? (
+                    invoicesHistory.length > 0 && (
+                      <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-slate-800 text-slate-300 text-[9px] font-bold border border-slate-700 flex items-center justify-center">
+                        {invoicesHistory.length}
+                      </span>
+                    )
                   ) : (
                     <span
                       className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        activeTab === 'new' ? 'bg-slate-950 text-amber-400' : 'bg-amber-500/20 text-amber-400'
+                        activeTab === 'history' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
                       }`}
                     >
-                      {billQueue.length}
-                    </span>
-                  )
-                )}
-              </button>
-
-              {/* Tab 2: Invoices Ledger */}
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('history');
-                  loadHistory();
-                }}
-                className={`w-full flex items-center ${
-                  isSidebarCollapsed ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'
-                } rounded-xl transition text-left cursor-pointer relative ${
-                  activeTab === 'history'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20 font-black'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                }`}
-                title={`Invoices Ledger (${invoicesHistory.length})`}
-              >
-                <div className={`flex items-center ${isSidebarCollapsed ? '' : 'gap-2.5'}`}>
-                  <FileSpreadsheet className="w-4 h-4 shrink-0" />
-                  {!isSidebarCollapsed && <span>📜 Invoices Ledger</span>}
-                </div>
-                {isSidebarCollapsed ? (
-                  invoicesHistory.length > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-slate-800 text-slate-300 text-[9px] font-bold border border-slate-700 flex items-center justify-center">
                       {invoicesHistory.length}
                     </span>
-                  )
-                ) : (
-                  <span
-                    className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      activeTab === 'history' ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {invoicesHistory.length}
-                  </span>
-                )}
-              </button>
+                  )}
+                </button>
+              )}
 
               {/* Tab 3: Item & Stock Master */}
               <button

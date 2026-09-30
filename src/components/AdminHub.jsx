@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Truck,
   Package,
@@ -8,6 +8,7 @@ import {
   Megaphone,
   Calculator,
   UserCheck,
+  Users,
   Settings,
   Clock,
   Quote,
@@ -18,8 +19,15 @@ import {
   Calendar
 } from 'lucide-react';
 import { getDailyBusinessQuote } from '../lib/businessQuotes';
+import { useAuth } from '../context/AuthContext';
 
 export default function AdminHub({ onNavigate }) {
+  let auth = null;
+  try {
+    auth = useAuth();
+  } catch (e) {}
+  const currentStore = auth?.currentStore;
+  const isOwner = auth?.isOwner;
   // 1. Digital Live Clock with Seconds & Full Date
   const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
 
@@ -212,8 +220,36 @@ export default function AdminHub({ onNavigate }) {
         'ESC/POS Bluetooth & USB Thermal Printer Settings',
         'Store GPS Hub Geofence Radius Setup'
       ]
+    },
+    {
+      id: 'staff-settings',
+      path: '/settings/staff',
+      title: 'Store Staff & Roles',
+      category: 'Store Owner',
+      tag: 'Owner Only',
+      isLive: true,
+      icon: Users,
+      accentColor: 'from-blue-600 to-indigo-600',
+      tagColor: 'bg-blue-500/15 text-blue-300 border-blue-500/40 shadow-sm shadow-blue-500/20',
+      description: 'Role-Based Access (Cashier, Inventory, Delivery), PIN Security & Fleet Portal Link',
+      features: [
+        'Strict Store-Filtered Staff Directory',
+        'Add Staff with Roles: Cashier, Inward, Delivery Boy',
+        'Dedicated Rider Portal URL & Smartphone QR Code'
+      ]
     }
   ];
+
+  const filteredModulesList = useMemo(() => {
+    return modulesList.filter((mod) => {
+      if (mod.id === 'sales' && currentStore?.enabled_modules?.pos === false) return false;
+      if (mod.id === 'purchase' && currentStore?.enabled_modules?.inward_ocr === false) return false;
+      if (mod.id === 'delivery' && currentStore?.enabled_modules?.delivery === false) return false;
+      if (mod.id === 'finance' && currentStore?.enabled_modules?.ledger === false) return false;
+      if (mod.id === 'staff-settings' && !isOwner) return false;
+      return true;
+    });
+  }, [modulesList, currentStore, isOwner]);
 
   const handleCardClick = (mod, e) => {
     if (e && e.preventDefault) {
@@ -317,18 +353,18 @@ export default function AdminHub({ onNavigate }) {
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" />
-              <strong className="text-slate-200">{modulesList.filter((m) => m.isLive).length} Active</strong>
+              <strong className="text-slate-200">{filteredModulesList.filter((m) => m.isLive).length} Active</strong>
             </span>
             <span>•</span>
             <span className="flex items-center gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-              <span>{modulesList.filter((m) => !m.isLive).length} Planned</span>
+              <span>{filteredModulesList.filter((m) => !m.isLive).length} Planned</span>
             </span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-          {modulesList.map((mod) => {
+          {filteredModulesList.map((mod) => {
             const Icon = mod.icon;
             return (
               <a

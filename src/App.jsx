@@ -11,6 +11,10 @@ import PlannedModuleView from './components/PlannedModuleView';
 import SalesBillingHub from './pages/SalesBillingHub';
 import DriverPortal from './components/DriverPortal';
 import MobileInwardCapture from './components/purchase/MobileInwardCapture';
+import ModularSidebar from './components/ModularSidebar';
+import StaffSettingsPage from './pages/StaffSettingsPage';
+import StoreDeliveryPortal from './pages/StoreDeliveryPortal';
+import { useAuth } from './context/AuthContext';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -55,6 +59,12 @@ export const getInitialModule = () => {
   const queryModule = params.get('module');
 
   // Explicit path matching takes absolute priority
+  if (path.includes('/settings/staff')) {
+    return 'staff-settings';
+  }
+  if (path.includes('/store/') && path.includes('/delivery')) {
+    return 'store-delivery';
+  }
   if (path.includes('/rider') || path.includes('/driver')) {
     return 'driver';
   }
@@ -98,6 +108,17 @@ export function parseRoute() {
   if (pathname === '/scan-inward' || pathname.startsWith('/scan-inward')) {
     const sessionId = search.get('session') || '';
     return { type: 'scan-inward', module: null, pathname: '/scan-inward', sessionId };
+  }
+
+  // Route 0.5: Dedicated Dynamic Store Delivery Route (/store/:storeSlug/delivery)
+  const storeDeliveryMatch = pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/);
+  if (storeDeliveryMatch) {
+    return { type: 'store-delivery', storeSlug: storeDeliveryMatch[1], pathname };
+  }
+
+  // Route 0.6: Staff Management Screen (/settings/staff)
+  if (pathname === '/settings/staff' || pathname.startsWith('/settings/staff')) {
+    return { type: 'settings-staff', module: 'staff-settings', pathname: '/settings/staff' };
   }
 
   // Explicit pathname matching takes absolute priority over legacy query params
@@ -719,7 +740,18 @@ export default function App() {
     );
   }
 
-  const isViewAdmin = routeState.type.startsWith('admin');
+  // Dedicated Dynamic Store Delivery Route (/store/:storeSlug/delivery)
+  const isStoreDeliveryRoute =
+    routeState.type === 'store-delivery' ||
+    (typeof window !== 'undefined' && /^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/.test(window.location.pathname));
+
+  if (isStoreDeliveryRoute) {
+    const slugMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/) : null;
+    const activeSlug = routeState.storeSlug || slugMatch?.[1] || 'default';
+    return <StoreDeliveryPortal storeSlug={activeSlug} />;
+  }
+
+  const isViewAdmin = routeState.type.startsWith('admin') || routeState.type === 'settings-staff';
 
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
@@ -727,21 +759,45 @@ export default function App() {
       <Navbar
         isAdminRoute={isViewAdmin}
         isAdminView={isViewAdmin}
-        adminSubView={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : '')}
+        adminSubView={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : routeState.type === 'settings-staff' ? 'staff' : '')}
         onNavigateToAdminHub={() => navigate('/admin')}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
       />
 
-      {/* Main Routing Container */}
-      <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
-        {routeState.type === 'admin-login' ? (
-          /* ======================================================== */
-          /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
-          /* ======================================================== */
-          isAdminLoggedIn ? (
-            <div className="p-8 text-center">
+      <div className="flex flex-1 w-full overflow-hidden">
+        {/* Modular Sidebar Navigation (honors store.enabled_modules and role) */}
+        {isAdminLoggedIn && routeState.type !== 'admin-login' && (
+          <ModularSidebar
+            currentModule={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : routeState.type === 'settings-staff' ? 'staff-settings' : '')}
+            onNavigate={(path) => navigate(path)}
+            onLogout={handleAdminLogout}
+          />
+        )}
+
+        {/* Main Routing Container */}
+        <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
+          {routeState.type === 'settings-staff' ? (
+            /* ======================================================== */
+            /* ROUTE: /settings/staff (STAFF MANAGEMENT - STORE OWNER ONLY) */
+            /* ======================================================== */
+            !isAdminLoggedIn ? (
+              <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+            ) : (
+              <ErrorBoundary title="Store Staff Management">
+                <StaffSettingsPage
+                  onBackToHub={handleBackToHub}
+                  showToast={showToast}
+                />
+              </ErrorBoundary>
+            )
+          ) : routeState.type === 'admin-login' ? (
+            /* ======================================================== */
+            /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
+            /* ======================================================== */
+            isAdminLoggedIn ? (
+              <div className="p-8 text-center">
               <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
               <button
                 onClick={() => navigate('/admin')}
@@ -845,6 +901,7 @@ export default function App() {
           )
         )}
       </main>
+      </div>
 
       {/* Modals */}
       <AddDriverModal
