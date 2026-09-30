@@ -11,7 +11,6 @@ import {
   Sparkles,
   Lock,
   Mail,
-  KeyRound,
   X,
   ChevronRight,
   Activity,
@@ -52,10 +51,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   const [regPassword, setRegPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
-
-  // Tab 3: Staff Quick PIN State (all default to empty string)
-  const [staffSlug, setStaffSlug] = useState('');
-  const [staffPin, setStaffPin] = useState('');
 
   // Status & Feedback
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -414,147 +409,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
     }
   };
 
-  const handleStaffLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-
-    const cleanSlug = staffSlug.trim().toLowerCase();
-    const cleanPin = staffPin.trim();
-
-    if (!cleanSlug) {
-      setLoginError('Please enter your store code/slug.');
-      return;
-    }
-    if (!cleanPin || cleanPin.length < 4) {
-      setLoginError('Please enter your 4-digit staff PIN.');
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      let matchedStore = null;
-
-      if (isSupabaseConfigured && supabase) {
-        try {
-          const { data } = await supabase.from('stores').select('*').eq('slug', cleanSlug).single();
-          if (data) matchedStore = data;
-        } catch (e) {}
-      }
-
-      if (!matchedStore) {
-        try {
-          const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
-          matchedStore = localStores.find((s) => s.slug === cleanSlug);
-        } catch (e) {}
-      }
-
-      if (!matchedStore && (cleanSlug === 'mittal-store' || cleanSlug === 'default' || cleanSlug === DEFAULT_STORE.slug)) {
-        matchedStore = DEFAULT_STORE;
-      }
-
-      if (!matchedStore) {
-        setLoginError(`Store with slug "${cleanSlug}" was not found. Please check with your store administrator.`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      let matchedStaff = null;
-      if (isSupabaseConfigured && supabase) {
-        try {
-          const { data: staffData } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('store_id', matchedStore.id)
-            .eq('pin', cleanPin)
-            .eq('is_active', true)
-            .single();
-
-          if (staffData) matchedStaff = staffData;
-        } catch (e) {}
-      }
-
-      if (!matchedStaff) {
-        try {
-          const localStaff = JSON.parse(localStorage.getItem(`jal_jivan_store_staff_${matchedStore.id}`) || '[]');
-          const found = localStaff.find((s) => String(s.pin) === cleanPin && s.is_active !== false);
-          if (found) matchedStaff = found;
-        } catch (e) {}
-      }
-
-      // Demo PIN fallbacks
-      if (!matchedStaff) {
-        if (cleanPin === '1122') {
-          matchedStaff = {
-            id: `staff_cashier_${matchedStore.id}`,
-            full_name: 'Cashier Staff',
-            email: `cashier@${cleanSlug}.com`,
-            role: 'billing_cashier',
-            store_id: matchedStore.id,
-            pin: '1122',
-            is_active: true
-          };
-        } else if (cleanPin === '3344') {
-          matchedStaff = {
-            id: `staff_inward_${matchedStore.id}`,
-            full_name: 'Inventory Staff',
-            email: `inventory@${cleanSlug}.com`,
-            role: 'inventory_staff',
-            store_id: matchedStore.id,
-            pin: '3344',
-            is_active: true
-          };
-        } else if (cleanPin === '5566' || cleanPin === '1234') {
-          matchedStaff = {
-            id: `staff_rider_${matchedStore.id}`,
-            full_name: 'Delivery Staff',
-            email: `rider@${cleanSlug}.com`,
-            role: 'delivery_boy',
-            store_id: matchedStore.id,
-            pin: cleanPin,
-            is_active: true
-          };
-        }
-      }
-
-      if (!matchedStaff) {
-        setLoginError('Invalid PIN for this store. Please contact your store owner.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      loginUser({
-        profile: matchedStaff,
-        store: matchedStore,
-        role: matchedStaff.role,
-        session: null
-      });
-
-      // Redirect directly to their scoped store path
-      let redirectPath = `/${matchedStore.slug}`;
-      if (matchedStaff.role === 'delivery_boy') {
-        redirectPath = `/${matchedStore.slug}/delivery`;
-      } else if (matchedStaff.role === 'billing_cashier') {
-        redirectPath = `/${matchedStore.slug}/sales`;
-      } else if (matchedStaff.role === 'inventory_staff') {
-        redirectPath = `/${matchedStore.slug}/purchase`;
-      }
-
-      setIsLoginModalOpen(false);
-      if (onLoginSuccess) {
-        onLoginSuccess(redirectPath);
-      } else if (onNavigate) {
-        onNavigate(redirectPath);
-      } else {
-        window.location.href = redirectPath;
-      }
-    } catch (err) {
-      setLoginError(err.message || 'Staff login error.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   return (
     <div className="min-h-screen w-full bg-[#070b18] text-slate-100 selection:bg-emerald-500 selection:text-white flex flex-col font-sans overflow-x-hidden">
       {/* Dynamic Background Glows */}
@@ -669,18 +523,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
           >
             <Store className="w-4 h-4 text-emerald-400" />
             <span>Store Sign In</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setModalTab('staff');
-              setIsLoginModalOpen(true);
-              setLoginError('');
-            }}
-            className="py-3.5 px-5 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-300 font-semibold rounded-2xl text-sm transition flex items-center gap-2"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-teal-400" />
-            <span>Staff PIN</span>
           </button>
         </div>
 
@@ -957,7 +799,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       </footer>
 
       {/* ======================================================== */}
-      {/* 5. STORE ACCESS MODAL (SIGN IN, SIGNUP, STAFF PIN) */}
+      {/* 5. STORE ACCESS MODAL (SIGN IN & REGISTER STORE ONLY) */}
       {/* ======================================================== */}
       {isLoginModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -968,25 +810,17 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                   {modalTab === 'signup' ? (
                     <Building2 className="w-5 h-5" />
-                  ) : modalTab === 'staff' ? (
-                    <KeyRound className="w-5 h-5" />
                   ) : (
                     <Store className="w-5 h-5" />
                   )}
                 </div>
                 <div>
                   <h3 className="text-base font-black text-white">
-                    {modalTab === 'signup'
-                      ? 'Register New Store'
-                      : modalTab === 'staff'
-                      ? 'Staff Terminal PIN'
-                      : 'Store Owner Sign In'}
+                    {modalTab === 'signup' ? 'Register New Store' : 'Store Sign In'}
                   </h3>
                   <p className="text-xs text-slate-400">
                     {modalTab === 'signup'
                       ? 'Deploy your dedicated retail operating system'
-                      : modalTab === 'staff'
-                      ? 'Quick access PIN for cashiers and fleet riders'
                       : 'Sign in to access your tenant store'}
                   </p>
                 </div>
@@ -1002,8 +836,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
               </button>
             </div>
 
-            {/* 3-Tab Switcher */}
-            <div className="grid grid-cols-3 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-bold shrink-0">
+            {/* 2-Tab Switcher */}
+            <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-bold shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1033,21 +867,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
               >
                 Register Store
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setModalTab('staff');
-                  setLoginError('');
-                }}
-                className={`py-2 rounded-lg transition text-center ${
-                  modalTab === 'staff'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Staff PIN
-              </button>
             </div>
 
             {/* Error Message */}
@@ -1071,28 +890,30 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                       <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="email"
+                        autoComplete="username"
                         required
                         value={signInEmail}
                         onChange={(e) => setSignInEmail(e.target.value)}
-                        placeholder="owner@yourstore.com"
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        placeholder="name@store.com"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Store Password
+                      Password
                     </label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type={showSignInPassword ? 'text' : 'password'}
+                        autoComplete="current-password"
                         required
                         value={signInPassword}
                         onChange={(e) => setSignInPassword(e.target.value)}
                         placeholder="••••••••"
-                        className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                       <button
                         type="button"
@@ -1153,7 +974,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                           value={regStoreName}
                           onChange={handleStoreNameChange}
                           placeholder="e.g. Apex Retail"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                         />
                       </div>
                     </div>
@@ -1170,7 +991,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                           value={regStoreSlug}
                           onChange={handleStoreSlugChange}
                           placeholder="apex-retail"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                         />
                       </div>
                     </div>
@@ -1196,7 +1017,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                           value={regOwnerName}
                           onChange={(e) => setRegOwnerName(e.target.value)}
                           placeholder="e.g. Vikram Sharma"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                         />
                       </div>
                     </div>
@@ -1213,7 +1034,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                           value={regPhone}
                           onChange={(e) => setRegPhone(e.target.value)}
                           placeholder="+91 98765 43210"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                         />
                       </div>
                     </div>
@@ -1227,11 +1048,12 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                       <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="email"
+                        autoComplete="email"
                         required
                         value={regEmail}
                         onChange={(e) => setRegEmail(e.target.value)}
-                        placeholder="owner@apexretail.com"
-                        className="w-full pl-9 pr-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        placeholder="name@store.com"
+                        className="w-full pl-9 pr-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
                   </div>
@@ -1244,12 +1066,13 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                       <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type={showRegPassword ? 'text' : 'password'}
+                        autoComplete="new-password"
                         required
                         minLength={6}
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
-                        placeholder="At least 6 characters"
-                        className="w-full pl-9 pr-9 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        placeholder="••••••••"
+                        className="w-full pl-9 pr-9 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                       <button
                         type="button"
@@ -1302,77 +1125,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                         className="text-emerald-400 hover:underline font-bold"
                       >
                         Sign In
-                      </button>
-                    </p>
-                  </div>
-                </form>
-              )}
-
-              {/* TAB 3: STAFF QUICK PIN */}
-              {modalTab === 'staff' && (
-                <form onSubmit={handleStaffLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Store URL Slug
-                    </label>
-                    <div className="relative">
-                      <Store className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        required
-                        value={staffSlug}
-                        onChange={(e) => setStaffSlug(e.target.value)}
-                        placeholder="e.g. mittal-store"
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      4-Digit Staff PIN
-                    </label>
-                    <div className="relative">
-                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="password"
-                        maxLength={6}
-                        required
-                        value={staffPin}
-                        onChange={(e) => setStaffPin(e.target.value)}
-                        placeholder="••••"
-                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm font-mono tracking-widest focus:outline-none focus:border-emerald-500 transition"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-                  >
-                    {isSubmitting ? (
-                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <span>Authorize Staff Terminal</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </>
-                    )}
-                  </button>
-
-                  <div className="pt-2 text-center">
-                    <p className="text-xs text-slate-400">
-                      Store Owner?{' '}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setModalTab('signin');
-                          setLoginError('');
-                        }}
-                        className="text-emerald-400 hover:underline font-bold"
-                      >
-                        Sign In with Email & Password
                       </button>
                     </p>
                   </div>
