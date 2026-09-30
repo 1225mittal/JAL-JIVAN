@@ -18,8 +18,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   useAuth,
   DEFAULT_STORE,
-  DEFAULT_USER_PROFILE,
-  DEFAULT_SUPER_ADMIN_PROFILE
+  DEFAULT_USER_PROFILE
 } from '../context/AuthContext';
 
 export default function Login({ onLoginSuccess }) {
@@ -28,8 +27,8 @@ export default function Login({ onLoginSuccess }) {
   // Mode: 'owner' | 'staff'
   const [activeTab, setActiveTab] = useState('owner');
 
-  // Tab 1: Owner / Super Admin
-  const [email, setEmail] = useState('');
+  // Tab 1: Store Owner
+  const [email, setEmail] = useState('owner@mittalstore.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -42,7 +41,7 @@ export default function Login({ onLoginSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
 
   // ==========================================
-  // 1. STORE OWNER / SUPER ADMIN (EMAIL & PASSWORD)
+  // 1. STORE OWNER (EMAIL & PASSWORD)
   // ==========================================
   const handleOwnerLogin = async (e) => {
     e?.preventDefault();
@@ -52,11 +51,17 @@ export default function Login({ onLoginSuccess }) {
     const cleanPassword = password.trim();
 
     if (!cleanEmail) {
-      setErrorMsg('Please enter your registered email address.');
+      setErrorMsg('Please enter your registered store owner email address.');
       return;
     }
     if (!cleanPassword) {
       setErrorMsg('Please enter your password.');
+      return;
+    }
+
+    // Decouple Super Admin from Store Login
+    if (cleanEmail.includes('superadmin')) {
+      setErrorMsg('Super Admin access is isolated to the Cloud HQ Enclave. Please navigate to /hq-console/auth.');
       return;
     }
 
@@ -77,7 +82,6 @@ export default function Login({ onLoginSuccess }) {
 
           if (!authError && authData?.user) {
             authSession = authData.session;
-            // Query user_profiles for the logged-in user's role joining stores
             const { data: profData, error: profError } = await supabase
               .from('user_profiles')
               .select('*, stores(*)')
@@ -90,14 +94,11 @@ export default function Login({ onLoginSuccess }) {
                 resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
               }
             } else {
-              // Construct profile from user metadata if profile row isn't yet migrated
-              const metaRole = authData.user.user_metadata?.role ||
-                (cleanEmail.includes('superadmin') ? 'super_admin' : 'store_owner');
               resolvedProfile = {
                 id: authData.user.id,
                 email: authData.user.email,
-                full_name: authData.user.user_metadata?.full_name || cleanEmail.split('@')[0],
-                role: metaRole,
+                full_name: authData.user.user_metadata?.full_name || 'Store Owner',
+                role: 'store_owner',
                 store_id: authData.user.user_metadata?.store_id || 'store_mittal_dept',
                 is_active: true
               };
@@ -110,20 +111,13 @@ export default function Login({ onLoginSuccess }) {
         }
       }
 
-      // 2. Demo / Fallback Master Credentials support (offline or test instances)
+      // 2. Demo / Fallback Store Owner Credentials (offline or test instances)
       if (!resolvedProfile) {
-        const isSuperAdminCreds =
-          (cleanEmail === 'superadmin@jaljivan.com' || cleanEmail === 'superadmin' || cleanEmail === 'admin@jaljivan.com') &&
-          (cleanPassword === 'SuperAdmin#2026!' || cleanPassword === 'superadmin123' || cleanPassword === '2026' || cleanPassword === 'MittalStore#2026!Secure');
-
         const isOwnerCreds =
           (cleanEmail === 'owner@mittalstore.com' || cleanEmail === 'mittal' || cleanEmail === 'admin' || cleanEmail === 'mittal@store.com') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
-        if (isSuperAdminCreds) {
-          resolvedProfile = DEFAULT_SUPER_ADMIN_PROFILE;
-          resolvedStore = null;
-        } else if (isOwnerCreds) {
+        if (isOwnerCreds) {
           resolvedProfile = DEFAULT_USER_PROFILE;
           resolvedStore = DEFAULT_STORE;
         }
@@ -135,7 +129,6 @@ export default function Login({ onLoginSuccess }) {
         return;
       }
 
-      // If store is still not resolved and profile has store_id, fetch store
       if (!resolvedStore && resolvedProfile.store_id && isSupabaseConfigured && supabase) {
         try {
           const { data: storeData } = await supabase
@@ -147,7 +140,7 @@ export default function Login({ onLoginSuccess }) {
         } catch (e) {}
       }
 
-      if (!resolvedStore && resolvedProfile.role !== 'super_admin') {
+      if (!resolvedStore) {
         resolvedStore = DEFAULT_STORE;
       }
 
@@ -155,31 +148,12 @@ export default function Login({ onLoginSuccess }) {
       loginUser({
         profile: resolvedProfile,
         store: resolvedStore,
-        role: resolvedProfile.role,
+        role: 'store_owner',
         session: authSession
       });
 
-      // Role-Based Redirection:
-      // - super_admin => /super-admin
-      // - store_owner => /admin
-      // - delivery_boy => /store/${slug}/delivery
-      // - billing_cashier => /admin/sales
-      // - inventory_staff => /admin/purchase
-      let redirectPath = '/admin';
-      const role = resolvedProfile.role;
-      const storeSlugVal = resolvedStore?.slug || 'mittal-store';
-
-      if (role === 'super_admin') {
-        redirectPath = '/super-admin';
-      } else if (role === 'store_owner') {
-        redirectPath = '/admin';
-      } else if (role === 'delivery_boy') {
-        redirectPath = `/store/${storeSlugVal}/delivery`;
-      } else if (role === 'billing_cashier') {
-        redirectPath = '/admin/sales';
-      } else if (role === 'inventory_staff') {
-        redirectPath = '/admin/purchase';
-      }
+      // Requirement 4: Store owners land directly on /admin
+      const redirectPath = '/admin';
 
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
@@ -241,7 +215,6 @@ export default function Login({ onLoginSuccess }) {
         } catch (e) {}
       }
 
-      // Default store fallback
       if (!matchedStore && (cleanSlug === 'mittal-store' || cleanSlug === 'default' || cleanSlug === DEFAULT_STORE.slug)) {
         matchedStore = DEFAULT_STORE;
       }
@@ -270,7 +243,6 @@ export default function Login({ onLoginSuccess }) {
         } catch (e) {}
       }
 
-      // Fallback to local staff cache
       if (!matchedStaff) {
         try {
           const localStaff = JSON.parse(localStorage.getItem(`jal_jivan_store_staff_${matchedStore.id}`) || '[]');
@@ -329,7 +301,6 @@ export default function Login({ onLoginSuccess }) {
         return;
       }
 
-      // Save session in AuthContext & localStorage
       loginUser({
         profile: matchedStaff,
         store: matchedStore,
@@ -337,7 +308,6 @@ export default function Login({ onLoginSuccess }) {
         session: null
       });
 
-      // Role-Based Redirection:
       let redirectPath = '/admin';
       if (matchedStaff.role === 'delivery_boy') {
         redirectPath = `/store/${matchedStore.slug}/delivery`;
@@ -366,14 +336,14 @@ export default function Login({ onLoginSuccess }) {
   return (
     <div className="flex items-center justify-center min-h-[82vh] px-4 py-8 animate-in fade-in duration-300">
       <div className="w-full max-w-md bg-slate-900/95 border border-slate-800 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-2xl space-y-6">
-        {/* Header Branding */}
+        {/* Header Branding (Clean Store Branding) */}
         <div className="text-center space-y-2">
-          <div className="w-14 h-14 bg-gradient-to-tr from-emerald-500 via-teal-500 to-indigo-600 border border-emerald-400/30 text-white rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <ShieldCheck className="w-7 h-7 text-white" />
+          <div className="w-14 h-14 bg-gradient-to-tr from-emerald-500 to-teal-500 border border-emerald-400/30 text-white rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <Store className="w-7 h-7 text-white" />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Enterprise Sign In</h1>
+          <h1 className="text-2xl font-black text-white tracking-tight">Store Portal Sign In</h1>
           <p className="text-xs text-slate-400">
-            Mittal Departmental Store & Multi-Tenant Platform
+            Mittal Departmental Store & Staff Access Terminal
           </p>
         </div>
 
@@ -392,7 +362,7 @@ export default function Login({ onLoginSuccess }) {
             }`}
           >
             <Crown className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Store Owner / Super Admin</span>
+            <span className="truncate">Store Owner</span>
           </button>
 
           <button
@@ -421,13 +391,13 @@ export default function Login({ onLoginSuccess }) {
         )}
 
         {/* ======================================================== */}
-        {/* TAB 1: STORE OWNER / SUPER ADMIN (EMAIL + PASSWORD) */}
+        {/* TAB 1: STORE OWNER (EMAIL + PASSWORD) */}
         {/* ======================================================== */}
         {activeTab === 'owner' && (
           <form onSubmit={handleOwnerLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                Work Email Address
+                Store Owner Email
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
@@ -439,7 +409,7 @@ export default function Login({ onLoginSuccess }) {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="owner@mittalstore.com or superadmin@jaljivan.com"
+                  placeholder="owner@mittalstore.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950/70 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition placeholder:text-slate-600"
                 />
               </div>
@@ -448,7 +418,7 @@ export default function Login({ onLoginSuccess }) {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
-                  Password
+                  Store Password
                 </label>
                 <span className="text-[10px] text-slate-500">Master Password accepted</span>
               </div>
@@ -462,7 +432,7 @@ export default function Login({ onLoginSuccess }) {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter account password"
+                  placeholder="Enter store password"
                   className="w-full pl-10 pr-10 py-3 bg-slate-950/70 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition placeholder:text-slate-600"
                 />
                 <button
@@ -485,37 +455,27 @@ export default function Login({ onLoginSuccess }) {
                 <div className="w-5 h-5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <span>Sign In as Executive</span>
+                  <span>Sign In as Store Owner</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
             </button>
 
-            {/* Quick-fill helper chips for evaluation */}
+            {/* Quick-fill helper chips for owner evaluation */}
             <div className="pt-3 border-t border-slate-800/80 space-y-2">
               <p className="text-[11px] font-semibold text-slate-400 text-center">
                 Quick Test Credentials:
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('superadmin@jaljivan.com');
-                    setPassword('SuperAdmin#2026!');
-                  }}
-                  className="text-[10px] px-2.5 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 transition font-mono"
-                >
-                  Super Admin
-                </button>
+              <div className="flex items-center justify-center">
                 <button
                   type="button"
                   onClick={() => {
                     setEmail('owner@mittalstore.com');
                     setPassword('MittalStore#2026!Secure');
                   }}
-                  className="text-[10px] px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition font-mono"
+                  className="text-[10px] px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition font-mono"
                 >
-                  Store Owner
+                  Store Owner (owner@mittalstore.com)
                 </button>
               </div>
             </div>

@@ -6,6 +6,8 @@ import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import Login from './pages/Login';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import SuperAdminAuth from './pages/SuperAdminAuth';
+import MasterHQConsole from './pages/MasterHQConsole';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
 import ItemsInventoryHub from './components/items/ItemsInventoryHub';
@@ -61,8 +63,8 @@ export const getInitialModule = () => {
   const queryModule = params.get('module');
 
   // Explicit path matching takes absolute priority
-  if (path.includes('/super-admin')) {
-    return 'super-admin';
+  if (path.includes('/hq-console') || path.includes('/super-admin')) {
+    return 'hq-console';
   }
   if (path.includes('/settings/staff')) {
     return 'staff-settings';
@@ -126,9 +128,12 @@ export function parseRoute() {
     return { type: 'settings-staff', module: 'staff-settings', pathname: '/settings/staff' };
   }
 
-  // Route 0.7: Dedicated Super Admin Dashboard (/super-admin)
-  if (pathname === '/super-admin' || pathname.startsWith('/super-admin')) {
-    return { type: 'super-admin', module: 'super-admin', pathname: '/super-admin' };
+  // Route 0.7: Dedicated Isolated Master HQ Console (/hq-console and /hq-console/auth)
+  if (pathname === '/hq-console/auth' || pathname.startsWith('/hq-console/auth')) {
+    return { type: 'hq-auth', module: null, pathname: '/hq-console/auth' };
+  }
+  if (pathname === '/hq-console' || pathname.startsWith('/hq-console') || pathname === '/super-admin') {
+    return { type: 'hq-console', module: null, pathname: '/hq-console' };
   }
 
   // Explicit pathname matching takes absolute priority over legacy query params
@@ -765,10 +770,43 @@ export default function App() {
     return <StoreDeliveryPortal storeSlug={activeSlug} />;
   }
 
+  // Dedicated Isolated Master HQ Console Routes (/hq-console and /hq-console/auth)
+  // Completely detached from store layout (no store Navbar, no store ModularSidebar)
+  const isHqAuthRoute =
+    routeState.type === 'hq-auth' ||
+    (typeof window !== 'undefined' &&
+      (window.location.pathname.toLowerCase().startsWith('/hq-console/auth') ||
+       (window.location.hash && window.location.hash.toLowerCase().startsWith('/hq-console/auth'))));
+
+  if (isHqAuthRoute) {
+    return (
+      <SuperAdminAuth
+        onAuthSuccess={() => navigate('/hq-console')}
+        onNavigate={(path) => navigate(path)}
+      />
+    );
+  }
+
+  const isHqConsoleRoute =
+    routeState.type === 'hq-console' ||
+    (typeof window !== 'undefined' &&
+      (window.location.pathname.toLowerCase() === '/hq-console' ||
+       window.location.pathname.toLowerCase() === '/hq-console/' ||
+       window.location.pathname.toLowerCase() === '/super-admin' ||
+       (window.location.hash && window.location.hash.toLowerCase().includes('/hq-console'))));
+
+  if (isHqConsoleRoute) {
+    return (
+      <MasterHQConsole
+        onNavigate={(path) => navigate(path)}
+        showToast={showToast}
+      />
+    );
+  }
+
   const isViewAdmin =
     routeState.type.startsWith('admin') ||
-    routeState.type === 'settings-staff' ||
-    routeState.type === 'super-admin';
+    routeState.type === 'settings-staff';
 
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
@@ -782,8 +820,6 @@ export default function App() {
             ? 'hub'
             : routeState.type === 'settings-staff'
             ? 'staff'
-            : routeState.type === 'super-admin'
-            ? 'super-admin'
             : '')
         }
         onNavigateToAdminHub={() => navigate('/admin')}
@@ -802,8 +838,6 @@ export default function App() {
                 ? 'hub'
                 : routeState.type === 'settings-staff'
                 ? 'staff-settings'
-                : routeState.type === 'super-admin'
-                ? 'super-admin'
                 : '')
             }
             onNavigate={(path) => navigate(path)}
@@ -813,21 +847,7 @@ export default function App() {
 
         {/* Main Routing Container */}
         <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
-          {routeState.type === 'super-admin' ? (
-            /* ======================================================== */
-            /* ROUTE: /super-admin (SUPER ADMIN MULTI-TENANT DASHBOARD) */
-            /* ======================================================== */
-            !isAdminLoggedIn ? (
-              <Login onLoginSuccess={handleAdminLoginSuccess} />
-            ) : (
-              <ErrorBoundary title="Super Admin Platform Console">
-                <SuperAdminDashboard
-                  showToast={showToast}
-                  onNavigate={(path) => navigate(path)}
-                />
-              </ErrorBoundary>
-            )
-          ) : routeState.type === 'settings-staff' ? (
+          {routeState.type === 'settings-staff' ? (
             /* ======================================================== */
             /* ROUTE: /settings/staff (STAFF MANAGEMENT - STORE OWNER ONLY) */
             /* ======================================================== */

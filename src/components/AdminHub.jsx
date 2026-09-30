@@ -238,23 +238,6 @@ export default function AdminHub({ onNavigate }) {
         'Add Staff with Roles: Cashier, Inward, Delivery Boy',
         'Dedicated Rider Portal URL & Smartphone QR Code'
       ]
-    },
-    {
-      id: 'super-admin',
-      title: 'Super Admin Multi-Tenant Console',
-      category: 'Platform Super Admin',
-      description: 'Global stores directory, tenant provisioning, and module feature flags control.',
-      path: '/super-admin',
-      icon: ShieldCheck,
-      badge: 'Super Admin',
-      badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/40',
-      gradient: 'from-purple-900/30 via-slate-900 to-slate-950',
-      borderColor: 'border-purple-500/30 hover:border-purple-500/60',
-      features: [
-        'Multi-tenant store registry',
-        'Create new stores & owner credentials',
-        'Real-time module toggles per store'
-      ]
     }
   ];
 
@@ -265,10 +248,9 @@ export default function AdminHub({ onNavigate }) {
       if (mod.id === 'delivery' && currentStore?.enabled_modules?.delivery === false) return false;
       if (mod.id === 'finance' && currentStore?.enabled_modules?.ledger === false) return false;
       if (mod.id === 'staff-settings' && !isOwner) return false;
-      if (mod.id === 'super-admin' && !isSuperAdmin) return false;
       return true;
     });
-  }, [modulesList, currentStore, isOwner, isSuperAdmin]);
+  }, [modulesList, currentStore, isOwner]);
 
   const handleCardClick = (mod, e) => {
     if (e && e.preventDefault) {
