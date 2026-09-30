@@ -5,6 +5,7 @@ import DamageReturnHub from './components/damage/DamageReturnHub';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import Login from './pages/Login';
+import PublicLandingPage from './pages/PublicLandingPage';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import SuperAdminAuth from './pages/SuperAdminAuth';
 import MasterHQConsole from './pages/MasterHQConsole';
@@ -18,7 +19,8 @@ import MobileInwardCapture from './components/purchase/MobileInwardCapture';
 import ModularSidebar from './components/ModularSidebar';
 import StaffSettingsPage from './pages/StaffSettingsPage';
 import StoreDeliveryPortal from './pages/StoreDeliveryPortal';
-import { useAuth } from './context/AuthContext';
+import { useAuth, DEFAULT_STORE } from './context/AuthContext';
+import { Store, ShieldAlert, AlertTriangle } from 'lucide-react';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -58,77 +60,39 @@ const ADMIN_SESSION_KEY = 'admin_session';
 // ==========================================
 export const getInitialModule = () => {
   if (typeof window === 'undefined') return 'hub';
-  const path = window.location.pathname.toLowerCase();
-  const params = new URLSearchParams(window.location.search);
-  const queryModule = params.get('module');
-
-  // Explicit path matching takes absolute priority
-  if (path.includes('/hq-console') || path.includes('/super-admin')) {
-    return 'hq-console';
-  }
-  if (path.includes('/settings/staff')) {
-    return 'staff-settings';
-  }
-  if (path.includes('/store/') && path.includes('/delivery')) {
-    return 'store-delivery';
-  }
-  if (path.includes('/rider') || path.includes('/driver')) {
-    return 'driver';
-  }
-  if (path.includes('/admin/staff') || queryModule === 'staff') {
-    return 'staff';
-  }
-  if (path.includes('/admin/sales') || queryModule === 'sales') {
-    return 'sales';
-  }
-  if (path.includes('/admin/items') || path.includes('/admin/inventory') || queryModule === 'items' || queryModule === 'inventory') {
-    return 'items';
-  }
-  if (path.includes('/admin/purchase') || queryModule === 'purchase') {
-    return 'purchase';
-  }
-  if (path.includes('/admin/delivery') || queryModule === 'delivery') {
-    return 'delivery';
-  }
-  if (path.includes('/admin/damage') || queryModule === 'damage') {
-    return 'damage';
-  }
+  const route = parseRoute();
+  if (route.type === 'driver') return 'driver';
+  if (route.type === 'store-delivery') return 'delivery';
+  if (route.module) return route.module;
   return 'hub';
 };
 
 export function parseRoute() {
   if (typeof window === 'undefined') {
-    return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
+    return { type: 'public-landing', pathname: '/' };
   }
 
   let pathname = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
   const hash = (window.location.hash || '').toLowerCase().replace(/^#\/?/, '').replace(/\/+$/, '');
   const search = new URLSearchParams(window.location.search);
-  const legacyModule = search.get('module');
 
   // Support SPA deep link fallback via hash
   if (pathname === '/' && hash) {
     pathname = '/' + hash;
   }
 
-  // Route 0: Dedicated Public Mobile Inward Camera (/scan-inward)
+  // 1. PUBLIC ROOT (/) - SaaS Landing & Store Login
+  if (pathname === '/' || pathname === '') {
+    return { type: 'public-landing', pathname: '/' };
+  }
+
+  // 2. Dedicated Public Mobile Inward Camera (/scan-inward)
   if (pathname === '/scan-inward' || pathname.startsWith('/scan-inward')) {
     const sessionId = search.get('session') || '';
     return { type: 'scan-inward', module: null, pathname: '/scan-inward', sessionId };
   }
 
-  // Route 0.5: Dedicated Dynamic Store Delivery Route (/store/:storeSlug/delivery)
-  const storeDeliveryMatch = pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/);
-  if (storeDeliveryMatch) {
-    return { type: 'store-delivery', storeSlug: storeDeliveryMatch[1], pathname };
-  }
-
-  // Route 0.6: Staff Management Screen (/settings/staff)
-  if (pathname === '/settings/staff' || pathname.startsWith('/settings/staff')) {
-    return { type: 'settings-staff', module: 'staff-settings', pathname: '/settings/staff' };
-  }
-
-  // Route 0.7: Dedicated Isolated Master HQ Console (/hq-console and /hq-console/auth)
+  // 3. Standalone Super Admin HQ Console (/hq-console and /hq-console/auth)
   if (pathname === '/hq-console/auth' || pathname.startsWith('/hq-console/auth')) {
     return { type: 'hq-auth', module: null, pathname: '/hq-console/auth' };
   }
@@ -136,43 +100,93 @@ export function parseRoute() {
     return { type: 'hq-console', module: null, pathname: '/hq-console' };
   }
 
-  // Explicit pathname matching takes absolute priority over legacy query params
-  // Route 1: Dedicated Rider Portal (/rider, with /driver as legacy alias)
+  // 4. Dedicated Rider Portal (/rider, with /driver as legacy alias)
   if (pathname === '/rider' || pathname === '/driver') {
     return { type: 'driver', module: null, pathname: '/rider' };
   }
 
-  // Route 2: Dedicated Admin Login (/admin/login or /login)
+  // 5. Dedicated Store Delivery Route:
+  // - /store/:storeSlug/delivery OR /:storeSlug/delivery
+  const legacyStoreDeliveryMatch = pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/);
+  if (legacyStoreDeliveryMatch) {
+    return { type: 'store-delivery', storeSlug: legacyStoreDeliveryMatch[1], pathname };
+  }
+
+  // 6. Dedicated Store Login Screen (/login or /admin/login)
   if (pathname === '/admin/login' || pathname === '/login') {
     return { type: 'admin-login', module: null, pathname: '/login' };
   }
 
-  // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/items, /admin/staff, etc.)
+  // 7. Settings Staff (/settings/staff)
+  if (pathname === '/settings/staff' || pathname.startsWith('/settings/staff')) {
+    return { type: 'settings-staff', module: 'staff-settings', pathname: '/settings/staff' };
+  }
+
+  // 8. Legacy /admin or /admin/:mod routes
   const adminModMatch = pathname.match(
     /^\/admin\/(delivery|damage|purchase|items|inventory|staff|sales|marketing|finance|settings|config)$/
   );
   if (adminModMatch) {
     const rawMod = adminModMatch[1];
     const mod = rawMod === 'config' ? 'settings' : rawMod === 'inventory' ? 'items' : rawMod;
+    if (mod === 'delivery') {
+      return { type: 'store-delivery', storeSlug: 'mittal-store', pathname: '/admin/delivery' };
+    }
     return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
   }
-
-  // Route 5: Master Executive Hub (/admin or /admin/hub)
   if (pathname === '/admin' || pathname === '/admin/hub' || pathname === '/hub') {
     return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
   }
 
-  // Handle legacy query params (?module=...) only for root '/' or fallback
-  if (legacyModule) {
-    const mod = legacyModule === 'hub' ? 'hub' : legacyModule;
-    if (mod === 'hub') {
-      return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
+  // 9. DYNAMIC STORE SCOPED ROUTES (/:storeSlug, /:storeSlug/admin, /:storeSlug/:module)
+  const segments = pathname.replace(/^\//, '').split('/');
+  const potentialSlug = segments[0];
+
+  const reserved = [
+    '',
+    'scan-inward',
+    'rider',
+    'driver',
+    'hq-console',
+    'super-admin',
+    'login',
+    'admin',
+    'store',
+    'api',
+    'assets',
+    'settings'
+  ];
+
+  if (potentialSlug && !reserved.includes(potentialSlug)) {
+    const subRoute = segments[1] || '';
+
+    // Subroute: delivery (/:storeSlug/delivery)
+    if (subRoute === 'delivery') {
+      return { type: 'store-delivery', storeSlug: potentialSlug, pathname };
     }
-    return { type: 'admin-module', module: mod, pathname: `/admin/${mod}` };
+
+    // Subroute: staff (/:storeSlug/staff)
+    if (subRoute === 'staff') {
+      return { type: 'store-scoped', storeSlug: potentialSlug, module: 'staff-settings', pathname };
+    }
+
+    // Subroute: hub (/:storeSlug or /:storeSlug/admin or /:storeSlug/hub)
+    if (!subRoute || subRoute === 'admin' || subRoute === 'hub') {
+      return { type: 'store-scoped', storeSlug: potentialSlug, module: 'hub', pathname: `/${potentialSlug}` };
+    }
+
+    // Subroute: modules (sales, purchase, items, inventory, damage, marketing, finance, settings)
+    const normalizedMod = subRoute === 'inventory' ? 'items' : subRoute;
+    return {
+      type: 'store-scoped',
+      storeSlug: potentialSlug,
+      module: normalizedMod,
+      pathname: `/${potentialSlug}/${subRoute}`
+    };
   }
 
-  // Route 6: Root (/) defaults to Master Executive Hub (/admin)
-  return { type: 'admin-hub', module: 'hub', pathname: '/admin' };
+  // Default fallback: Public Landing Page
+  return { type: 'public-landing', pathname: '/' };
 }
 
 function getModuleTitle(moduleKey) {
@@ -200,13 +214,25 @@ function getModuleTitle(moduleKey) {
 }
 
 export default function App() {
-  const { userRole, isSuperAdmin, logoutUser } = useAuth();
+  const {
+    currentStore,
+    setCurrentStore,
+    userRole,
+    isSuperAdmin,
+    isOwner,
+    userProfile,
+    logoutUser
+  } = useAuth();
 
   // Current Active Module State (checked from URL before localStorage)
   const [currentModule, setCurrentModule] = useState(getInitialModule);
 
   // Current Route State
   const [routeState, setRouteState] = useState(() => parseRoute());
+
+  // Store Scoping and Multi-Tenant Isolation States
+  const [storeNotFound, setStoreNotFound] = useState(false);
+  const [tenantAccessDenied, setTenantAccessDenied] = useState(false);
 
   // Admin Authentication State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
@@ -217,7 +243,6 @@ export default function App() {
       return false;
     }
   });
-
 
   // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {
@@ -252,9 +277,11 @@ export default function App() {
     setRouteState(newRoute);
     if (newRoute.type === 'driver') {
       setCurrentModule('driver');
+    } else if (newRoute.type === 'store-delivery') {
+      setCurrentModule('delivery');
     } else if (newRoute.module) {
       setCurrentModule(newRoute.module);
-    } else if (newRoute.type === 'admin-hub') {
+    } else if (newRoute.type === 'admin-hub' || newRoute.type === 'store-scoped') {
       setCurrentModule('hub');
     }
   }, []);
@@ -266,6 +293,108 @@ export default function App() {
     } catch (e) {}
   }, [currentModule]);
 
+  // Multi-Tenant Isolation & Store Verification Effect
+  useEffect(() => {
+    async function verifyTenantStore() {
+      if (routeState.type !== 'store-scoped' && routeState.type !== 'store-delivery') {
+        setTenantAccessDenied(false);
+        setStoreNotFound(false);
+        return;
+      }
+
+      const routeSlug = routeState.storeSlug;
+      if (!routeSlug) return;
+
+      // 1. If currently loaded store matches routeSlug
+      if (currentStore?.slug === routeSlug) {
+        if (
+          isAdminLoggedIn &&
+          userProfile?.store_id &&
+          userProfile.store_id !== currentStore.id &&
+          userRole !== 'super_admin'
+        ) {
+          setTenantAccessDenied(true);
+        } else {
+          setTenantAccessDenied(false);
+        }
+        setStoreNotFound(false);
+        return;
+      }
+
+      // 2. Fetch the store corresponding to routeSlug
+      let matchedStore = null;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('stores')
+            .select('*')
+            .eq('slug', routeSlug)
+            .single();
+          if (!error && data) {
+            matchedStore = data;
+          }
+        } catch (e) {}
+      }
+
+      if (!matchedStore) {
+        try {
+          const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
+          matchedStore = localStores.find((s) => s.slug === routeSlug);
+        } catch (e) {}
+      }
+
+      if (!matchedStore && (routeSlug === 'mittal-store' || routeSlug === DEFAULT_STORE.slug || routeSlug === 'default')) {
+        matchedStore = DEFAULT_STORE;
+      }
+
+      if (!matchedStore) {
+        setStoreNotFound(true);
+        setTenantAccessDenied(false);
+        return;
+      }
+
+      setStoreNotFound(false);
+
+      // Verify user permission for this store
+      if (isAdminLoggedIn) {
+        const userStoreId = userProfile?.store_id;
+        const hasAccess = userRole === 'super_admin' || !userStoreId || userStoreId === matchedStore.id;
+
+        if (!hasAccess) {
+          setTenantAccessDenied(true);
+          return;
+        }
+
+        setTenantAccessDenied(false);
+        setCurrentStore(matchedStore);
+      }
+    }
+
+    verifyTenantStore();
+  }, [routeState.type, routeState.storeSlug, currentStore, isAdminLoggedIn, userProfile, userRole, setCurrentStore]);
+
+  // Requirement 4: Clean auto-redirect away from /login if already logged in
+  useEffect(() => {
+    if (routeState.type === 'admin-login' && isAdminLoggedIn) {
+      const targetSlug = currentStore?.slug || 'mittal-store';
+      navigate(`/${targetSlug}`, true);
+    }
+  }, [routeState.type, isAdminLoggedIn, currentStore?.slug, navigate]);
+
+  // Check if active module is permitted for this store's subscription license
+  const isModulePermitted = useCallback((mod) => {
+    if (!mod || mod === 'hub') return true;
+    if (mod === 'staff-settings' || mod === 'staff') return isOwner;
+    if (mod === 'items' || mod === 'damage') return true;
+    const modules = currentStore?.enabled_modules;
+    if (!modules) return true;
+    if (mod === 'sales' && modules.pos === false) return false;
+    if (mod === 'purchase' && modules.inward_ocr === false) return false;
+    if (mod === 'delivery' && modules.delivery === false) return false;
+    if (mod === 'finance' && modules.ledger === false) return false;
+    return true;
+  }, [currentStore?.enabled_modules, isOwner]);
+
   // Listen to browser navigation (back/forward) & clean legacy query params
   useEffect(() => {
     const handleLocationChange = () => {
@@ -273,9 +402,11 @@ export default function App() {
       setRouteState(newRoute);
       if (newRoute.type === 'driver') {
         setCurrentModule('driver');
+      } else if (newRoute.type === 'store-delivery') {
+        setCurrentModule('delivery');
       } else if (newRoute.module) {
         setCurrentModule(newRoute.module);
-      } else if (newRoute.type === 'admin-hub') {
+      } else if (newRoute.type === 'admin-hub' || newRoute.type === 'store-scoped') {
         setCurrentModule('hub');
       }
     };
@@ -283,15 +414,15 @@ export default function App() {
     window.addEventListener('popstate', handleLocationChange);
     window.addEventListener('hashchange', handleLocationChange);
 
-    // Strip legacy ?module=... query params and rewrite cleanly without overriding direct URLs
+    // Clean legacy query params
     const search = new URLSearchParams(window.location.search);
-    if (search.has('module')) {
+    const currentPath = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
+    if (search.has('module') && currentPath !== '/' && currentPath !== '') {
       const legacyMod = search.get('module');
       search.delete('module');
       const remainingQuery = search.toString() ? `?${search.toString()}` : '';
-      const currentPath = (window.location.pathname || '/').toLowerCase().replace(/\/+$/, '') || '/';
       let newPath = currentPath;
-      if (currentPath === '/' || currentPath === '') {
+      if (currentPath === '/admin' && legacyMod) {
         newPath = legacyMod === 'hub' ? '/admin' : `/admin/${legacyMod}`;
       }
       try {
@@ -442,12 +573,15 @@ export default function App() {
   // Admin Login Success (supports role-based redirect target)
   const handleAdminLoginSuccess = (redirectPath) => {
     setIsAdminLoggedIn(true);
-    const target = typeof redirectPath === 'string' && redirectPath ? redirectPath : '/admin';
+    const target =
+      typeof redirectPath === 'string' && redirectPath
+        ? redirectPath
+        : `/${currentStore?.slug || 'mittal-store'}`;
     navigate(target);
     showToast('Authenticated successfully! Welcome back.', 'success');
   };
 
-  // Admin Logout (strictly navigates to /admin/login)
+  // Admin Logout (navigates to /login)
   const handleAdminLogout = () => {
     setIsAdminLoggedIn(false);
     logoutUser?.();
@@ -455,13 +589,14 @@ export default function App() {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
     } catch (e) {}
-    navigate('/admin/login');
-    showToast('Logged out of Admin Portal', 'info');
+    navigate('/login');
+    showToast('Logged out of Store Terminal', 'info');
   };
 
   // Back to Hub Handler
   const handleBackToHub = () => {
-    navigate('/admin');
+    const slug = currentStore?.slug || routeState.storeSlug || 'mittal-store';
+    navigate(`/${slug}`);
   };
 
   // Operational Action Handlers
@@ -759,14 +894,31 @@ export default function App() {
     );
   }
 
-  // Dedicated Dynamic Store Delivery Route (/store/:storeSlug/delivery)
+  // Dedicated Public SaaS Landing Page (/)
+  if (routeState.type === 'public-landing') {
+    return (
+      <PublicLandingPage
+        onLoginSuccess={(targetPath) => navigate(targetPath)}
+        onNavigate={(targetPath) => navigate(targetPath)}
+      />
+    );
+  }
+
+  // Dedicated Dynamic Store Delivery Route (/store/:storeSlug/delivery or /:storeSlug/delivery)
   const isStoreDeliveryRoute =
     routeState.type === 'store-delivery' ||
-    (typeof window !== 'undefined' && /^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/.test(window.location.pathname));
+    (typeof window !== 'undefined' &&
+      (/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/.test(window.location.pathname) ||
+       /^\/([a-zA-Z0-9_-]+)\/delivery\/?$/.test(window.location.pathname)));
 
-  if (isStoreDeliveryRoute) {
-    const slugMatch = typeof window !== 'undefined' ? window.location.pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/) : null;
-    const activeSlug = routeState.storeSlug || slugMatch?.[1] || 'default';
+  if (isStoreDeliveryRoute && (!isAdminLoggedIn || !isOwner)) {
+    const slugMatch =
+      typeof window !== 'undefined'
+        ? window.location.pathname.match(/^\/store\/([a-zA-Z0-9_-]+)\/delivery\/?$/) ||
+          window.location.pathname.match(/^\/([a-zA-Z0-9_-]+)\/delivery\/?$/)
+        : null;
+    const activeSlug =
+      routeState.storeSlug || slugMatch?.[1] || currentStore?.slug || 'mittal-store';
     return <StoreDeliveryPortal storeSlug={activeSlug} />;
   }
 
@@ -805,6 +957,7 @@ export default function App() {
   }
 
   const isViewAdmin =
+    routeState.type === 'store-scoped' ||
     routeState.type.startsWith('admin') ||
     routeState.type === 'settings-staff';
 
@@ -816,13 +969,15 @@ export default function App() {
         isAdminView={isViewAdmin}
         adminSubView={
           routeState.module ||
-          (routeState.type === 'admin-hub'
+          (routeState.type === 'admin-hub' || routeState.type === 'store-scoped'
             ? 'hub'
             : routeState.type === 'settings-staff'
             ? 'staff'
             : '')
         }
-        onNavigateToAdminHub={() => navigate('/admin')}
+        storeName={currentStore?.name || 'Mittal Departmental Store'}
+        storeSlug={currentStore?.slug || 'mittal-store'}
+        onNavigateToAdminHub={() => navigate(`/${currentStore?.slug || 'mittal-store'}`)}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
         onAdminLogout={handleAdminLogout}
@@ -830,11 +985,11 @@ export default function App() {
 
       <div className="flex flex-1 w-full overflow-hidden">
         {/* Modular Sidebar Navigation (honors store.enabled_modules and role) */}
-        {isAdminLoggedIn && routeState.type !== 'admin-login' && (
+        {isAdminLoggedIn && routeState.type !== 'admin-login' && !storeNotFound && !tenantAccessDenied && (
           <ModularSidebar
             currentModule={
               routeState.module ||
-              (routeState.type === 'admin-hub'
+              (routeState.type === 'admin-hub' || routeState.type === 'store-scoped'
                 ? 'hub'
                 : routeState.type === 'settings-staff'
                 ? 'staff-settings'
@@ -847,53 +1002,109 @@ export default function App() {
 
         {/* Main Routing Container */}
         <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
-          {routeState.type === 'settings-staff' ? (
+          {storeNotFound ? (
+            /* STORE NOT FOUND */
+            <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-300">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4">
+                <Store className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-white">Store Not Found</h2>
+              <p className="text-slate-400 text-sm mt-2 max-w-md">
+                The store with identifier <span className="font-mono text-amber-300 font-bold">"/{routeState.storeSlug}"</span> does not exist or has been decommissioned.
+              </p>
+              <div className="flex items-center gap-3 mt-6">
+                <button
+                  onClick={() => navigate('/')}
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition"
+                >
+                  Platform Home
+                </button>
+                {isAdminLoggedIn && (
+                  <button
+                    onClick={() => navigate(`/${currentStore?.slug || 'mittal-store'}`)}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition"
+                  >
+                    Go to My Store ({currentStore?.name})
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : tenantAccessDenied ? (
+            /* TENANT ACCESS RESTRICTED */
+            <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-300">
+              <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-4 shadow-lg shadow-rose-500/10">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+              <div className="px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 font-mono text-xs font-bold mb-3">
+                CROSS-TENANT ISOLATION ACTIVE
+              </div>
+              <h2 className="text-2xl font-black text-white">Store Access Restricted</h2>
+              <p className="text-slate-400 text-sm mt-2 max-w-md">
+                You are currently signed in as <span className="text-white font-semibold">{userProfile?.full_name || 'Store Staff'}</span> assigned to{' '}
+                <span className="text-emerald-400 font-semibold">{currentStore?.name}</span>. You do not have permissions to access{' '}
+                <span className="font-mono text-rose-300">"/{routeState.storeSlug}"</span>.
+              </p>
+              <div className="flex items-center gap-3 mt-6">
+                <button
+                  onClick={() => navigate(`/${currentStore?.slug || 'mittal-store'}`)}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition"
+                >
+                  Go to My Store ({currentStore?.name})
+                </button>
+                <button
+                  onClick={handleAdminLogout}
+                  className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs border border-slate-700 transition"
+                >
+                  Sign Out / Switch Account
+                </button>
+              </div>
+            </div>
+          ) : !isModulePermitted(routeState.module || 'hub') ? (
+            /* MODULE DISABLED BY LICENSE */
+            <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-300">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <div className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono text-xs font-bold mb-3">
+                MODULE DISABLED BY LICENSE
+              </div>
+              <h2 className="text-xl font-bold text-white">Module Not Included in Store Plan</h2>
+              <p className="text-slate-400 text-sm mt-2 max-w-md">
+                This module is currently disabled in the subscription license for <span className="text-white font-semibold">{currentStore?.name}</span>.
+                Contact your Super Administrator via the HQ Console to activate this module.
+              </p>
+              <button
+                onClick={handleBackToHub}
+                className="mt-6 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition"
+              >
+                Return to Store Hub
+              </button>
+            </div>
+          ) : !isAdminLoggedIn ? (
+            /* STORE LOGIN SCREEN (WHEN NOT LOGGED IN) */
+            <Login onLoginSuccess={handleAdminLoginSuccess} />
+          ) : routeState.type === 'admin-login' ? (
+            /* ROUTE: /login (ALREADY LOGGED IN -> LOADING SPINNER WHILE REDIRECTING) */
+            <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3">
+              <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-slate-400 font-mono">Redirecting to your store dashboard...</span>
+            </div>
+          ) : routeState.type === 'settings-staff' || routeState.module === 'staff-settings' ? (
             /* ======================================================== */
             /* ROUTE: /settings/staff (STAFF MANAGEMENT - STORE OWNER ONLY) */
             /* ======================================================== */
-            !isAdminLoggedIn ? (
-              <Login onLoginSuccess={handleAdminLoginSuccess} />
-            ) : (
-              <ErrorBoundary title="Store Staff Management">
-                <StaffSettingsPage
-                  onBackToHub={handleBackToHub}
-                  showToast={showToast}
-                />
-              </ErrorBoundary>
-            )
-          ) : routeState.type === 'admin-login' ? (
+            <ErrorBoundary title="Store Staff Management">
+              <StaffSettingsPage
+                onBackToHub={handleBackToHub}
+                showToast={showToast}
+              />
+            </ErrorBoundary>
+          ) : (routeState.type === 'store-scoped' || routeState.type === 'admin-hub') && (!routeState.module || routeState.module === 'hub') ? (
             /* ======================================================== */
-            /* ROUTE: /admin/login (DEDICATED ADMIN LOGIN) */
+            /* ROUTE: /:storeSlug (EXECUTIVE STORE HUB) */
             /* ======================================================== */
-            isAdminLoggedIn ? (
-              <div className="p-8 text-center">
-                <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
-                <button
-                  onClick={() => navigate('/admin')}
-                  className="mt-4 px-4 py-2 bg-emerald-600 rounded-xl text-white font-bold text-xs"
-                >
-                  Go to Hub
-                </button>
-              </div>
-            ) : (
-              <Login onLoginSuccess={handleAdminLoginSuccess} />
-            )
-          ) : routeState.type === 'admin-hub' ? (
-            /* ======================================================== */
-            /* ROUTE: /admin (CLEAN EXECUTIVE MASTER HUB) */
-            /* ======================================================== */
-            !isAdminLoggedIn ? (
-              <Login onLoginSuccess={handleAdminLoginSuccess} />
-            ) : (
-              <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
-            )
-          ) : routeState.type === 'admin-module' ? (
-            /* ======================================================== */
-            /* ROUTE: /admin/{module} (DEDICATED MODULE PAGES) */
-            /* ======================================================== */
-            !isAdminLoggedIn ? (
-              <Login onLoginSuccess={handleAdminLoginSuccess} />
-            ) : routeState.module === 'delivery' ? (
+            <AdminHub onNavigate={(path) => navigate(path)} />
+          ) : routeState.module === 'delivery' || routeState.type === 'store-delivery' ? (
             <ErrorBoundary title="Delivery & Dispatch Console">
               <AdminDashboard
                 orders={orders}
@@ -958,18 +1169,8 @@ export default function App() {
               moduleId={routeState.module}
               onBackToHub={handleBackToHub}
             />
-          )
-        ) : (
-          /* ======================================================== */
-          /* ROOT / OR DEFAULT EXECUTIVE ADMIN HUB */
-          /* ======================================================== */
-          isAdminLoggedIn ? (
-            <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
-          ) : (
-            <Login onLoginSuccess={handleAdminLoginSuccess} />
-          )
-        )}
-      </main>
+          )}
+        </main>
       </div>
 
       {/* Modals */}

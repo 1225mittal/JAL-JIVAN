@@ -252,11 +252,28 @@ export default function AdminHub({ onNavigate }) {
     });
   }, [modulesList, currentStore, isOwner]);
 
+  const getModuleUrl = (mod) => {
+    const storeSlug = currentStore?.slug || 'mittal-store';
+    if (mod.id === 'sales') return `/${storeSlug}/sales`;
+    if (mod.id === 'purchase') return `/${storeSlug}/purchase`;
+    if (mod.id === 'delivery') return `/${storeSlug}/delivery`;
+    if (mod.id === 'items' || mod.id === 'inventory') return `/${storeSlug}/items`;
+    if (mod.id === 'damage') return `/${storeSlug}/damage`;
+    if (mod.id === 'staff-settings' || mod.id === 'staff') return `/${storeSlug}/staff`;
+    if (mod.path?.startsWith('/admin/')) return `/${storeSlug}/${mod.id}`;
+    return mod.path || `/${storeSlug}`;
+  };
+
   const handleCardClick = (mod, e) => {
     if (e && e.preventDefault) {
       e.preventDefault();
     }
-    window.open(mod.path, '_blank', 'noopener,noreferrer');
+    const targetUrl = getModuleUrl(mod);
+    if (onNavigate) {
+      onNavigate(targetUrl);
+    } else {
+      window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    }
   };
 
   return (
@@ -370,7 +387,7 @@ export default function AdminHub({ onNavigate }) {
             return (
               <a
                 key={mod.id}
-                href={mod.path}
+                href={getModuleUrl(mod)}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => handleCardClick(mod, e)}

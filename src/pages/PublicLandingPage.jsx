@@ -1,0 +1,858 @@
+import React, { useState } from 'react';
+import {
+  Store,
+  Receipt,
+  FileSpreadsheet,
+  BookOpen,
+  Truck,
+  ShieldCheck,
+  CheckCircle2,
+  ArrowRight,
+  Sparkles,
+  Lock,
+  Mail,
+  KeyRound,
+  X,
+  ChevronRight,
+  Activity,
+  Layers,
+  Zap,
+  Cpu,
+  Smartphone,
+  Eye,
+  EyeOff,
+  AlertCircle
+} from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { useAuth, DEFAULT_STORE, DEFAULT_USER_PROFILE } from '../context/AuthContext';
+
+export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
+  const { loginUser } = useAuth();
+
+  // Store Login Modal State
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [loginTab, setLoginTab] = useState('owner'); // 'owner' | 'staff'
+
+  // Owner Form State
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [ownerPassword, setOwnerPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Staff Form State
+  const [staffSlug, setStaffSlug] = useState('');
+  const [staffPin, setStaffPin] = useState('');
+
+  // Status
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState('');
+
+  // Interactive Capability Tab in Hero
+  const [activeCapability, setActiveCapability] = useState('pos');
+
+  // ==========================================
+  // AUTHENTICATION HANDLERS (STORE SCOPED)
+  // ==========================================
+  const handleOwnerLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+
+    const cleanEmail = ownerEmail.trim().toLowerCase();
+    const cleanPassword = ownerPassword.trim();
+
+    if (!cleanEmail || !cleanPassword) {
+      setLoginError('Please enter your email and password.');
+      return;
+    }
+
+    if (cleanEmail.includes('superadmin')) {
+      setLoginError('Invalid credentials for tenant store terminal.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      let resolvedProfile = null;
+      let resolvedStore = null;
+      let authSession = null;
+
+      if (isSupabaseConfigured && supabase?.auth) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: cleanPassword
+          });
+
+          if (!authError && authData?.user) {
+            authSession = authData.session;
+            const { data: profData } = await supabase
+              .from('user_profiles')
+              .select('*, stores(*)')
+              .eq('id', authData.user.id)
+              .single();
+
+            if (profData) {
+              resolvedProfile = profData;
+              if (profData.stores) {
+                resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Auth notice:', err);
+        }
+      }
+
+      // Offline / Demo Store Owner fallback
+      if (!resolvedProfile) {
+        const isOwnerCreds =
+          (cleanEmail === 'owner@mittalstore.com' || cleanEmail === 'mittal' || cleanEmail === 'admin') &&
+          (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
+
+        if (isOwnerCreds) {
+          resolvedProfile = DEFAULT_USER_PROFILE;
+          resolvedStore = DEFAULT_STORE;
+        }
+      }
+
+      if (!resolvedProfile) {
+        setLoginError('Invalid store owner credentials. Please verify your email and password.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!resolvedStore && resolvedProfile.store_id && isSupabaseConfigured && supabase) {
+        try {
+          const { data: storeData } = await supabase
+            .from('stores')
+            .select('*')
+            .eq('id', resolvedProfile.store_id)
+            .single();
+          if (storeData) resolvedStore = storeData;
+        } catch (e) {}
+      }
+
+      if (!resolvedStore) {
+        resolvedStore = DEFAULT_STORE;
+      }
+
+      loginUser({
+        profile: resolvedProfile,
+        store: resolvedStore,
+        role: 'store_owner',
+        session: authSession
+      });
+
+      // Requirement 1: Redirect directly to their scoped store path: /${store.slug}
+      const storeSlug = resolvedStore?.slug || 'mittal-store';
+      const redirectPath = `/${storeSlug}`;
+
+      setIsLoginModalOpen(false);
+      if (onLoginSuccess) {
+        onLoginSuccess(redirectPath);
+      } else if (onNavigate) {
+        onNavigate(redirectPath);
+      } else {
+        window.location.href = redirectPath;
+      }
+    } catch (err) {
+      setLoginError(err.message || 'Authentication error.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStaffLogin = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+
+    const cleanSlug = staffSlug.trim().toLowerCase();
+    const cleanPin = staffPin.trim();
+
+    if (!cleanSlug) {
+      setLoginError('Please enter your store code/slug.');
+      return;
+    }
+    if (!cleanPin || cleanPin.length < 4) {
+      setLoginError('Please enter your 4-digit staff PIN.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      let matchedStore = null;
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data } = await supabase.from('stores').select('*').eq('slug', cleanSlug).single();
+          if (data) matchedStore = data;
+        } catch (e) {}
+      }
+
+      if (!matchedStore) {
+        try {
+          const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
+          matchedStore = localStores.find((s) => s.slug === cleanSlug);
+        } catch (e) {}
+      }
+
+      if (!matchedStore && (cleanSlug === 'mittal-store' || cleanSlug === 'default' || cleanSlug === DEFAULT_STORE.slug)) {
+        matchedStore = DEFAULT_STORE;
+      }
+
+      if (!matchedStore) {
+        setLoginError(`Store with slug "${cleanSlug}" was not found. Please check with your store administrator.`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      let matchedStaff = null;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data: staffData } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('store_id', matchedStore.id)
+            .eq('pin', cleanPin)
+            .eq('is_active', true)
+            .single();
+
+          if (staffData) matchedStaff = staffData;
+        } catch (e) {}
+      }
+
+      if (!matchedStaff) {
+        try {
+          const localStaff = JSON.parse(localStorage.getItem(`jal_jivan_store_staff_${matchedStore.id}`) || '[]');
+          const found = localStaff.find((s) => String(s.pin) === cleanPin && s.is_active !== false);
+          if (found) matchedStaff = found;
+        } catch (e) {}
+      }
+
+      // Demo PIN fallbacks
+      if (!matchedStaff) {
+        if (cleanPin === '1122') {
+          matchedStaff = {
+            id: `staff_cashier_${matchedStore.id}`,
+            full_name: 'Cashier Staff',
+            email: `cashier@${cleanSlug}.com`,
+            role: 'billing_cashier',
+            store_id: matchedStore.id,
+            pin: '1122',
+            is_active: true
+          };
+        } else if (cleanPin === '3344') {
+          matchedStaff = {
+            id: `staff_inward_${matchedStore.id}`,
+            full_name: 'Inventory Staff',
+            email: `inventory@${cleanSlug}.com`,
+            role: 'inventory_staff',
+            store_id: matchedStore.id,
+            pin: '3344',
+            is_active: true
+          };
+        } else if (cleanPin === '5566' || cleanPin === '1234') {
+          matchedStaff = {
+            id: `staff_rider_${matchedStore.id}`,
+            full_name: 'Delivery Staff',
+            email: `rider@${cleanSlug}.com`,
+            role: 'delivery_boy',
+            store_id: matchedStore.id,
+            pin: cleanPin,
+            is_active: true
+          };
+        }
+      }
+
+      if (!matchedStaff) {
+        setLoginError('Invalid PIN for this store. Please contact your store owner.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      loginUser({
+        profile: matchedStaff,
+        store: matchedStore,
+        role: matchedStaff.role,
+        session: null
+      });
+
+      // Redirect directly to their scoped store path
+      let redirectPath = `/${matchedStore.slug}`;
+      if (matchedStaff.role === 'delivery_boy') {
+        redirectPath = `/${matchedStore.slug}/delivery`;
+      } else if (matchedStaff.role === 'billing_cashier') {
+        redirectPath = `/${matchedStore.slug}/sales`;
+      } else if (matchedStaff.role === 'inventory_staff') {
+        redirectPath = `/${matchedStore.slug}/purchase`;
+      }
+
+      setIsLoginModalOpen(false);
+      if (onLoginSuccess) {
+        onLoginSuccess(redirectPath);
+      } else if (onNavigate) {
+        onNavigate(redirectPath);
+      } else {
+        window.location.href = redirectPath;
+      }
+    } catch (err) {
+      setLoginError(err.message || 'Staff login error.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-[#070b18] text-slate-100 selection:bg-emerald-500 selection:text-white flex flex-col font-sans overflow-x-hidden">
+      {/* Dynamic Background Glows */}
+      <div className="absolute top-0 left-1/3 w-[500px] h-[500px] bg-emerald-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/4 right-10 w-[400px] h-[400px] bg-indigo-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-25 pointer-events-none" />
+
+      {/* ======================================================== */}
+      {/* 1. PUBLIC PLATFORM HEADER */}
+      {/* ======================================================== */}
+      <header className="w-full bg-slate-950/70 border-b border-slate-800/80 backdrop-blur-xl sticky top-0 z-40 px-4 sm:px-8 py-4">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-500 to-indigo-600 border border-emerald-400/40 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/20">
+              <Store className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-base sm:text-lg tracking-tight text-white">
+                  JAL-JIVAN
+                </span>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono">
+                  RETAIL OS
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 hidden sm:block">
+                High-Performance FMCG & Supermarket Platform
+              </p>
+            </div>
+          </div>
+
+          <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-slate-300">
+            <a href="#pos" className="hover:text-emerald-400 transition">Counter POS</a>
+            <a href="#ocr" className="hover:text-teal-400 transition">AI Inward OCR</a>
+            <a href="#ledger" className="hover:text-blue-400 transition">Vendor Ledgers</a>
+            <a href="#fleet" className="hover:text-indigo-400 transition">Hyperlocal Fleet</a>
+          </nav>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsLoginModalOpen(true)}
+              className="py-2.5 px-5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 active:scale-95"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>Store Login</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ======================================================== */}
+      {/* 2. HERO SECTION */}
+      {/* ======================================================== */}
+      <section className="relative z-10 max-w-7xl mx-auto px-4 sm:px-8 pt-12 pb-16 text-center space-y-8">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900 border border-emerald-500/30 text-emerald-300 text-xs font-bold uppercase tracking-wider shadow-inner">
+          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Multi-Tenant Operating System for Modern Retail</span>
+        </div>
+
+        <div className="space-y-4 max-w-4xl mx-auto">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.15]">
+            Automate Counter Billing,{' '}
+            <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-indigo-400 bg-clip-text text-transparent">
+              Groq Vision Inwarding
+            </span>{' '}
+            & Delivery Fleet
+          </h1>
+          <p className="text-sm sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+            The all-in-one retail cloud engineered for departmental stores and high-velocity supermarkets.
+            Instant barcode billing, paper bill digitization, real-time vendor bahi-khata, and a smartphone rider portal.
+          </p>
+        </div>
+
+        {/* Hero CTAs */}
+        <div className="flex flex-wrap items-center justify-center gap-3.5">
+          <button
+            onClick={() => setIsLoginModalOpen(true)}
+            className="py-3.5 px-7 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-2xl text-sm transition shadow-xl shadow-emerald-500/25 flex items-center gap-2.5 active:scale-95"
+          >
+            <span>Open Store Terminal</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+
+          <a
+            href="#modules"
+            className="py-3.5 px-6 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-white font-bold rounded-2xl text-sm transition flex items-center gap-2"
+          >
+            <span>Explore Capabilities</span>
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          </a>
+        </div>
+
+        {/* ======================================================== */}
+        {/* INTERACTIVE CAPABILITIES PREVIEW TABS */}
+        {/* ======================================================== */}
+        <div className="pt-8 max-w-4xl mx-auto text-left">
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-1.5 bg-slate-950 rounded-2xl border border-slate-800">
+              <button
+                onClick={() => setActiveCapability('pos')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  activeCapability === 'pos'
+                    ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                <span>Counter POS</span>
+              </button>
+
+              <button
+                onClick={() => setActiveCapability('ocr')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  activeCapability === 'ocr'
+                    ? 'bg-teal-500/20 border border-teal-500/40 text-teal-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>AI Inward OCR</span>
+              </button>
+
+              <button
+                onClick={() => setActiveCapability('ledger')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  activeCapability === 'ledger'
+                    ? 'bg-blue-500/20 border border-blue-500/40 text-blue-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Vendor Ledgers</span>
+              </button>
+
+              <button
+                onClick={() => setActiveCapability('fleet')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+                  activeCapability === 'fleet'
+                    ? 'bg-indigo-500/20 border border-indigo-500/40 text-indigo-300'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Delivery Fleet</span>
+              </button>
+            </div>
+
+            {/* Tab Preview Content */}
+            <div className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800/80">
+              {activeCapability === 'pos' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <Receipt className="w-4 h-4 text-emerald-400" />
+                      <span>Counter Billing & Thermal Printing</span>
+                    </h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      Sub-second Latency
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Designed for peak-hour rush. Scan barcodes or search FMCG inventory instantly. Handles split tenders (Cash, UPI QR, Customer Udhaar/Khata), auto-computes CGST + SGST tax slabs, and prints 80mm thermal receipts directly.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 pt-2 text-[11px] font-mono text-slate-300">
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      ⚡ Barcode Scan: &lt;50ms
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      🧾 ESC/POS Thermal Print
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      💳 Split Payment Engine
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeCapability === 'ocr' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <FileSpreadsheet className="w-4 h-4 text-teal-400" />
+                      <span>Groq Vision B2B Tax Invoice Digitizer</span>
+                    </h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                      Zero Manual Entry
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Take a smartphone photo of any distributor paper bill. The Groq Vision engine extracts vendor GSTIN, line items, purchase rate, MRP, and GST brackets. Automatically syncs item master stock and flags price hikes.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 pt-2 text-[11px] font-mono text-slate-300">
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📸 Smartphone Snap Sync
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📦 Automatic Stock Inward
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      🛡️ HSN & Tax Validation
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeCapability === 'ledger' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-blue-400" />
+                      <span>Distributor Bahi-Khata & Debit Notes</span>
+                    </h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      Real-Time Statements
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    End-to-end accounts payable ledger for every agency. Track bill payments, record cash/bank settlements, and automatically deduct return damages using formatted debit notes.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 pt-2 text-[11px] font-mono text-slate-300">
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📒 Agency Account Ledger
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      ✂️ Damage Debit Deductions
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📊 Outstanding Aging Reports
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeCapability === 'fleet' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-indigo-400" />
+                      <span>Hyperlocal Dispatch & Delivery Portal</span>
+                    </h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                      Dedicated Rider App
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Smartphone delivery boy portal accessible via store QR code or link (<code className="text-indigo-300">/:storeSlug/delivery</code>). Drivers accept orders, capture live proof of delivery photos, and trigger real-time GPS tracking.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 pt-2 text-[11px] font-mono text-slate-300">
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📱 Mobile PIN Sign-In
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      📸 Camera Proof of Delivery
+                    </div>
+                    <div className="p-2 rounded-xl bg-slate-900 border border-slate-800">
+                      🗺️ Live Order Coordinates
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ======================================================== */}
+      {/* 3. FOUR CORE MODULE PILLARS */}
+      {/* ======================================================== */}
+      <section id="modules" className="max-w-7xl mx-auto px-4 sm:px-8 py-16 space-y-12">
+        <div className="text-center space-y-2">
+          <span className="text-xs font-black tracking-widest uppercase text-emerald-400">
+            Enterprise Architecture
+          </span>
+          <h2 className="text-2xl sm:text-4xl font-black text-white tracking-tight">
+            Modular Retail Infrastructure
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
+            Enable only the operational modules each store needs. Control licensing and feature flags dynamically.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Card 1: POS */}
+          <div id="pos" className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-emerald-500/40 transition space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Receipt className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Counter POS</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Fast barcode scanning, GST thermal receipts, and unified khata accounts.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center gap-1.5 text-xs text-emerald-400 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Module: enabled_modules.pos</span>
+            </div>
+          </div>
+
+          {/* Card 2: OCR */}
+          <div id="ocr" className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-teal-500/40 transition space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
+              <FileSpreadsheet className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">AI Inward OCR</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Groq Vision invoice processing from smartphone camera snapshots.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center gap-1.5 text-xs text-teal-400 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Module: enabled_modules.inward_ocr</span>
+            </div>
+          </div>
+
+          {/* Card 3: Ledger */}
+          <div id="ledger" className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-blue-500/40 transition space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+              <BookOpen className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Vendor Ledgers</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Distributor statement reconciliation, debit notes, and payment scheduling.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center gap-1.5 text-xs text-blue-400 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Module: enabled_modules.ledger</span>
+            </div>
+          </div>
+
+          {/* Card 4: Fleet */}
+          <div id="fleet" className="p-6 rounded-3xl bg-slate-900/60 border border-slate-800 hover:border-indigo-500/40 transition space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+              <Truck className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Delivery Fleet</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Mobile rider portal, task dispatching, and camera proof of delivery.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center gap-1.5 text-xs text-indigo-400 font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Module: enabled_modules.delivery</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ======================================================== */}
+      {/* 4. FOOTER */}
+      {/* ======================================================== */}
+      <footer className="w-full bg-slate-950 border-t border-slate-800/80 py-8 px-4 sm:px-8 mt-auto text-center text-xs text-slate-500 space-y-2">
+        <p className="font-semibold text-slate-400">
+          JAL-JIVAN Retail Operating System © {new Date().getFullYear()}
+        </p>
+        <p className="text-[11px]">
+          Dedicated Multi-Tenant Architecture. Tenant stores run inside scoped paths (<code className="text-slate-400 font-mono">/:storeSlug</code>).
+        </p>
+      </footer>
+
+      {/* ======================================================== */}
+      {/* 5. STORE LOGIN MODAL (OWNERS & STAFF ONLY) */}
+      {/* ======================================================== */}
+      {isLoginModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Store className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">Store Access Terminal</h3>
+                  <p className="text-xs text-slate-400">Sign in to your assigned store</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsLoginModalOpen(false);
+                  setLoginError('');
+                }}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tab Switcher */}
+            <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginTab('owner');
+                  setLoginError('');
+                }}
+                className={`py-2 rounded-lg transition ${
+                  loginTab === 'owner'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Store Owner
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setLoginTab('staff');
+                  setLoginError('');
+                }}
+                className={`py-2 rounded-lg transition ${
+                  loginTab === 'staff'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Staff Terminal PIN
+              </button>
+            </div>
+
+            {loginError && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            {/* Owner Tab Form */}
+            {loginTab === 'owner' && (
+              <form onSubmit={handleOwnerLogin} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Store Owner Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      required
+                      value={ownerEmail}
+                      onChange={(e) => setOwnerEmail(e.target.value)}
+                      placeholder="owner@yourstore.com"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Store Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      value={ownerPassword}
+                      onChange={(e) => setOwnerPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Enter Store Terminal</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Staff Tab Form */}
+            {loginTab === 'staff' && (
+              <form onSubmit={handleStaffLogin} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Store Slug / Identifier
+                  </label>
+                  <div className="relative">
+                    <Store className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      value={staffSlug}
+                      onChange={(e) => setStaffSlug(e.target.value)}
+                      placeholder="e.g. mittal-store"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    4-Digit Staff PIN
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      maxLength={6}
+                      required
+                      value={staffPin}
+                      onChange={(e) => setStaffPin(e.target.value)}
+                      placeholder="••••"
+                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm font-mono tracking-widest focus:outline-none focus:border-emerald-500 transition"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                >
+                  {isSubmitting ? (
+                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Authorize Staff Terminal</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

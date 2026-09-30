@@ -30,7 +30,9 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
     delivery: true
   };
 
-  // Nav Items configured per user requirements:
+  const storeSlug = currentStore?.slug || 'mittal-store';
+
+  // Nav Items configured per user requirements & store scoping:
   // Billing POS: enabled_modules.pos
   // Inward Hub & OCR: enabled_modules.inward_ocr
   // Vendor Ledgers: enabled_modules.ledger
@@ -39,14 +41,14 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
     {
       id: 'hub',
       label: 'Executive Hub',
-      path: '/admin',
+      path: `/${storeSlug}`,
       icon: Building2,
       visible: true
     },
     {
       id: 'sales',
       label: 'Sales & POS Billing',
-      path: '/admin/sales',
+      path: `/${storeSlug}/sales`,
       icon: Receipt,
       visible: Boolean(enabledModules.pos),
       badge: 'Live POS'
@@ -54,7 +56,7 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
     {
       id: 'purchase',
       label: 'Purchase & Inward OCR',
-      path: '/admin/purchase',
+      path: `/${storeSlug}/purchase`,
       icon: FileSpreadsheet,
       visible: Boolean(enabledModules.inward_ocr),
       badge: 'Groq OCR'
@@ -62,14 +64,14 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
     {
       id: 'ledger',
       label: 'Vendor Ledgers',
-      path: '/admin/purchase?tab=ledger',
+      path: `/${storeSlug}/purchase?tab=ledger`,
       icon: BookOpen,
       visible: Boolean(enabledModules.ledger)
     },
     {
       id: 'delivery',
       label: 'Delivery & Dispatch',
-      path: '/admin/delivery',
+      path: `/${storeSlug}/delivery`,
       icon: Truck,
       visible: Boolean(enabledModules.delivery),
       badge: 'Fleet'
@@ -77,21 +79,21 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
     {
       id: 'items',
       label: 'Item & Stock Master',
-      path: '/admin/items',
+      path: `/${storeSlug}/items`,
       icon: Package,
       visible: true
     },
     {
       id: 'damage',
       label: 'Damage & Returns',
-      path: '/admin/damage',
+      path: `/${storeSlug}/damage`,
       icon: PackageX,
       visible: true
     },
     {
       id: 'staff-settings',
       label: 'Staff Management',
-      path: '/settings/staff',
+      path: `/${storeSlug}/staff`,
       icon: Users,
       visible: Boolean(isOwner), // Accessible only to role store_owner
       badge: 'Owner'

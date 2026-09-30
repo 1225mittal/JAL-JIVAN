@@ -393,7 +393,7 @@ export default function MasterHQConsole({ onNavigate, showToast }) {
 
   const copyStoreLink = (slug) => {
     if (typeof window === 'undefined') return;
-    const url = `${window.location.origin}/store/${slug}/delivery`;
+    const url = `${window.location.origin}/${slug}/delivery`;
     navigator.clipboard.writeText(url);
     setCopiedSlug(slug);
     showToast?.(`Copied Rider Portal Link for ${slug}`, 'success');

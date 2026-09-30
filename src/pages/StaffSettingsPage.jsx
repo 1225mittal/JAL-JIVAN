@@ -47,7 +47,7 @@ export default function StaffSettingsPage({ onBackToHub, showToast }) {
 
   const portalUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}/store/${currentStore?.slug || 'default'}/delivery`;
+    return `${window.location.origin}/${currentStore?.slug || 'mittal-store'}/delivery`;
   }, [currentStore?.slug]);
 
   // Load Staff for the current store

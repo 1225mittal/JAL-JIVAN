@@ -28,12 +28,12 @@ export default function Login({ onLoginSuccess }) {
   const [activeTab, setActiveTab] = useState('owner');
 
   // Tab 1: Store Owner
-  const [email, setEmail] = useState('owner@mittalstore.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   // Tab 2: Staff Quick PIN
-  const [storeSlug, setStoreSlug] = useState('mittal-store');
+  const [storeSlug, setStoreSlug] = useState('');
   const [staffPin, setStaffPin] = useState('');
 
   // Status & Error
@@ -61,7 +61,7 @@ export default function Login({ onLoginSuccess }) {
 
     // Decouple Super Admin from Store Login
     if (cleanEmail.includes('superadmin')) {
-      setErrorMsg('Super Admin access is isolated to the Cloud HQ Enclave. Please navigate to /hq-console/auth.');
+      setErrorMsg('Invalid store credentials. Master administrative accounts must use the discrete HQ enclave.');
       return;
     }
 
@@ -152,8 +152,9 @@ export default function Login({ onLoginSuccess }) {
         session: authSession
       });
 
-      // Requirement 4: Store owners land directly on /admin
-      const redirectPath = '/admin';
+      // Requirement 1: Redirect directly to scoped store path: /${store.slug}
+      const storeSlugVal = resolvedStore?.slug || 'mittal-store';
+      const redirectPath = `/${storeSlugVal}`;
 
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
@@ -308,15 +309,15 @@ export default function Login({ onLoginSuccess }) {
         session: null
       });
 
-      let redirectPath = '/admin';
+      let redirectPath = `/${matchedStore.slug}`;
       if (matchedStaff.role === 'delivery_boy') {
-        redirectPath = `/store/${matchedStore.slug}/delivery`;
+        redirectPath = `/${matchedStore.slug}/delivery`;
       } else if (matchedStaff.role === 'billing_cashier') {
-        redirectPath = '/admin/sales';
+        redirectPath = `/${matchedStore.slug}/sales`;
       } else if (matchedStaff.role === 'inventory_staff') {
-        redirectPath = '/admin/purchase';
+        redirectPath = `/${matchedStore.slug}/purchase`;
       } else {
-        redirectPath = '/admin';
+        redirectPath = `/${matchedStore.slug}`;
       }
 
       if (onLoginSuccess) {
@@ -460,25 +461,6 @@ export default function Login({ onLoginSuccess }) {
                 </>
               )}
             </button>
-
-            {/* Quick-fill helper chips for owner evaluation */}
-            <div className="pt-3 border-t border-slate-800/80 space-y-2">
-              <p className="text-[11px] font-semibold text-slate-400 text-center">
-                Quick Test Credentials:
-              </p>
-              <div className="flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEmail('owner@mittalstore.com');
-                    setPassword('MittalStore#2026!Secure');
-                  }}
-                  className="text-[10px] px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 transition font-mono"
-                >
-                  Store Owner (owner@mittalstore.com)
-                </button>
-              </div>
-            </div>
           </form>
         )}
 
@@ -546,60 +528,8 @@ export default function Login({ onLoginSuccess }) {
                 </>
               )}
             </button>
-
-            {/* Quick-fill helper chips for staff PINs */}
-            <div className="pt-3 border-t border-slate-800/80 space-y-2">
-              <p className="text-[11px] font-semibold text-slate-400 text-center">
-                Demo Terminal Staff PINs:
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStoreSlug('mittal-store');
-                    setStaffPin('1122');
-                  }}
-                  className="text-[10px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition font-mono"
-                >
-                  POS Cashier (1122)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStoreSlug('mittal-store');
-                    setStaffPin('3344');
-                  }}
-                  className="text-[10px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition font-mono"
-                >
-                  Inward OCR (3344)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStoreSlug('mittal-store');
-                    setStaffPin('5566');
-                  }}
-                  className="text-[10px] px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition font-mono"
-                >
-                  Delivery Boy (5566)
-                </button>
-              </div>
-            </div>
           </form>
         )}
-
-        {/* Footer Link to Dedicated Rider Portal */}
-        <div className="pt-2 text-center">
-          <p className="text-xs text-slate-400">
-            Dedicated smartphone delivery portal?{' '}
-            <a
-              href="/store/mittal-store/delivery"
-              className="text-emerald-400 hover:text-emerald-300 font-bold underline transition ml-1"
-            >
-              Open Delivery Portal →
-            </a>
-          </p>
-        </div>
       </div>
     </div>
   );

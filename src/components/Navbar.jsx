@@ -6,6 +6,8 @@ export default function Navbar({
   isAdminRoute = false,
   isAdminView = false,
   adminSubView = 'hub',
+  storeName = '',
+  storeSlug = '',
   onNavigateToAdminHub,
   onOpenDbInfo,
   isAdminLoggedIn = false,
@@ -26,7 +28,7 @@ export default function Navbar({
         <div
           onClick={handleLogoClick}
           className="flex items-center gap-2.5 min-w-0 cursor-pointer group select-none"
-          title="Navigate to Master Admin Hub (/admin)"
+          title="Navigate to Store Hub"
         >
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0 group-hover:scale-105 transition-transform">
             <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-pulse" />
@@ -36,8 +38,8 @@ export default function Navbar({
               <span className="font-black text-sm sm:text-base tracking-tight text-white group-hover:text-emerald-300 transition-colors shrink-0">
                 JAL-JIVAN
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
-                {isAdminLoggedIn ? (adminSubView === 'hub' ? 'Executive Hub' : 'Admin') : 'Enterprise'}
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-emerald-500/15 text-emerald-300 border-emerald-500/30 truncate max-w-[200px]">
+                {isAdminLoggedIn ? (storeName || (adminSubView === 'hub' ? 'Store Hub' : 'Store Portal')) : 'Retail OS'}
               </span>
             </div>
           </div>
