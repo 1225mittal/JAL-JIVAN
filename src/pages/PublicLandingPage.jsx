@@ -21,7 +21,12 @@ import {
   Smartphone,
   Eye,
   EyeOff,
-  AlertCircle
+  AlertCircle,
+  Building2,
+  User,
+  Phone,
+  Globe,
+  Plus
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { useAuth, DEFAULT_STORE, DEFAULT_USER_PROFILE } from '../context/AuthContext';
@@ -29,43 +34,71 @@ import { useAuth, DEFAULT_STORE, DEFAULT_USER_PROFILE } from '../context/AuthCon
 export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   const { loginUser } = useAuth();
 
-  // Store Login Modal State
+  // Store Access Modal State (3 modes: 'signin' | 'signup' | 'staff')
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [loginTab, setLoginTab] = useState('owner'); // 'owner' | 'staff'
+  const [modalTab, setModalTab] = useState('signin'); // 'signin' | 'signup' | 'staff'
 
-  // Owner Form State
-  const [ownerEmail, setOwnerEmail] = useState('');
-  const [ownerPassword, setOwnerPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  // Tab 1: Store Owner Sign In State (all default to empty string)
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+  const [showSignInPassword, setShowSignInPassword] = useState(false);
 
-  // Staff Form State
+  // Tab 2: Register New Store (Signup) State (all default to empty string)
+  const [regStoreName, setRegStoreName] = useState('');
+  const [regStoreSlug, setRegStoreSlug] = useState('');
+  const [regOwnerName, setRegOwnerName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+
+  // Tab 3: Staff Quick PIN State (all default to empty string)
   const [staffSlug, setStaffSlug] = useState('');
   const [staffPin, setStaffPin] = useState('');
 
-  // Status
+  // Status & Feedback
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
 
   // Interactive Capability Tab in Hero
   const [activeCapability, setActiveCapability] = useState('pos');
 
+  // Auto-slug generator
+  const generateSlug = (text) => {
+    return (text || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/[\s_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  };
+
+  const handleStoreNameChange = (e) => {
+    const val = e.target.value;
+    setRegStoreName(val);
+    if (!slugManuallyEdited) {
+      setRegStoreSlug(generateSlug(val));
+    }
+  };
+
+  const handleStoreSlugChange = (e) => {
+    setSlugManuallyEdited(true);
+    setRegStoreSlug(generateSlug(e.target.value));
+  };
+
   // ==========================================
-  // AUTHENTICATION HANDLERS (STORE SCOPED)
+  // 1. STORE OWNER SIGN IN HANDLER
   // ==========================================
-  const handleOwnerLogin = async (e) => {
+  const handleOwnerSignIn = async (e) => {
     e.preventDefault();
     setLoginError('');
 
-    const cleanEmail = ownerEmail.trim().toLowerCase();
-    const cleanPassword = ownerPassword.trim();
+    const cleanEmail = signInEmail.trim().toLowerCase();
+    const cleanPassword = signInPassword.trim();
 
     if (!cleanEmail || !cleanPassword) {
       setLoginError('Please enter your email and password.');
-      return;
-    }
-
-    if (cleanEmail.includes('superadmin')) {
-      setLoginError('Invalid credentials for tenant store terminal.');
       return;
     }
 
@@ -97,10 +130,31 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
               }
             }
+          } else if (authError) {
+            console.warn('Supabase signIn notice:', authError.message);
           }
         } catch (err) {
           console.warn('Auth notice:', err);
         }
+      }
+
+      // Check local stores cache
+      if (!resolvedProfile) {
+        try {
+          const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
+          for (const s of localStores) {
+            const staffKey = `jal_jivan_store_staff_${s.id}`;
+            const staffList = JSON.parse(localStorage.getItem(staffKey) || '[]');
+            const foundOwner = staffList.find(
+              (st) => st.email?.toLowerCase() === cleanEmail && st.role === 'store_owner'
+            );
+            if (foundOwner) {
+              resolvedProfile = foundOwner;
+              resolvedStore = s;
+              break;
+            }
+          }
+        } catch (e) {}
       }
 
       // Offline / Demo Store Owner fallback
@@ -116,7 +170,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       }
 
       if (!resolvedProfile) {
-        setLoginError('Invalid store owner credentials. Please verify your email and password.');
+        setLoginError('Invalid credentials. Please verify your email and password.');
         setIsSubmitting(false);
         return;
       }
@@ -143,7 +197,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         session: authSession
       });
 
-      // Requirement 1: Redirect directly to their scoped store path: /${store.slug}
       const storeSlug = resolvedStore?.slug || 'mittal-store';
       const redirectPath = `/${storeSlug}`;
 
@@ -157,6 +210,205 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       }
     } catch (err) {
       setLoginError(err.message || 'Authentication error.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ==========================================
+  // 2. REGISTER NEW STORE (SIGNUP) HANDLER
+  // ==========================================
+  const handleStoreRegister = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+
+    const cleanStoreName = regStoreName.trim();
+    const cleanSlug = generateSlug(regStoreSlug || regStoreName);
+    const cleanOwnerName = regOwnerName.trim();
+    const cleanPhone = regPhone.trim();
+    const cleanEmail = regEmail.trim().toLowerCase();
+    const cleanPassword = regPassword.trim();
+
+    if (!cleanStoreName) {
+      setLoginError('Please enter your store name.');
+      return;
+    }
+    if (!cleanSlug || cleanSlug.length < 2) {
+      setLoginError('Please enter a valid store URL slug (e.g. apex-retail).');
+      return;
+    }
+    if (!cleanOwnerName) {
+      setLoginError('Please enter the store owner full name.');
+      return;
+    }
+    if (!cleanPhone) {
+      setLoginError('Please enter a contact phone number.');
+      return;
+    }
+    if (!cleanEmail) {
+      setLoginError('Please enter your work email address.');
+      return;
+    }
+    if (!cleanPassword || cleanPassword.length < 6) {
+      setLoginError('Please enter a secure password (minimum 6 characters).');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // 1. Prevent collision with system paths
+      const reservedSlugs = [
+        'hq-console', 'super-admin', 'login', 'admin', 'rider', 'driver', 'scan-inward', 'store', 'api', 'assets'
+      ];
+      if (reservedSlugs.includes(cleanSlug)) {
+        setLoginError(`The slug "${cleanSlug}" is reserved. Please choose another unique slug.`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Check if slug already exists in Supabase
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data: existingStore } = await supabase
+            .from('stores')
+            .select('id, slug')
+            .eq('slug', cleanSlug)
+            .maybeSingle();
+
+          if (existingStore) {
+            setLoginError(`Store slug "${cleanSlug}" is already taken. Please choose a different slug.`);
+            setIsSubmitting(false);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // 2. Sign up user with supabase.auth.signUp
+      let authUser = null;
+      let authSession = null;
+      if (isSupabaseConfigured && supabase?.auth) {
+        try {
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email: cleanEmail,
+            password: cleanPassword,
+            options: {
+              data: {
+                full_name: cleanOwnerName,
+                phone: cleanPhone,
+                role: 'store_owner'
+              }
+            }
+          });
+
+          if (signUpError) {
+            console.warn('Supabase signUp error notice:', signUpError.message);
+            if (!signUpError.message?.toLowerCase().includes('already registered')) {
+              throw new Error(signUpError.message);
+            }
+          } else {
+            authUser = signUpData?.user;
+            authSession = signUpData?.session;
+          }
+        } catch (err) {
+          if (!err.message?.toLowerCase().includes('already registered')) {
+            throw err;
+          }
+        }
+      }
+
+      // 3. Create row in stores table with default modules
+      const newStoreId = `store_${cleanSlug}_${Date.now()}`;
+      const newStoreRecord = {
+        id: newStoreId,
+        name: cleanStoreName,
+        slug: cleanSlug,
+        phone: cleanPhone,
+        status: 'active',
+        enabled_modules: {
+          pos: true,
+          inward_ocr: true,
+          ledger: true,
+          delivery: true
+        },
+        created_at: new Date().toISOString()
+      };
+
+      // 4. Create corresponding row in user_profiles with role 'store_owner'
+      const newUserId = authUser?.id || `user_owner_${cleanSlug}_${Date.now()}`;
+      const newUserProfile = {
+        id: newUserId,
+        full_name: cleanOwnerName,
+        email: cleanEmail,
+        phone: cleanPhone,
+        role: 'store_owner',
+        store_id: newStoreId,
+        is_active: true,
+        created_at: new Date().toISOString()
+      };
+
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.from('stores').insert([newStoreRecord]);
+          await supabase.from('user_profiles').insert([newUserProfile]);
+        } catch (dbErr) {
+          console.warn('Database insert warning (fallback cached):', dbErr.message);
+        }
+      }
+
+      // 5. Pre-seed local storage directory & staff
+      try {
+        const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
+        const updatedList = [newStoreRecord, ...localStores.filter((s) => s.slug !== cleanSlug)];
+        localStorage.setItem('jal_jivan_all_stores', JSON.stringify(updatedList));
+
+        const staffKey = `jal_jivan_store_staff_${newStoreId}`;
+        const initialStaff = [
+          {
+            id: `staff_owner_${newStoreId}`,
+            store_id: newStoreId,
+            full_name: cleanOwnerName,
+            email: cleanEmail,
+            role: 'store_owner',
+            pin: '2026',
+            is_active: true,
+            created_at: new Date().toISOString()
+          },
+          {
+            id: `staff_cashier_${newStoreId}`,
+            store_id: newStoreId,
+            full_name: 'Cashier Staff',
+            email: `cashier@${cleanSlug}.com`,
+            role: 'billing_cashier',
+            pin: '1122',
+            is_active: true,
+            created_at: new Date().toISOString()
+          }
+        ];
+        localStorage.setItem(staffKey, JSON.stringify(initialStaff));
+      } catch (e) {}
+
+      // 6. Log in the newly registered store owner
+      loginUser({
+        profile: newUserProfile,
+        store: newStoreRecord,
+        role: 'store_owner',
+        session: authSession
+      });
+
+      // 7. Redirect immediately to /${newStoreSlug}
+      const redirectPath = `/${cleanSlug}`;
+      setIsLoginModalOpen(false);
+      if (onLoginSuccess) {
+        onLoginSuccess(redirectPath);
+      } else if (onNavigate) {
+        onNavigate(redirectPath);
+      } else {
+        window.location.href = redirectPath;
+      }
+    } catch (err) {
+      console.error('Registration exception:', err);
+      setLoginError(err.message || 'Failed to register store. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -343,7 +595,23 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setIsLoginModalOpen(true)}
+              onClick={() => {
+                setModalTab('signup');
+                setIsLoginModalOpen(true);
+                setLoginError('');
+              }}
+              className="hidden sm:inline-flex py-2.5 px-4 bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-white font-bold rounded-xl text-xs sm:text-sm transition items-center gap-2"
+            >
+              <Plus className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Register Store</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setModalTab('signin');
+                setIsLoginModalOpen(true);
+                setLoginError('');
+              }}
               className="py-2.5 px-5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center gap-2 active:scale-95"
             >
               <Lock className="w-3.5 h-3.5" />
@@ -379,20 +647,41 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         {/* Hero CTAs */}
         <div className="flex flex-wrap items-center justify-center gap-3.5">
           <button
-            onClick={() => setIsLoginModalOpen(true)}
+            onClick={() => {
+              setModalTab('signup');
+              setIsLoginModalOpen(true);
+              setLoginError('');
+            }}
             className="py-3.5 px-7 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-2xl text-sm transition shadow-xl shadow-emerald-500/25 flex items-center gap-2.5 active:scale-95"
           >
-            <span>Open Store Terminal</span>
+            <Plus className="w-4 h-4 text-slate-950" />
+            <span>Register New Store</span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
-          <a
-            href="#modules"
+          <button
+            onClick={() => {
+              setModalTab('signin');
+              setIsLoginModalOpen(true);
+              setLoginError('');
+            }}
             className="py-3.5 px-6 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-white font-bold rounded-2xl text-sm transition flex items-center gap-2"
           >
-            <span>Explore Capabilities</span>
-            <ChevronRight className="w-4 h-4 text-slate-400" />
-          </a>
+            <Store className="w-4 h-4 text-emerald-400" />
+            <span>Store Sign In</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setModalTab('staff');
+              setIsLoginModalOpen(true);
+              setLoginError('');
+            }}
+            className="py-3.5 px-5 bg-slate-950 hover:bg-slate-900 border border-slate-800 text-slate-300 font-semibold rounded-2xl text-sm transition flex items-center gap-2"
+          >
+            <KeyRound className="w-3.5 h-3.5 text-teal-400" />
+            <span>Staff PIN</span>
+          </button>
         </div>
 
         {/* ======================================================== */}
@@ -668,20 +957,38 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       </footer>
 
       {/* ======================================================== */}
-      {/* 5. STORE LOGIN MODAL (OWNERS & STAFF ONLY) */}
+      {/* 5. STORE ACCESS MODAL (SIGN IN, SIGNUP, STAFF PIN) */}
       {/* ======================================================== */}
       {isLoginModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5">
+          <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 max-h-[90vh] flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <Store className="w-5 h-5" />
+                  {modalTab === 'signup' ? (
+                    <Building2 className="w-5 h-5" />
+                  ) : modalTab === 'staff' ? (
+                    <KeyRound className="w-5 h-5" />
+                  ) : (
+                    <Store className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-white">Store Access Terminal</h3>
-                  <p className="text-xs text-slate-400">Sign in to your assigned store</p>
+                  <h3 className="text-base font-black text-white">
+                    {modalTab === 'signup'
+                      ? 'Register New Store'
+                      : modalTab === 'staff'
+                      ? 'Staff Terminal PIN'
+                      : 'Store Owner Sign In'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {modalTab === 'signup'
+                      ? 'Deploy your dedicated retail operating system'
+                      : modalTab === 'staff'
+                      ? 'Quick access PIN for cashiers and fleet riders'
+                      : 'Sign in to access your tenant store'}
+                  </p>
                 </div>
               </div>
               <button
@@ -695,161 +1002,383 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
               </button>
             </div>
 
-            {/* Tab Switcher */}
-            <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-bold">
+            {/* 3-Tab Switcher */}
+            <div className="grid grid-cols-3 p-1 bg-slate-950 rounded-xl border border-slate-800 text-xs font-bold shrink-0">
               <button
                 type="button"
                 onClick={() => {
-                  setLoginTab('owner');
+                  setModalTab('signin');
                   setLoginError('');
                 }}
-                className={`py-2 rounded-lg transition ${
-                  loginTab === 'owner'
+                className={`py-2 rounded-lg transition text-center ${
+                  modalTab === 'signin'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Store Owner
+                Sign In
               </button>
 
               <button
                 type="button"
                 onClick={() => {
-                  setLoginTab('staff');
+                  setModalTab('signup');
                   setLoginError('');
                 }}
-                className={`py-2 rounded-lg transition ${
-                  loginTab === 'staff'
+                className={`py-2 rounded-lg transition text-center ${
+                  modalTab === 'signup'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Staff Terminal PIN
+                Register Store
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setModalTab('staff');
+                  setLoginError('');
+                }}
+                className={`py-2 rounded-lg transition text-center ${
+                  modalTab === 'staff'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Staff PIN
               </button>
             </div>
 
+            {/* Error Message */}
             {loginError && (
-              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs flex items-center gap-2 shrink-0">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
                 <span>{loginError}</span>
               </div>
             )}
 
-            {/* Owner Tab Form */}
-            {loginTab === 'owner' && (
-              <form onSubmit={handleOwnerLogin} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Store Owner Email
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      value={ownerEmail}
-                      onChange={(e) => setOwnerEmail(e.target.value)}
-                      placeholder="owner@yourstore.com"
-                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
+            {/* Scrollable Content Container */}
+            <div className="overflow-y-auto pr-1 space-y-4">
+              {/* TAB 1: OWNER SIGN IN */}
+              {modalTab === 'signin' && (
+                <form onSubmit={handleOwnerSignIn} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Store Owner Email
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        value={signInEmail}
+                        onChange={(e) => setSignInEmail(e.target.value)}
+                        placeholder="owner@yourstore.com"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Store Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      value={ownerPassword}
-                      onChange={(e) => setOwnerPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                    >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Store Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type={showSignInPassword ? 'text' : 'password'}
+                        required
+                        value={signInPassword}
+                        onChange={(e) => setSignInPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSignInPassword(!showSignInPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showSignInPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
-                </div>
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <span>Enter Store Terminal</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>Sign In to Store</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
 
-            {/* Staff Tab Form */}
-            {loginTab === 'staff' && (
-              <form onSubmit={handleStaffLogin} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Store Slug / Identifier
-                  </label>
-                  <div className="relative">
-                    <Store className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      required
-                      value={staffSlug}
-                      onChange={(e) => setStaffSlug(e.target.value)}
-                      placeholder="e.g. mittal-store"
-                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition"
-                    />
+                  <div className="pt-2 text-center">
+                    <p className="text-xs text-slate-400">
+                      Need a new store instance?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalTab('signup');
+                          setLoginError('');
+                        }}
+                        className="text-emerald-400 hover:underline font-bold"
+                      >
+                        Register New Store
+                      </button>
+                    </p>
                   </div>
-                </div>
+                </form>
+              )}
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    4-Digit Staff PIN
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      maxLength={6}
-                      required
-                      value={staffPin}
-                      onChange={(e) => setStaffPin(e.target.value)}
-                      placeholder="••••"
-                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm font-mono tracking-widest focus:outline-none focus:border-emerald-500 transition"
-                    />
+              {/* TAB 2: REGISTER NEW STORE (SIGNUP) */}
+              {modalTab === 'signup' && (
+                <form onSubmit={handleStoreRegister} className="space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Store Name
+                      </label>
+                      <div className="relative">
+                        <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={regStoreName}
+                          onChange={handleStoreNameChange}
+                          placeholder="e.g. Apex Retail"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Desired Store URL Slug
+                      </label>
+                      <div className="relative">
+                        <Globe className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={regStoreSlug}
+                          onChange={handleStoreSlugChange}
+                          placeholder="apex-retail"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
-                >
-                  {isSubmitting ? (
-                    <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <span>Authorize Staff Terminal</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </>
-                  )}
-                </button>
-              </form>
-            )}
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    Direct access URL:{' '}
+                    <span className="text-emerald-400">
+                      jaljivan.com/{regStoreSlug || 'your-slug'}
+                    </span>
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Owner Full Name
+                      </label>
+                      <div className="relative">
+                        <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={regOwnerName}
+                          onChange={(e) => setRegOwnerName(e.target.value)}
+                          placeholder="e.g. Vikram Sharma"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Contact Phone
+                      </label>
+                      <div className="relative">
+                        <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="tel"
+                          required
+                          value={regPhone}
+                          onChange={(e) => setRegPhone(e.target.value)}
+                          placeholder="+91 98765 43210"
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                      Owner Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        value={regEmail}
+                        onChange={(e) => setRegEmail(e.target.value)}
+                        placeholder="owner@apexretail.com"
+                        className="w-full pl-9 pr-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                      Set Secure Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type={showRegPassword ? 'text' : 'password'}
+                        required
+                        minLength={6}
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        placeholder="At least 6 characters"
+                        className="w-full pl-9 pr-9 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegPassword(!showRegPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                      >
+                        {showRegPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Modules Included Badge */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300">Default Activated Modules</span>
+                      <span className="text-[10px] text-emerald-400 font-semibold uppercase">All 4 Enabled</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-400">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">POS Billing</span>
+                      <span className="px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-300 border border-teal-500/20">Inward AI OCR</span>
+                      <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">Vendor Ledger</span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">Delivery Fleet</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>Deploy Store & Launch Dashboard</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="pt-1 text-center">
+                    <p className="text-xs text-slate-400">
+                      Already registered?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalTab('signin');
+                          setLoginError('');
+                        }}
+                        className="text-emerald-400 hover:underline font-bold"
+                      >
+                        Sign In
+                      </button>
+                    </p>
+                  </div>
+                </form>
+              )}
+
+              {/* TAB 3: STAFF QUICK PIN */}
+              {modalTab === 'staff' && (
+                <form onSubmit={handleStaffLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Store URL Slug
+                    </label>
+                    <div className="relative">
+                      <Store className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        value={staffSlug}
+                        onChange={(e) => setStaffSlug(e.target.value)}
+                        placeholder="e.g. mittal-store"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      4-Digit Staff PIN
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        maxLength={6}
+                        required
+                        value={staffPin}
+                        onChange={(e) => setStaffPin(e.target.value)}
+                        placeholder="••••"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-sm font-mono tracking-widest focus:outline-none focus:border-emerald-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                  >
+                    {isSubmitting ? (
+                      <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>Authorize Staff Terminal</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+
+                  <div className="pt-2 text-center">
+                    <p className="text-xs text-slate-400">
+                      Store Owner?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setModalTab('signin');
+                          setLoginError('');
+                        }}
+                        className="text-emerald-400 hover:underline font-bold"
+                      >
+                        Sign In with Email & Password
+                      </button>
+                    </p>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
