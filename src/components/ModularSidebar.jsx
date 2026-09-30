@@ -95,6 +95,14 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
       icon: Users,
       visible: Boolean(isOwner), // Accessible only to role store_owner
       badge: 'Owner'
+    },
+    {
+      id: 'super-admin',
+      label: 'Super Admin',
+      path: '/super-admin',
+      icon: ShieldCheck,
+      visible: userRole === 'super_admin',
+      badge: 'Master'
     }
   ];
 

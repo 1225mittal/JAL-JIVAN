@@ -24,6 +24,15 @@ export const DEFAULT_USER_PROFILE = {
   is_active: true
 };
 
+export const DEFAULT_SUPER_ADMIN_PROFILE = {
+  id: 'user_super_admin_master',
+  full_name: 'Super Administrator',
+  email: 'superadmin@jaljivan.com',
+  role: 'super_admin',
+  store_id: null,
+  is_active: true
+};
+
 const STORAGE_STORE_KEY = 'jal_jivan_current_store';
 const STORAGE_PROFILE_KEY = 'jal_jivan_user_profile';
 const STORAGE_ROLE_KEY = 'jal_jivan_user_role';
@@ -41,7 +50,7 @@ export function AuthProvider({ children }) {
     return DEFAULT_STORE;
   });
 
-  // 2. User Role State (store_owner, billing_cashier, inventory_staff, delivery_boy)
+  // 2. User Role State (super_admin, store_owner, billing_cashier, inventory_staff, delivery_boy)
   const [userRole, setUserRoleState] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_ROLE_KEY);
@@ -95,6 +104,56 @@ export function AuthProvider({ children }) {
       localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(profile));
     } catch (e) {}
   }, []);
+
+  // Login helper for atomic state updates & localStorage syncing
+  const loginUser = useCallback(({ profile, store, role, session: newSession }) => {
+    const activeRole = role || profile?.role || 'store_owner';
+    if (profile) {
+      setUserProfile(profile);
+    }
+    setUserRole(activeRole);
+    if (store) {
+      setCurrentStore(store);
+    }
+    if (newSession !== undefined) {
+      setSession(newSession);
+    }
+
+    try {
+      if (profile) localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(profile));
+      localStorage.setItem(STORAGE_ROLE_KEY, activeRole);
+      if (store) localStorage.setItem(STORAGE_STORE_KEY, JSON.stringify(store));
+      localStorage.setItem('jal_jivan_admin_logged_in', 'true');
+      localStorage.setItem(
+        'admin_session',
+        JSON.stringify({
+          user: profile?.full_name || profile?.email || 'Admin User',
+          role: activeRole,
+          store_id: store?.id || profile?.store_id || null,
+          token: `sess_${Date.now()}`,
+          loggedInAt: Date.now()
+        })
+      );
+    } catch (e) {}
+  }, [setUserProfile, setUserRole, setCurrentStore]);
+
+  // Logout helper
+  const logoutUser = useCallback(async () => {
+    if (isSupabaseConfigured && supabase?.auth) {
+      try {
+        await supabase.auth.signOut();
+      } catch (e) {}
+    }
+    setSession(null);
+    setUserRole('store_owner');
+    setUserProfile(DEFAULT_USER_PROFILE);
+    try {
+      localStorage.removeItem(STORAGE_PROFILE_KEY);
+      localStorage.removeItem(STORAGE_ROLE_KEY);
+      localStorage.removeItem('jal_jivan_admin_logged_in');
+      localStorage.removeItem('admin_session');
+    } catch (e) {}
+  }, [setUserRole, setUserProfile]);
 
   // Fetch user_profiles joining stores for the authenticated user session
   const fetchUserProfile = useCallback(async (currentSession) => {
@@ -214,6 +273,11 @@ export function AuthProvider({ children }) {
     return userRole === 'store_owner';
   }, [userRole]);
 
+  // Is current user super_admin
+  const isSuperAdmin = useMemo(() => {
+    return userRole === 'super_admin';
+  }, [userRole]);
+
   const value = useMemo(() => ({
     session,
     loading,
@@ -223,10 +287,13 @@ export function AuthProvider({ children }) {
     setUserRole,
     userProfile,
     setUserProfile,
+    loginUser,
+    logoutUser,
     refreshProfile: () => fetchUserProfile(session),
     hasModule,
-    isOwner
-  }), [session, loading, currentStore, setCurrentStore, userRole, setUserRole, userProfile, setUserProfile, fetchUserProfile, hasModule, isOwner]);
+    isOwner,
+    isSuperAdmin
+  }), [session, loading, currentStore, setCurrentStore, userRole, setUserRole, userProfile, setUserProfile, loginUser, logoutUser, fetchUserProfile, hasModule, isOwner, isSuperAdmin]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -4,6 +4,8 @@ import AdminHub from './components/AdminHub';
 import DamageReturnHub from './components/damage/DamageReturnHub';
 import AdminPanel, { AdminDashboard } from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
+import Login from './pages/Login';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import StaffDirectoryHub from './components/staff/StaffDirectoryHub';
 import ItemsInventoryHub from './components/items/ItemsInventoryHub';
@@ -59,6 +61,9 @@ export const getInitialModule = () => {
   const queryModule = params.get('module');
 
   // Explicit path matching takes absolute priority
+  if (path.includes('/super-admin')) {
+    return 'super-admin';
+  }
   if (path.includes('/settings/staff')) {
     return 'staff-settings';
   }
@@ -121,15 +126,20 @@ export function parseRoute() {
     return { type: 'settings-staff', module: 'staff-settings', pathname: '/settings/staff' };
   }
 
+  // Route 0.7: Dedicated Super Admin Dashboard (/super-admin)
+  if (pathname === '/super-admin' || pathname.startsWith('/super-admin')) {
+    return { type: 'super-admin', module: 'super-admin', pathname: '/super-admin' };
+  }
+
   // Explicit pathname matching takes absolute priority over legacy query params
   // Route 1: Dedicated Rider Portal (/rider, with /driver as legacy alias)
   if (pathname === '/rider' || pathname === '/driver') {
     return { type: 'driver', module: null, pathname: '/rider' };
   }
 
-  // Route 2: Dedicated Admin Login (/admin/login)
-  if (pathname === '/admin/login') {
-    return { type: 'admin-login', module: null, pathname: '/admin/login' };
+  // Route 2: Dedicated Admin Login (/admin/login or /login)
+  if (pathname === '/admin/login' || pathname === '/login') {
+    return { type: 'admin-login', module: null, pathname: '/login' };
   }
 
   // Route 3: Dedicated Admin Modules (/admin/delivery, /admin/damage, /admin/purchase, /admin/items, /admin/staff, etc.)
@@ -185,6 +195,8 @@ function getModuleTitle(moduleKey) {
 }
 
 export default function App() {
+  const { userRole, isSuperAdmin, logoutUser } = useAuth();
+
   // Current Active Module State (checked from URL before localStorage)
   const [currentModule, setCurrentModule] = useState(getInitialModule);
 
@@ -422,16 +434,18 @@ export default function App() {
   // AUTHENTICATION & NAVIGATION HANDLERS
   // ==========================================
 
-  // Admin Login Success
-  const handleAdminLoginSuccess = () => {
+  // Admin Login Success (supports role-based redirect target)
+  const handleAdminLoginSuccess = (redirectPath) => {
     setIsAdminLoggedIn(true);
-    navigate('/admin');
-    showToast('Admin authenticated successfully! Welcome to Master Hub.', 'success');
+    const target = typeof redirectPath === 'string' && redirectPath ? redirectPath : '/admin';
+    navigate(target);
+    showToast('Authenticated successfully! Welcome back.', 'success');
   };
 
   // Admin Logout (strictly navigates to /admin/login)
   const handleAdminLogout = () => {
     setIsAdminLoggedIn(false);
+    logoutUser?.();
     try {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
@@ -751,7 +765,10 @@ export default function App() {
     return <StoreDeliveryPortal storeSlug={activeSlug} />;
   }
 
-  const isViewAdmin = routeState.type.startsWith('admin') || routeState.type === 'settings-staff';
+  const isViewAdmin =
+    routeState.type.startsWith('admin') ||
+    routeState.type === 'settings-staff' ||
+    routeState.type === 'super-admin';
 
   return (
     <div className="min-h-full w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
@@ -759,7 +776,16 @@ export default function App() {
       <Navbar
         isAdminRoute={isViewAdmin}
         isAdminView={isViewAdmin}
-        adminSubView={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : routeState.type === 'settings-staff' ? 'staff' : '')}
+        adminSubView={
+          routeState.module ||
+          (routeState.type === 'admin-hub'
+            ? 'hub'
+            : routeState.type === 'settings-staff'
+            ? 'staff'
+            : routeState.type === 'super-admin'
+            ? 'super-admin'
+            : '')
+        }
         onNavigateToAdminHub={() => navigate('/admin')}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
         isAdminLoggedIn={isAdminLoggedIn}
@@ -770,7 +796,16 @@ export default function App() {
         {/* Modular Sidebar Navigation (honors store.enabled_modules and role) */}
         {isAdminLoggedIn && routeState.type !== 'admin-login' && (
           <ModularSidebar
-            currentModule={routeState.module || (routeState.type === 'admin-hub' ? 'hub' : routeState.type === 'settings-staff' ? 'staff-settings' : '')}
+            currentModule={
+              routeState.module ||
+              (routeState.type === 'admin-hub'
+                ? 'hub'
+                : routeState.type === 'settings-staff'
+                ? 'staff-settings'
+                : routeState.type === 'super-admin'
+                ? 'super-admin'
+                : '')
+            }
             onNavigate={(path) => navigate(path)}
             onLogout={handleAdminLogout}
           />
@@ -778,12 +813,26 @@ export default function App() {
 
         {/* Main Routing Container */}
         <main className={`flex-1 w-full mx-auto overflow-x-hidden ${routeState.module === 'purchase' || routeState.module === 'items' ? 'max-w-[98vw] px-2 md:px-4 py-2' : 'max-w-6xl px-3 sm:px-4 py-3 sm:py-6'}`}>
-          {routeState.type === 'settings-staff' ? (
+          {routeState.type === 'super-admin' ? (
+            /* ======================================================== */
+            /* ROUTE: /super-admin (SUPER ADMIN MULTI-TENANT DASHBOARD) */
+            /* ======================================================== */
+            !isAdminLoggedIn ? (
+              <Login onLoginSuccess={handleAdminLoginSuccess} />
+            ) : (
+              <ErrorBoundary title="Super Admin Platform Console">
+                <SuperAdminDashboard
+                  showToast={showToast}
+                  onNavigate={(path) => navigate(path)}
+                />
+              </ErrorBoundary>
+            )
+          ) : routeState.type === 'settings-staff' ? (
             /* ======================================================== */
             /* ROUTE: /settings/staff (STAFF MANAGEMENT - STORE OWNER ONLY) */
             /* ======================================================== */
             !isAdminLoggedIn ? (
-              <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+              <Login onLoginSuccess={handleAdminLoginSuccess} />
             ) : (
               <ErrorBoundary title="Store Staff Management">
                 <StaffSettingsPage
@@ -798,33 +847,33 @@ export default function App() {
             /* ======================================================== */
             isAdminLoggedIn ? (
               <div className="p-8 text-center">
-              <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
-              <button
-                onClick={() => navigate('/admin')}
-                className="mt-4 px-4 py-2 bg-emerald-600 rounded-xl text-white font-bold text-xs"
-              >
-                Go to Hub
-              </button>
-            </div>
-          ) : (
-            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
-          )
-        ) : routeState.type === 'admin-hub' ? (
-          /* ======================================================== */
-          /* ROUTE: /admin (CLEAN EXECUTIVE MASTER HUB) */
-          /* ======================================================== */
-          !isAdminLoggedIn ? (
-            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
-          ) : (
-            <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
-          )
-        ) : routeState.type === 'admin-module' ? (
-          /* ======================================================== */
-          /* ROUTE: /admin/{module} (DEDICATED MODULE PAGES) */
-          /* ======================================================== */
-          !isAdminLoggedIn ? (
-            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
-          ) : routeState.module === 'delivery' ? (
+                <p className="text-slate-400">Admin session active. Redirecting to Master Hub...</p>
+                <button
+                  onClick={() => navigate('/admin')}
+                  className="mt-4 px-4 py-2 bg-emerald-600 rounded-xl text-white font-bold text-xs"
+                >
+                  Go to Hub
+                </button>
+              </div>
+            ) : (
+              <Login onLoginSuccess={handleAdminLoginSuccess} />
+            )
+          ) : routeState.type === 'admin-hub' ? (
+            /* ======================================================== */
+            /* ROUTE: /admin (CLEAN EXECUTIVE MASTER HUB) */
+            /* ======================================================== */
+            !isAdminLoggedIn ? (
+              <Login onLoginSuccess={handleAdminLoginSuccess} />
+            ) : (
+              <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
+            )
+          ) : routeState.type === 'admin-module' ? (
+            /* ======================================================== */
+            /* ROUTE: /admin/{module} (DEDICATED MODULE PAGES) */
+            /* ======================================================== */
+            !isAdminLoggedIn ? (
+              <Login onLoginSuccess={handleAdminLoginSuccess} />
+            ) : routeState.module === 'delivery' ? (
             <ErrorBoundary title="Delivery & Dispatch Console">
               <AdminDashboard
                 orders={orders}
@@ -897,7 +946,7 @@ export default function App() {
           isAdminLoggedIn ? (
             <AdminHub onNavigate={(path) => window.open(path, '_blank', 'noopener,noreferrer')} />
           ) : (
-            <AdminLogin onLoginSuccess={handleAdminLoginSuccess} />
+            <Login onLoginSuccess={handleAdminLoginSuccess} />
           )
         )}
       </main>
