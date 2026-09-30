@@ -3475,7 +3475,7 @@ export async function fetchPurchaseBillQueue() {
       const { data, error } = await supabase
         .from('purchase_bill_queue')
         .select('*')
-        .eq('status', 'pending_ocr')
+        .in('status', ['PENDING', 'pending_ocr', 'queued'])
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
@@ -3488,7 +3488,7 @@ export async function fetchPurchaseBillQueue() {
       console.warn('fetchPurchaseBillQueue exception:', e.message);
     }
   }
-  return getLocalBillQueue().filter((b) => b.status === 'pending_ocr');
+  return getLocalBillQueue().filter((b) => b.status === 'PENDING' || b.status === 'pending_ocr');
 }
 
 export async function insertPurchaseBillQueue(item) {
@@ -3499,7 +3499,7 @@ export async function insertPurchaseBillQueue(item) {
     try {
       const { data, error } = await supabase
         .from('purchase_bill_queue')
-        .insert([{ image_url: imageUrl, status: 'pending_ocr' }])
+        .insert([{ image_url: imageUrl, status: 'PENDING' }])
         .select()
         .single();
 

@@ -694,43 +694,76 @@ export default function PurchaseInwardHub({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       try {
+        let dataUrl = '';
+        let base64 = '';
+
         if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-          const { dataUrl, base64 } = await renderPdfFirstPageToImage(file, 2.0);
-          const newItem = {
-            id: `bill_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
-            dataUrl,
-            base64,
-            mimeType: 'image/jpeg',
-            name: file.name,
-            size: file.size,
-            uploadedAt: new Date().toISOString(),
-            attachedToPrevious: false,
-            status: 'queued'
-          };
-          addedItems.push(newItem);
+          const rendered = await renderPdfFirstPageToImage(file, 2.0);
+          dataUrl = rendered.dataUrl;
+          base64 = rendered.base64;
         } else {
-          await new Promise((resolve) => {
+          dataUrl = await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = (evt) => {
-              const dataUrl = evt.target.result;
-              const base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
-              const newItem = {
-                id: `bill_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
-                dataUrl,
-                base64,
-                mimeType: file.type || 'image/jpeg',
-                name: file.name,
-                size: file.size,
-                uploadedAt: new Date().toISOString(),
-                attachedToPrevious: false,
-                status: 'queued'
-              };
-              addedItems.push(newItem);
-              resolve();
-            };
+            reader.onload = (evt) => resolve(evt.target.result);
+            reader.onerror = reject;
             reader.readAsDataURL(file);
           });
+          base64 = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
         }
+
+        // Upload to Cloudflare R2 via /api/upload-bill
+        let r2Url = '';
+        try {
+          const uploadRes = await fetch('/api/upload-bill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: dataUrl,
+              fileName: file.name
+            })
+          });
+          if (uploadRes.ok) {
+            const uploadData = await uploadRes.json();
+            if (uploadData.url) {
+              r2Url = uploadData.url;
+            }
+          }
+        } catch (uploadErr) {
+          console.warn('R2 upload notice (falling back to dataUrl):', uploadErr.message);
+        }
+
+        const effectiveImageUrl = r2Url || dataUrl;
+
+        // Insert into Supabase purchase_bill_queue: { image_url, status: 'PENDING' }
+        let queueRowId = null;
+        if (effectiveImageUrl && isSupabaseConfigured && supabase) {
+          try {
+            const { data: qData } = await supabase
+              .from('purchase_bill_queue')
+              .insert([{ image_url: effectiveImageUrl, status: 'PENDING' }])
+              .select()
+              .single();
+            if (qData?.id) {
+              queueRowId = qData.id;
+            }
+          } catch (dbErr) {
+            console.warn('purchase_bill_queue insert notice:', dbErr);
+          }
+        }
+
+        const newItem = {
+          id: queueRowId || `bill_${Date.now()}_${i}_${Math.random().toString(36).substr(2, 5)}`,
+          image_url: effectiveImageUrl,
+          dataUrl: effectiveImageUrl,
+          base64: !r2Url ? base64 : undefined,
+          mimeType: file.type || 'image/jpeg',
+          name: file.name,
+          size: file.size,
+          uploadedAt: new Date().toISOString(),
+          attachedToPrevious: false,
+          status: 'PENDING'
+        };
+        addedItems.push(newItem);
       } catch (err) {
         console.error('File conversion error:', err);
         setOcrError(`Failed to process document "${file.name}": ${err.message || 'Corrupted file'}`);
@@ -776,24 +809,29 @@ export default function PurchaseInwardHub({
     setOcrError('');
     setOcrStatusMessage(`Running Groq Vision LPU OCR on "${billItem.name || 'Selected Bill'}"...`);
 
-    const imgPreview = billItem.dataUrl || billItem.image_url;
+    const imgPreview = billItem.image_url || billItem.dataUrl;
     setBillPreviewUrl(imgPreview);
 
     try {
-      let base64 = billItem.base64;
-      if (!base64 && (billItem.image_url || billItem.dataUrl)) {
-        setOcrStatusMessage('Fetching full-resolution bill image for Groq Vision OCR...');
-        base64 = await getBase64FromUrl(billItem.image_url || billItem.dataUrl);
+      // Feed queueItem.image_url directly to Groq vision model / OCR extraction
+      let imageTarget = billItem.image_url;
+      if (!imageTarget) {
+        let base64 = billItem.base64;
+        if (!base64 && billItem.dataUrl) {
+          setOcrStatusMessage('Fetching full-resolution bill image for Groq Vision OCR...');
+          base64 = await getBase64FromUrl(billItem.dataUrl);
+        }
+        imageTarget = base64 || billItem.dataUrl;
       }
 
-      if (!base64) {
+      if (!imageTarget) {
         throw new Error('Could not access image data for Vision OCR.');
       }
 
-      setBillBase64(base64);
+      setBillBase64(imageTarget.startsWith('data:') ? imageTarget : '');
       setOcrStatusMessage('Extracting invoice header & line items via Groq Vision LPU...');
 
-      const parsed = await groqVisionOcr.processBill(base64, {
+      const parsed = await groqVisionOcr.processBill(imageTarget, {
         mimeType: billItem.mimeType || 'image/jpeg'
       });
       setRawOcrData(parsed);
@@ -1366,9 +1404,12 @@ export default function PurchaseInwardHub({
       const bankAccountNo = (bankDetails.account_no || bankDetails.bank_account_no || '').trim();
       const bankIfsc = (bankDetails.ifsc || bankDetails.bank_ifsc || '').trim();
 
-      // Collect all permanent bill image URLs
+      // Collect permanent bill image URL from active queue bill or preview
+      const activeQueueItem = (billQueue || []).find((b) => b && (b.id === currentQueueBillId || b.id === activeProcessingBillId));
+      const targetBillImageUrl = activeQueueItem?.image_url || billPreviewUrl || '';
+
       const billImageUrls = [
-        billPreviewUrl,
+        targetBillImageUrl,
         ...((billQueue || []).filter((b) => b && (b.id === currentQueueBillId || b.attachedToPrevious)).map((b) => b.image_url || b.dataUrl))
       ].filter(Boolean);
 
@@ -1403,7 +1444,7 @@ export default function PurchaseInwardHub({
         vendor_grand_total: vendorPrintedGrandTotal,
         has_discrepancy: hasDiscrepancy,
         discrepancy: discrepancy,
-        bill_image_url: uniqueBillUrls[0] || billPreviewUrl || '',
+        bill_image_url: activeQueueItem?.image_url || uniqueBillUrls[0] || billPreviewUrl || '',
         bill_image_urls: uniqueBillUrls,
         vendor_details: sellerData,
         tax_summary: {
@@ -1500,21 +1541,27 @@ export default function PurchaseInwardHub({
       // 1. Commit to purchase_invoices and purchase_items + auto-sync to inventory_items
       const saved = await savePurchaseInvoice(invoicePayload, formattedItems);
 
-      // 2. Remove committed bill from uploaded queue (delete from DB and filter out of state)
-      const activeQueueId = currentQueueBillId || activeProcessingBillId;
-      if (activeQueueId) {
+      // 2. Immediately DELETE the processed row from purchase_bill_queue (DB and state)
+      const activeQueueIds = [
+        currentQueueBillId,
+        activeProcessingBillId,
+        ...((billQueue || []).filter((b) => b && b.attachedToPrevious).map((b) => b.id))
+      ].filter(Boolean);
+
+      const uniqueQueueIds = Array.from(new Set(activeQueueIds));
+      for (const qId of uniqueQueueIds) {
         try {
           if (isSupabaseConfigured && supabase) {
-            await supabase.from('purchase_bill_queue').delete().eq('id', activeQueueId);
+            await supabase.from('purchase_bill_queue').delete().eq('id', qId);
           }
-          await updatePurchaseBillStatus(activeQueueId, 'processed').catch(() => {});
+          await updatePurchaseBillStatus(qId, 'processed').catch(() => {});
         } catch (queueErr) {
-          console.warn('Notice: Queue deletion/status update error:', queueErr);
+          console.warn('Notice: Queue deletion error for id:', qId, queueErr);
         }
-        setBillQueue((prev) => (prev || []).filter((b) => b.id !== activeQueueId));
-        setCurrentQueueBillId(null);
-        setActiveProcessingBillId(null);
       }
+      setBillQueue((prev) => (prev || []).filter((b) => !uniqueQueueIds.includes(b.id)));
+      setCurrentQueueBillId(null);
+      setActiveProcessingBillId(null);
 
       // 3. Auto-sync vendor profile
       if (sellerData.name) {

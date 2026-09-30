@@ -16,8 +16,8 @@ import { supabase } from '../../lib/supabase';
 // In-memory HTML5 Canvas pre-processor for High-Contrast Document Scanner Mode
 function preprocessDocumentCanvas(file, options = {}) {
   const {
-    maxWidth = 1600,
-    quality = 0.8,
+    maxWidth = 1200,
+    quality = 0.7,
     mode = 'document' // 'document' (crisp grayscale + auto-contrast + sharpen) or 'photo' (color)
   } = options;
 
@@ -213,56 +213,46 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
 
     setIsUploading(true);
     setErrorMsg('');
-    setUploadProgress(
-      scannerMode === 'document'
-        ? 'Processing high-contrast document scan (1600px & sharpen)...'
-        : 'Compressing photo (1600px)...'
-    );
+    setUploadProgress('Compressing photo (max 1200px / JPEG 0.7)...');
 
     try {
-      // 1. Process with in-memory HTML5 Canvas pre-processor (max 1600px, quality 0.8)
-      const { blob, dataUrl, sizeKb } = await preprocessDocumentCanvas(file, {
-        maxWidth: 1600,
-        quality: 0.8,
+      // 1. Compress image to max 1200px width / JPEG 0.7 quality
+      const { dataUrl, sizeKb } = await preprocessDocumentCanvas(file, {
+        maxWidth: 1200,
+        quality: 0.7,
         mode: scannerMode
       });
 
-      setUploadProgress(`Transmitting (${sizeKb} KB) to laptop screen...`);
+      setUploadProgress(`Uploading to Cloudflare R2 storage (${sizeKb} KB)...`);
 
-      // 2. Upload to Supabase storage bucket `purchase-bills`
-      let publicUrl = null;
-      try {
-        const fileExt = 'jpg';
-        const fileName = `${sessionId}/${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-          .from('purchase-bills')
-          .upload(fileName, blob, {
-            contentType: 'image/jpeg',
-            upsert: true
-          });
+      // 2. Send the compressed image to /api/upload-bill
+      const uploadRes = await fetch('/api/upload-bill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: dataUrl,
+          fileName: `mobile_snap_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.jpg`
+        })
+      });
 
-        if (!uploadErr && uploadData?.path) {
-          const { data: urlData } = supabase.storage
-            .from('purchase-bills')
-            .getPublicUrl(uploadData.path);
-          publicUrl = urlData?.publicUrl;
-        } else if (uploadErr) {
-          console.warn('Supabase storage upload notice:', uploadErr.message);
-        }
-      } catch (storageErr) {
-        console.warn('Storage upload notice (falling back to dataUrl):', storageErr);
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok || !uploadData.url) {
+        throw new Error(uploadData.error || 'Failed to upload bill to Cloudflare R2');
       }
 
-      // If publicUrl is obtained, use it; otherwise fallback to compressed dataUrl
-      const finalImageUrl = publicUrl || dataUrl;
+      // 3. Receive the returned R2 url
+      const r2Url = uploadData.url;
 
-      // 3. Persistent Queue Storage in Supabase:
-      // Insert a record directly into purchase_bill_queue with status: 'pending_ocr'
+      setUploadProgress('Linking bill to live inward queue...');
+
+      // 4. Insert into Supabase purchase_bill_queue with:
+      //    { image_url: data.url, status: 'PENDING' }
+      //    (DO NOT store base64 string in Supabase)
       let snappedBill = null;
       try {
         const { data, error } = await supabase
           .from('purchase_bill_queue')
-          .insert([{ image_url: finalImageUrl, status: 'pending_ocr' }])
+          .insert([{ image_url: r2Url, status: 'PENDING' }])
           .select()
           .single();
 
@@ -278,16 +268,16 @@ export default function MobileInwardCapture({ sessionId: propSessionId = '' }) {
       if (!snappedBill) {
         snappedBill = {
           id: 'bill_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-          image_url: finalImageUrl,
-          status: 'pending_ocr',
+          image_url: r2Url,
+          status: 'PENDING',
           created_at: new Date().toISOString()
         };
       }
 
-      // 4. Broadcast the event via Supabase Realtime channel with the inserted record
+      // 5. Broadcast the event via Supabase Realtime channel with the inserted record
       const broadcastPayload = {
         bill: snappedBill,
-        imageUrl: finalImageUrl
+        imageUrl: r2Url
       };
 
       // Session Broadcast

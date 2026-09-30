@@ -174,6 +174,43 @@ export default defineConfig(({ mode }) => {
               })
               return
             }
+            if (req.url?.startsWith('/api/upload-bill') && req.method === 'POST') {
+              let body = ''
+              req.on('data', (chunk) => { body += chunk })
+              req.on('end', async () => {
+                try {
+                  req.body = JSON.parse(body || '{}')
+                  if (!process.env.R2_ACCOUNT_ENDPOINT) {
+                    process.env.R2_ACCOUNT_ENDPOINT = env.R2_ACCOUNT_ENDPOINT || env.VITE_R2_ACCOUNT_ENDPOINT || ''
+                  }
+                  if (!process.env.R2_ACCESS_KEY_ID) {
+                    process.env.R2_ACCESS_KEY_ID = env.R2_ACCESS_KEY_ID || env.VITE_R2_ACCESS_KEY_ID || ''
+                  }
+                  if (!process.env.R2_SECRET_ACCESS_KEY) {
+                    process.env.R2_SECRET_ACCESS_KEY = env.R2_SECRET_ACCESS_KEY || env.VITE_R2_SECRET_ACCESS_KEY || ''
+                  }
+                  if (!process.env.R2_BUCKET_NAME) {
+                    process.env.R2_BUCKET_NAME = env.R2_BUCKET_NAME || env.VITE_R2_BUCKET_NAME || ''
+                  }
+                  if (!process.env.R2_PUBLIC_DOMAIN) {
+                    process.env.R2_PUBLIC_DOMAIN = env.R2_PUBLIC_DOMAIN || env.VITE_R2_PUBLIC_DOMAIN || ''
+                  }
+                  const { default: handler } = await import('./api/upload-bill.js')
+                  res.status = (code) => { res.statusCode = code; return res }
+                  res.json = (data) => {
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify(data))
+                    return res
+                  }
+                  await handler(req, res)
+                } catch (err) {
+                  res.statusCode = 500
+                  res.setHeader('Content-Type', 'application/json')
+                  res.end(JSON.stringify({ error: err.message || 'Internal Server Error' }))
+                }
+              })
+              return
+            }
             next()
           })
         }

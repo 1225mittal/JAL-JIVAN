@@ -260,19 +260,21 @@ export function normalizeParsedInvoice(parsed) {
  * Model: llama-3.2-11b-vision-preview (fallback to llama-3.2-90b-vision-preview / qwen/qwen3.8-27b)
  * Authorization: Bearer ${import.meta.env.VITE_GROQ_API_KEY}
  */
-export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
+export async function callGroqVision(imageSource, { apiKey = '', mimeType = 'image/jpeg' } = {}) {
   const effectiveKey = apiKey
     || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_GROQ_API_KEY : '')
     || (typeof process !== 'undefined' ? process.env?.GROQ_API_KEY || process.env?.VITE_GROQ_API_KEY : '');
 
   // If no direct client API key is provided, seamlessly route through backend serverless endpoint
   if (!effectiveKey) {
-    return processBill(imageBase64, { mimeType });
+    return processBill(imageSource, { mimeType });
   }
 
-  const cleanImage = imageBase64.startsWith('data:')
-    ? imageBase64
-    : `data:${mimeType || 'image/jpeg'};base64,${imageBase64}`;
+  const rawInput = (imageSource || '').toString().trim();
+  const isUrl = rawInput.startsWith('http://') || rawInput.startsWith('https://');
+  const cleanImage = (isUrl || rawInput.startsWith('data:'))
+    ? rawInput
+    : `data:${mimeType || 'image/jpeg'};base64,${rawInput}`;
 
   // Active Groq Vision models in order of priority
   const visionModels = [
@@ -334,10 +336,12 @@ export async function callGroqVision(imageBase64, { apiKey = '', mimeType = 'ima
 /**
  * Primary Bill OCR Entry Point: Exclusively Groq Vision routed via /api/groq-ocr
  */
-export async function processBill(imageBase64, options = {}) {
-  const cleanImage = imageBase64.startsWith('data:')
-    ? imageBase64
-    : `data:${options.mimeType || 'image/jpeg'};base64,${imageBase64}`;
+export async function processBill(imageInput, options = {}) {
+  const rawInput = (imageInput || '').toString().trim();
+  const isUrl = rawInput.startsWith('http://') || rawInput.startsWith('https://');
+  const cleanImage = (isUrl || rawInput.startsWith('data:'))
+    ? rawInput
+    : `data:${options.mimeType || 'image/jpeg'};base64,${rawInput}`;
 
   // If a client API key is explicitly provided, we can call directly
   if (options.apiKey || options.useDirectClient) {
@@ -351,6 +355,8 @@ export async function processBill(imageBase64, options = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         imageBase64: cleanImage,
+        image: cleanImage,
+        imageUrl: isUrl ? rawInput : undefined,
         mimeType: options.mimeType || 'image/jpeg'
       })
     });
