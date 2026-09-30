@@ -24,7 +24,6 @@ import {
   Building2,
   User,
   Phone,
-  Globe,
   Plus
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -33,24 +32,21 @@ import { useAuth, DEFAULT_STORE, DEFAULT_USER_PROFILE } from '../context/AuthCon
 export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   const { loginUser } = useAuth();
 
-  // Store Access Modal State (3 modes: 'signin' | 'signup' | 'staff')
+  // Store Access Modal State (2 modes: 'signin' | 'signup')
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
-  const [modalTab, setModalTab] = useState('signin'); // 'signin' | 'signup' | 'staff'
+  const [modalTab, setModalTab] = useState('signin'); // 'signin' | 'signup'
 
-  // Tab 1: Store Owner Sign In State (all default to empty string)
-  const [signInEmail, setSignInEmail] = useState('');
+  // Tab 1: Store Owner Sign In State (accepts Mobile Number or Email)
+  const [signInIdentifier, setSignInIdentifier] = useState('');
   const [signInPassword, setSignInPassword] = useState('');
   const [showSignInPassword, setShowSignInPassword] = useState(false);
 
-  // Tab 2: Register New Store (Signup) State (all default to empty string)
+  // Tab 2: Register New Store (Signup) State (STRICTLY 4 COMPULSORY FIELDS)
   const [regStoreName, setRegStoreName] = useState('');
-  const [regStoreSlug, setRegStoreSlug] = useState('');
   const [regOwnerName, setRegOwnerName] = useState('');
-  const [regPhone, setRegPhone] = useState('');
-  const [regEmail, setRegEmail] = useState('');
+  const [regMobile, setRegMobile] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
-  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   // Status & Feedback
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -69,31 +65,18 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       .replace(/^-+|-+$/g, '');
   };
 
-  const handleStoreNameChange = (e) => {
-    const val = e.target.value;
-    setRegStoreName(val);
-    if (!slugManuallyEdited) {
-      setRegStoreSlug(generateSlug(val));
-    }
-  };
-
-  const handleStoreSlugChange = (e) => {
-    setSlugManuallyEdited(true);
-    setRegStoreSlug(generateSlug(e.target.value));
-  };
-
   // ==========================================
-  // 1. STORE OWNER SIGN IN HANDLER
+  // 1. STORE OWNER SIGN IN HANDLER (MOBILE OR EMAIL + PASSWORD)
   // ==========================================
   const handleOwnerSignIn = async (e) => {
     e.preventDefault();
     setLoginError('');
 
-    const cleanEmail = signInEmail.trim().toLowerCase();
+    const rawInput = signInIdentifier.trim();
     const cleanPassword = signInPassword.trim();
 
-    if (!cleanEmail || !cleanPassword) {
-      setLoginError('Please enter your email and password.');
+    if (!rawInput || !cleanPassword) {
+      setLoginError('Please enter your mobile number or email, and password.');
       return;
     }
 
@@ -104,10 +87,30 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       let resolvedStore = null;
       let authSession = null;
 
+      const isEmail = rawInput.includes('@');
+      const cleanMobile = rawInput.replace(/\D/g, '');
+      const derivedEmail = `${cleanMobile}@store.jaljivan.internal`;
+
+      // 1. Authenticate with Supabase Auth
       if (isSupabaseConfigured && supabase?.auth) {
         try {
+          let authLookupEmail = isEmail ? rawInput.toLowerCase() : derivedEmail;
+
+          // If mobile number entered, look up registered profile to get primary email
+          if (!isEmail && cleanMobile) {
+            const { data: phoneProfile } = await supabase
+              .from('user_profiles')
+              .select('email, phone, store_id')
+              .or(`phone.eq.${cleanMobile},phone.eq.+91${cleanMobile}`)
+              .maybeSingle();
+
+            if (phoneProfile?.email) {
+              authLookupEmail = phoneProfile.email;
+            }
+          }
+
           const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
+            email: authLookupEmail,
             password: cleanPassword
           });
 
@@ -125,15 +128,33 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
               }
             }
-          } else if (authError) {
-            console.warn('Supabase signIn notice:', authError.message);
+          } else if (authError && !isEmail && authLookupEmail !== derivedEmail) {
+            // Secondary fallback attempt with derived email
+            const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
+              email: derivedEmail,
+              password: cleanPassword
+            });
+            if (!retryError && retryData?.user) {
+              authSession = retryData.session;
+              const { data: profData } = await supabase
+                .from('user_profiles')
+                .select('*, stores(*)')
+                .eq('id', retryData.user.id)
+                .single();
+              if (profData) {
+                resolvedProfile = profData;
+                if (profData.stores) {
+                  resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+                }
+              }
+            }
           }
         } catch (err) {
           console.warn('Auth notice:', err);
         }
       }
 
-      // Check local stores cache
+      // 2. Check local stores cache (offline / local resilience)
       if (!resolvedProfile) {
         try {
           const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
@@ -141,7 +162,11 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
             const staffKey = `jal_jivan_store_staff_${s.id}`;
             const staffList = JSON.parse(localStorage.getItem(staffKey) || '[]');
             const foundOwner = staffList.find(
-              (st) => st.email?.toLowerCase() === cleanEmail && st.role === 'store_owner'
+              (st) =>
+                st.role === 'store_owner' &&
+                ((isEmail && st.email?.toLowerCase() === rawInput.toLowerCase()) ||
+                  (!isEmail && (st.phone === cleanMobile || st.phone?.replace(/\D/g, '') === cleanMobile)) ||
+                  st.email === derivedEmail)
             );
             if (foundOwner) {
               resolvedProfile = foundOwner;
@@ -152,10 +177,10 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         } catch (e) {}
       }
 
-      // Offline / Demo Store Owner fallback
+      // 3. Offline / Demo Store Owner fallback
       if (!resolvedProfile) {
         const isOwnerCreds =
-          (cleanEmail === 'owner@mittalstore.com' || cleanEmail === 'mittal' || cleanEmail === 'admin') &&
+          (rawInput === 'owner@mittalstore.com' || cleanMobile === '9876543210' || rawInput === 'mittal' || rawInput === 'admin') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
         if (isOwnerCreds) {
@@ -165,7 +190,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       }
 
       if (!resolvedProfile) {
-        setLoginError('Invalid credentials. Please verify your email and password.');
+        setLoginError('Invalid credentials. Please verify your mobile number/email and password.');
         setIsSubmitting(false);
         return;
       }
@@ -211,115 +236,115 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   };
 
   // ==========================================
-  // 2. REGISTER NEW STORE (SIGNUP) HANDLER
+  // 2. REGISTER NEW STORE (ONLY 4 COMPULSORY FIELDS + 7-DAY TRIAL)
   // ==========================================
   const handleStoreRegister = async (e) => {
     e.preventDefault();
     setLoginError('');
 
     const cleanStoreName = regStoreName.trim();
-    const cleanSlug = generateSlug(regStoreSlug || regStoreName);
     const cleanOwnerName = regOwnerName.trim();
-    const cleanPhone = regPhone.trim();
-    const cleanEmail = regEmail.trim().toLowerCase();
+    const cleanMobile = regMobile.replace(/\D/g, '').trim();
     const cleanPassword = regPassword.trim();
 
+    // 1. Strict Validations for 4 Compulsory Fields
     if (!cleanStoreName) {
       setLoginError('Please enter your store name.');
-      return;
-    }
-    if (!cleanSlug || cleanSlug.length < 2) {
-      setLoginError('Please enter a valid store URL slug (e.g. apex-retail).');
       return;
     }
     if (!cleanOwnerName) {
       setLoginError('Please enter the store owner full name.');
       return;
     }
-    if (!cleanPhone) {
-      setLoginError('Please enter a contact phone number.');
-      return;
-    }
-    if (!cleanEmail) {
-      setLoginError('Please enter your work email address.');
+    if (!cleanMobile || cleanMobile.length < 10) {
+      setLoginError('Please enter a valid 10-digit mobile number.');
       return;
     }
     if (!cleanPassword || cleanPassword.length < 6) {
-      setLoginError('Please enter a secure password (minimum 6 characters).');
+      setLoginError('Please set a secure password (minimum 6 characters).');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // 1. Prevent collision with system paths
+      // 2. Auto-generate store URL slug in the background
+      const baseSlug = generateSlug(cleanStoreName) || 'store';
       const reservedSlugs = [
         'hq-console', 'super-admin', 'login', 'admin', 'rider', 'driver', 'scan-inward', 'store', 'api', 'assets'
       ];
-      if (reservedSlugs.includes(cleanSlug)) {
-        setLoginError(`The slug "${cleanSlug}" is reserved. Please choose another unique slug.`);
-        setIsSubmitting(false);
-        return;
+      let generatedSlug = baseSlug;
+
+      if (reservedSlugs.includes(generatedSlug) || generatedSlug.length < 2) {
+        generatedSlug = `${baseSlug}-${Math.floor(100 + Math.random() * 900)}`;
       }
 
-      // Check if slug already exists in Supabase
       if (isSupabaseConfigured && supabase) {
         try {
           const { data: existingStore } = await supabase
             .from('stores')
             .select('id, slug')
-            .eq('slug', cleanSlug)
+            .eq('slug', generatedSlug)
             .maybeSingle();
 
           if (existingStore) {
-            setLoginError(`Store slug "${cleanSlug}" is already taken. Please choose a different slug.`);
-            setIsSubmitting(false);
-            return;
+            generatedSlug = `${baseSlug}-${Math.floor(100 + Math.random() * 900)}`;
           }
         } catch (e) {}
       }
 
-      // 2. Sign up user with supabase.auth.signUp
+      // 3. Supabase Auth signup with mobile-derived email
+      const authEmail = `${cleanMobile}@store.jaljivan.internal`;
       let authUser = null;
       let authSession = null;
+
       if (isSupabaseConfigured && supabase?.auth) {
         try {
           const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: cleanEmail,
+            email: authEmail,
             password: cleanPassword,
             options: {
               data: {
                 full_name: cleanOwnerName,
-                phone: cleanPhone,
+                phone: cleanMobile,
                 role: 'store_owner'
               }
             }
           });
 
           if (signUpError) {
-            console.warn('Supabase signUp error notice:', signUpError.message);
-            if (!signUpError.message?.toLowerCase().includes('already registered')) {
-              throw new Error(signUpError.message);
+            console.warn('Supabase signUp notice:', signUpError.message);
+            // If already registered, attempt signIn to link session
+            if (signUpError.message?.toLowerCase().includes('already registered')) {
+              const { data: signInData } = await supabase.auth.signInWithPassword({
+                email: authEmail,
+                password: cleanPassword
+              });
+              if (signInData?.user) {
+                authUser = signInData.user;
+                authSession = signInData.session;
+              }
             }
           } else {
             authUser = signUpData?.user;
             authSession = signUpData?.session;
           }
         } catch (err) {
-          if (!err.message?.toLowerCase().includes('already registered')) {
-            throw err;
-          }
+          console.warn('Auth notice:', err);
         }
       }
 
-      // 3. Create row in stores table with default modules
-      const newStoreId = `store_${cleanSlug}_${Date.now()}`;
+      // 4. Automated 7-Day All-Access Free Trial
+      const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const newStoreId = `store_${generatedSlug}_${Date.now()}`;
       const newStoreRecord = {
         id: newStoreId,
         name: cleanStoreName,
-        slug: cleanSlug,
-        phone: cleanPhone,
+        slug: generatedSlug,
+        phone: cleanMobile,
+        contact_phone: cleanMobile,
         status: 'active',
+        trial_ends_at: trialEndsAt,
         enabled_modules: {
           pos: true,
           inward_ocr: true,
@@ -329,13 +354,13 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         created_at: new Date().toISOString()
       };
 
-      // 4. Create corresponding row in user_profiles with role 'store_owner'
-      const newUserId = authUser?.id || `user_owner_${cleanSlug}_${Date.now()}`;
+      // 5. Create user_profiles row
+      const newUserId = authUser?.id || `user_owner_${generatedSlug}_${Date.now()}`;
       const newUserProfile = {
         id: newUserId,
         full_name: cleanOwnerName,
-        email: cleanEmail,
-        phone: cleanPhone,
+        email: authEmail,
+        phone: cleanMobile,
         role: 'store_owner',
         store_id: newStoreId,
         is_active: true,
@@ -351,10 +376,10 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         }
       }
 
-      // 5. Pre-seed local storage directory & staff
+      // 6. Pre-seed local storage directory & staff for immediate reactivity
       try {
         const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
-        const updatedList = [newStoreRecord, ...localStores.filter((s) => s.slug !== cleanSlug)];
+        const updatedList = [newStoreRecord, ...localStores.filter((s) => s.slug !== generatedSlug)];
         localStorage.setItem('jal_jivan_all_stores', JSON.stringify(updatedList));
 
         const staffKey = `jal_jivan_store_staff_${newStoreId}`;
@@ -363,19 +388,10 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
             id: `staff_owner_${newStoreId}`,
             store_id: newStoreId,
             full_name: cleanOwnerName,
-            email: cleanEmail,
+            email: authEmail,
+            phone: cleanMobile,
             role: 'store_owner',
             pin: '2026',
-            is_active: true,
-            created_at: new Date().toISOString()
-          },
-          {
-            id: `staff_cashier_${newStoreId}`,
-            store_id: newStoreId,
-            full_name: 'Cashier Staff',
-            email: `cashier@${cleanSlug}.com`,
-            role: 'billing_cashier',
-            pin: '1122',
             is_active: true,
             created_at: new Date().toISOString()
           }
@@ -383,7 +399,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         localStorage.setItem(staffKey, JSON.stringify(initialStaff));
       } catch (e) {}
 
-      // 6. Log in the newly registered store owner
+      // 7. Log in the newly registered store owner
       loginUser({
         profile: newUserProfile,
         store: newStoreRecord,
@@ -391,8 +407,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         session: authSession
       });
 
-      // 7. Redirect immediately to /${newStoreSlug}
-      const redirectPath = `/${cleanSlug}`;
+      // 8. Redirect directly to /${generatedSlug} with all modules enabled
+      const redirectPath = `/${generatedSlug}`;
       setIsLoginModalOpen(false);
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
@@ -403,7 +419,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       }
     } catch (err) {
       console.error('Registration exception:', err);
-      setLoginError(err.message || 'Failed to register store. Please try again.');
+      setLoginError(err.message || 'Failed to deploy store. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -820,8 +836,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                   </h3>
                   <p className="text-xs text-slate-400">
                     {modalTab === 'signup'
-                      ? 'Deploy your dedicated retail operating system'
-                      : 'Sign in to access your tenant store'}
+                      ? '7-Day All-Access Free Trial • Instant Deployment'
+                      : 'Sign in with your mobile number or email'}
                   </p>
                 </div>
               </div>
@@ -884,17 +900,17 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 <form onSubmit={handleOwnerSignIn} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                      Store Owner Email
+                      Mobile Number or Email
                     </label>
                     <div className="relative">
-                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
-                        type="email"
+                        type="text"
                         autoComplete="username"
                         required
-                        value={signInEmail}
-                        onChange={(e) => setSignInEmail(e.target.value)}
-                        placeholder="name@store.com"
+                        value={signInIdentifier}
+                        onChange={(e) => setSignInIdentifier(e.target.value)}
+                        placeholder="9876543210 or name@store.com"
                         className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
@@ -958,109 +974,68 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                 </form>
               )}
 
-              {/* TAB 2: REGISTER NEW STORE (SIGNUP) */}
+              {/* TAB 2: REGISTER NEW STORE (STRICTLY 4 COMPULSORY FIELDS) */}
               {modalTab === 'signup' && (
-                <form onSubmit={handleStoreRegister} className="space-y-3.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                        Store Name
-                      </label>
-                      <div className="relative">
-                        <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          required
-                          value={regStoreName}
-                          onChange={handleStoreNameChange}
-                          placeholder="e.g. Apex Retail"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                        Desired Store URL Slug
-                      </label>
-                      <div className="relative">
-                        <Globe className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          required
-                          value={regStoreSlug}
-                          onChange={handleStoreSlugChange}
-                          placeholder="apex-retail"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-emerald-400 font-mono text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-slate-500 font-mono">
-                    Direct access URL:{' '}
-                    <span className="text-emerald-400">
-                      jaljivan.com/{regStoreSlug || 'your-slug'}
-                    </span>
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                        Owner Full Name
-                      </label>
-                      <div className="relative">
-                        <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          required
-                          value={regOwnerName}
-                          onChange={(e) => setRegOwnerName(e.target.value)}
-                          placeholder="e.g. Vikram Sharma"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                        Contact Phone
-                      </label>
-                      <div className="relative">
-                        <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="tel"
-                          required
-                          value={regPhone}
-                          onChange={(e) => setRegPhone(e.target.value)}
-                          placeholder="+91 98765 43210"
-                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
+                <form onSubmit={handleStoreRegister} className="space-y-4">
+                  {/* 1. Store Name */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                      Owner Email Address
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Store Name <span className="text-emerald-400">*</span>
                     </label>
                     <div className="relative">
-                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Building2 className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
-                        type="email"
-                        autoComplete="email"
+                        type="text"
                         required
-                        value={regEmail}
-                        onChange={(e) => setRegEmail(e.target.value)}
-                        placeholder="name@store.com"
-                        className="w-full pl-9 pr-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
+                        value={regStoreName}
+                        onChange={(e) => setRegStoreName(e.target.value)}
+                        placeholder="e.g. Mittal Mart"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                     </div>
                   </div>
 
+                  {/* 2. Owner Full Name */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
-                      Set Secure Password
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Owner Full Name <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        required
+                        value={regOwnerName}
+                        onChange={(e) => setRegOwnerName(e.target.value)}
+                        placeholder="e.g. Rahul Mittal"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3. Mobile Number */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Mobile Number <span className="text-emerald-400">*</span>
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        maxLength={10}
+                        required
+                        value={regMobile}
+                        onChange={(e) => setRegMobile(e.target.value.replace(/\D/g, ''))}
+                        placeholder="9876543210 (10 digits)"
+                        className="w-full pl-9 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs font-mono focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 4. Set Password */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                      Set Password <span className="text-emerald-400">*</span>
                     </label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1071,8 +1046,8 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                         minLength={6}
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full pl-9 pr-9 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
+                        placeholder="•••••••• (min 6 characters)"
+                        className="w-full pl-9 pr-9 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs focus:outline-none focus:border-emerald-500 transition placeholder:text-slate-600"
                       />
                       <button
                         type="button"
@@ -1084,24 +1059,23 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
                     </div>
                   </div>
 
-                  {/* Modules Included Badge */}
-                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-300">Default Activated Modules</span>
-                      <span className="text-[10px] text-emerald-400 font-semibold uppercase">All 4 Enabled</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold text-slate-400">
-                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">POS Billing</span>
-                      <span className="px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-300 border border-teal-500/20">Inward AI OCR</span>
-                      <span className="px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20">Vendor Ledger</span>
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">Delivery Fleet</span>
+                  {/* 7-Day Free Trial Banner */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border border-emerald-500/25 flex items-start gap-2.5">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-emerald-300">
+                        ✨ Includes 7-Day All-Access Free Trial
+                      </p>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        All enterprise modules (POS, AI Inward, Ledgers, Fleet) are unlocked instantly.
+                      </p>
                     </div>
                   </div>
 
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+                    className="w-full py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black rounded-xl text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
                   >
                     {isSubmitting ? (
                       <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />

@@ -12,7 +12,8 @@ import {
   EyeOff,
   Sparkles,
   Smartphone,
-  Crown
+  Crown,
+  Phone
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
@@ -47,11 +48,11 @@ export default function Login({ onLoginSuccess }) {
     e?.preventDefault();
     setErrorMsg('');
 
-    const cleanEmail = email.trim().toLowerCase();
+    const rawInput = email.trim();
     const cleanPassword = password.trim();
 
-    if (!cleanEmail) {
-      setErrorMsg('Please enter your registered store owner email address.');
+    if (!rawInput) {
+      setErrorMsg('Please enter your mobile number or registered email address.');
       return;
     }
     if (!cleanPassword) {
@@ -60,7 +61,7 @@ export default function Login({ onLoginSuccess }) {
     }
 
     // Decouple Super Admin from Store Login
-    if (cleanEmail.includes('superadmin')) {
+    if (rawInput.toLowerCase().includes('superadmin')) {
       setErrorMsg('Invalid store credentials. Master administrative accounts must use the discrete HQ enclave.');
       return;
     }
@@ -72,11 +73,28 @@ export default function Login({ onLoginSuccess }) {
       let resolvedStore = null;
       let authSession = null;
 
+      const isEmail = rawInput.includes('@');
+      const cleanMobile = rawInput.replace(/\D/g, '');
+      const derivedEmail = `${cleanMobile}@store.jaljivan.internal`;
+      let authLookupEmail = isEmail ? rawInput.toLowerCase() : derivedEmail;
+
       // 1. Try Supabase Auth signInWithPassword
       if (isSupabaseConfigured && supabase?.auth) {
         try {
+          if (!isEmail && cleanMobile) {
+            const { data: phoneProfile } = await supabase
+              .from('user_profiles')
+              .select('email, phone, store_id')
+              .or(`phone.eq.${cleanMobile},phone.eq.+91${cleanMobile}`)
+              .maybeSingle();
+
+            if (phoneProfile?.email) {
+              authLookupEmail = phoneProfile.email;
+            }
+          }
+
           const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
+            email: authLookupEmail,
             password: cleanPassword
           });
 
@@ -103,8 +121,25 @@ export default function Login({ onLoginSuccess }) {
                 is_active: true
               };
             }
-          } else if (authError) {
-            console.warn('Supabase signInWithPassword returned error:', authError.message);
+          } else if (authError && !isEmail && authLookupEmail !== derivedEmail) {
+            const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
+              email: derivedEmail,
+              password: cleanPassword
+            });
+            if (!retryError && retryData?.user) {
+              authSession = retryData.session;
+              const { data: profData } = await supabase
+                .from('user_profiles')
+                .select('*, stores(*)')
+                .eq('id', retryData.user.id)
+                .single();
+              if (profData) {
+                resolvedProfile = profData;
+                if (profData.stores) {
+                  resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
+                }
+              }
+            }
           }
         } catch (supabaseErr) {
           console.warn('Supabase Auth execution error:', supabaseErr);
@@ -114,7 +149,7 @@ export default function Login({ onLoginSuccess }) {
       // 2. Demo / Fallback Store Owner Credentials (offline or test instances)
       if (!resolvedProfile) {
         const isOwnerCreds =
-          (cleanEmail === 'owner@mittalstore.com' || cleanEmail === 'mittal' || cleanEmail === 'admin' || cleanEmail === 'mittal@store.com') &&
+          (rawInput === 'owner@mittalstore.com' || cleanMobile === '9876543210' || rawInput === 'mittal' || rawInput === 'admin' || rawInput === 'mittal@store.com') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
         if (isOwnerCreds) {
@@ -124,7 +159,7 @@ export default function Login({ onLoginSuccess }) {
       }
 
       if (!resolvedProfile) {
-        setErrorMsg('Invalid email or password. Please check your credentials or use the demo quick-fill.');
+        setErrorMsg('Invalid mobile number/email or password. Please verify your credentials.');
         setIsLoading(false);
         return;
       }
@@ -398,19 +433,19 @@ export default function Login({ onLoginSuccess }) {
           <form onSubmit={handleOwnerLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                Store Owner Email
+                Mobile Number or Email
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <Mail className="w-4 h-4" />
+                  <Phone className="w-4 h-4" />
                 </div>
                 <input
                   id="login-email-input"
-                  type="email"
+                  type="text"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@store.com"
+                  placeholder="9876543210 or name@store.com"
                   className="w-full pl-10 pr-4 py-3 bg-slate-950/70 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition placeholder:text-slate-600"
                 />
               </div>
