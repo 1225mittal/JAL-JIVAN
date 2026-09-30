@@ -46,6 +46,18 @@ export function AuthProvider({ children }) {
     try {
       const saved = localStorage.getItem(STORAGE_STORE_KEY);
       if (saved) return JSON.parse(saved);
+      const storeSession = localStorage.getItem('jaljivan_store_session');
+      if (storeSession) {
+        const parsed = JSON.parse(storeSession);
+        if (parsed.storeSlug) {
+          return {
+            id: parsed.storeId || `store_${parsed.storeSlug}`,
+            name: parsed.storeName || 'My Store',
+            slug: parsed.storeSlug,
+            enabled_modules: { pos: true, inward_ocr: true, ledger: true, delivery: true }
+          };
+        }
+      }
     } catch (e) {}
     return DEFAULT_STORE;
   });
@@ -55,6 +67,11 @@ export function AuthProvider({ children }) {
     try {
       const saved = localStorage.getItem(STORAGE_ROLE_KEY);
       if (saved) return saved;
+      const storeSession = localStorage.getItem('jaljivan_store_session');
+      if (storeSession) {
+        const parsed = JSON.parse(storeSession);
+        if (parsed.role) return parsed.role;
+      }
     } catch (e) {}
     return 'store_owner';
   });
@@ -64,6 +81,19 @@ export function AuthProvider({ children }) {
     try {
       const saved = localStorage.getItem(STORAGE_PROFILE_KEY);
       if (saved) return JSON.parse(saved);
+      const storeSession = localStorage.getItem('jaljivan_store_session');
+      if (storeSession) {
+        const parsed = JSON.parse(storeSession);
+        if (parsed.userId) {
+          return {
+            id: parsed.userId,
+            full_name: parsed.storeName ? `${parsed.storeName} Owner` : 'Store Owner',
+            role: parsed.role || 'store_owner',
+            store_id: parsed.storeId || `store_${parsed.storeSlug}`,
+            is_active: true
+          };
+        }
+      }
     } catch (e) {}
     return DEFAULT_USER_PROFILE;
   });
@@ -152,6 +182,7 @@ export function AuthProvider({ children }) {
       localStorage.removeItem(STORAGE_ROLE_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
       localStorage.removeItem('admin_session');
+      localStorage.removeItem('jaljivan_store_session');
     } catch (e) {}
   }, [setUserRole, setUserProfile]);
 

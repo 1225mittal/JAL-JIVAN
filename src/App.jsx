@@ -237,7 +237,7 @@ export default function App() {
   // Admin Authentication State
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     try {
-      const session = localStorage.getItem(ADMIN_SESSION_KEY);
+      const session = localStorage.getItem(ADMIN_SESSION_KEY) || localStorage.getItem('jaljivan_store_session');
       return Boolean(session);
     } catch {
       return false;
@@ -588,6 +588,7 @@ export default function App() {
     try {
       localStorage.removeItem(ADMIN_SESSION_KEY);
       localStorage.removeItem('jal_jivan_admin_logged_in');
+      localStorage.removeItem('jaljivan_store_session');
     } catch (e) {}
     navigate('/login');
     showToast('Logged out of Store Terminal', 'info');

@@ -66,7 +66,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
   };
 
   // ==========================================
-  // 1. STORE OWNER SIGN IN HANDLER (PHONE & PASSWORD ONLY)
+  // 1. STORE OWNER SIGN IN HANDLER (CUSTOM RPC: verify_store_phone_login)
   // ==========================================
   const handleOwnerSignIn = async (e) => {
     e.preventDefault();
@@ -80,145 +80,91 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
       return;
     }
 
-    // Format phone: Clean input of spaces and dashes. If it doesn't start with '+91', format it as `+91${cleanNumber}`.
-    let cleanNumber = rawInput.replace(/[\s-]/g, '');
-    let formattedPhone = cleanNumber;
-    if (!formattedPhone.startsWith('+91')) {
-      if (formattedPhone.startsWith('91') && formattedPhone.length === 12) {
-        formattedPhone = `+${formattedPhone}`;
-      } else {
-        formattedPhone = `+91${formattedPhone.replace(/^\+/, '')}`;
-      }
-    }
-
-    const cleanDigits = formattedPhone.replace(/\D/g, '').slice(-10);
+    const cleanPhone = rawInput.replace(/^(\+91|91)/, '').replace(/\D/g, '');
 
     setIsSubmitting(true);
 
     try {
-      let resolvedProfile = null;
-      let resolvedStore = null;
-      let authSession = null;
-      let storeSlug = null;
+      let userStore = null;
 
-      // Authenticate strictly using phone:
-      if (isSupabaseConfigured && supabase?.auth) {
+      // Authenticate via the custom RPC verify_store_phone_login:
+      if (isSupabaseConfigured && supabase?.rpc) {
         try {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            phone: formattedPhone,
-            password: cleanPassword
+          const { data, error } = await supabase.rpc('verify_store_phone_login', {
+            p_phone: cleanPhone,
+            p_password: cleanPassword
           });
 
-          if (!error && data?.user) {
-            authSession = data.session;
-
-            // Query user_profiles joining stores for this data.user.id to get store.slug
-            const { data: profData } = await supabase
-              .from('user_profiles')
-              .select('*, stores(*)')
-              .eq('id', data.user.id)
-              .single();
-
-            if (profData) {
-              resolvedProfile = profData;
-              if (profData.stores) {
-                resolvedStore = Array.isArray(profData.stores) ? profData.stores[0] : profData.stores;
-                storeSlug = resolvedStore?.slug;
-              }
-              if (!storeSlug && profData.store_id) {
-                const { data: sData } = await supabase
-                  .from('stores')
-                  .select('*')
-                  .eq('id', profData.store_id)
-                  .single();
-                if (sData) {
-                  resolvedStore = sData;
-                  storeSlug = sData.slug;
-                }
-              }
-            } else {
-              resolvedProfile = {
-                id: data.user.id,
-                phone: formattedPhone,
-                role: 'store_owner'
-              };
-            }
+          if (!error && data && data.length > 0 && data[0].success) {
+            userStore = data[0];
+          } else if (error) {
+            console.warn('verify_store_phone_login RPC notice:', error);
           }
-        } catch (authErr) {
-          console.warn('Supabase auth notice:', authErr);
+        } catch (rpcErr) {
+          console.warn('verify_store_phone_login RPC exception:', rpcErr);
         }
       }
 
-      // Check local stores cache (offline / local resilience)
-      if (!resolvedProfile) {
-        try {
-          const localStores = JSON.parse(localStorage.getItem('jal_jivan_all_stores') || '[]');
-          for (const s of localStores) {
-            const staffKey = `jal_jivan_store_staff_${s.id}`;
-            const staffList = JSON.parse(localStorage.getItem(staffKey) || '[]');
-            const foundOwner = staffList.find(
-              (st) =>
-                st.role === 'store_owner' &&
-                (st.phone === formattedPhone || st.phone === cleanDigits || st.phone?.replace(/\D/g, '').slice(-10) === cleanDigits)
-            );
-            if (foundOwner) {
-              resolvedProfile = foundOwner;
-              resolvedStore = s;
-              storeSlug = s.slug;
-              break;
-            }
-          }
-        } catch (e) {}
-      }
-
-      // Offline / Demo Store Owner fallback
-      if (!resolvedProfile) {
+      // Offline / Demo store fallback
+      if (!userStore) {
         const isOwnerCreds =
-          (cleanDigits === '8860221124' || cleanDigits === '9876543210' || rawInput === 'mittal') &&
+          (cleanPhone === '8860221124' || cleanPhone === '9876543210' || rawInput === 'mittal') &&
           (cleanPassword === 'MittalStore#2026!Secure' || cleanPassword === '2026' || cleanPassword === '1225' || cleanPassword === '9999');
 
         if (isOwnerCreds) {
-          resolvedProfile = DEFAULT_USER_PROFILE;
-          resolvedStore = DEFAULT_STORE;
-          storeSlug = DEFAULT_STORE.slug;
+          userStore = {
+            success: true,
+            user_id: DEFAULT_USER_PROFILE.id,
+            store_slug: DEFAULT_STORE.slug,
+            store_name: DEFAULT_STORE.name,
+            user_role: 'store_owner'
+          };
         }
       }
 
-      if (!resolvedProfile) {
+      if (!userStore || !userStore.success) {
         setLoginError('Invalid mobile number or password.');
         setIsSubmitting(false);
         return;
       }
 
-      if (!resolvedStore && resolvedProfile.store_id && isSupabaseConfigured && supabase) {
-        try {
-          const { data: storeData } = await supabase
-            .from('stores')
-            .select('*')
-            .eq('id', resolvedProfile.store_id)
-            .single();
-          if (storeData) {
-            resolvedStore = storeData;
-            storeSlug = storeData.slug;
-          }
-        } catch (e) {}
-      }
+      // Store session info in localStorage/context so the store views recognize the logged-in owner
+      localStorage.setItem('jaljivan_store_session', JSON.stringify({
+        userId: userStore.user_id,
+        storeSlug: userStore.store_slug,
+        storeName: userStore.store_name,
+        role: userStore.user_role
+      }));
 
-      if (!resolvedStore) {
-        resolvedStore = DEFAULT_STORE;
-      }
-
-      const finalSlug = storeSlug || resolvedStore?.slug || 'mittal-store';
-
+      // Also sync AuthContext state so entire app context recognizes the store & profile
       loginUser({
-        profile: resolvedProfile,
-        store: resolvedStore,
-        role: 'store_owner',
-        session: authSession
+        profile: {
+          id: userStore.user_id,
+          phone: `+91${cleanPhone}`,
+          full_name: userStore.user_name || userStore.full_name || 'Store Owner',
+          role: userStore.user_role || 'store_owner',
+          store_id: userStore.store_id || `store_${userStore.store_slug}`,
+          is_active: true
+        },
+        store: {
+          id: userStore.store_id || `store_${userStore.store_slug}`,
+          name: userStore.store_name,
+          slug: userStore.store_slug,
+          enabled_modules: {
+            pos: true,
+            inward_ocr: true,
+            ledger: true,
+            delivery: true
+          }
+        },
+        role: userStore.user_role || 'store_owner',
+        session: null
       });
 
-      const redirectPath = `/${finalSlug}`;
+      // Route directly to their store
+      const redirectPath = `/${userStore.store_slug}`;
       setIsLoginModalOpen(false);
+
       if (onLoginSuccess) {
         onLoginSuccess(redirectPath);
       } else if (onNavigate) {
@@ -227,6 +173,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         window.location.href = redirectPath;
       }
     } catch (err) {
+      console.error('Login process exception:', err);
       setLoginError('Invalid mobile number or password.');
     } finally {
       setIsSubmitting(false);
