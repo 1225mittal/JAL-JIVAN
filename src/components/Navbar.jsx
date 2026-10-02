@@ -1,34 +1,54 @@
 import React from 'react';
-import { Droplets, LogOut, Users, ShieldCheck } from 'lucide-react';
+import { Droplets, LogOut, ShieldCheck, LayoutGrid } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
-  isAdminRoute = false,
-  isAdminView = false,
-  adminSubView = 'hub',
-  storeName = '',
-  storeSlug = '',
+  adminSubView = 'pos',
   onNavigateToAdminHub,
   onOpenDbInfo,
   isAdminLoggedIn = false,
   onAdminLogout
 }) {
-  const isViewAdmin = Boolean(isAdminView || isAdminRoute);
-
   const handleLogoClick = () => {
     if (onNavigateToAdminHub) {
       onNavigateToAdminHub();
     }
   };
 
+  const getSubViewLabel = (view) => {
+    switch (view) {
+      case 'pos':
+      case 'sales':
+        return 'POS Billing';
+      case 'purchase':
+        return 'Purchase Invoices';
+      case 'items':
+      case 'inventory':
+        return 'Inventory & Stock';
+      case 'damage':
+        return 'Damage & Expiry';
+      case 'distributors':
+        return 'Distributors';
+      case 'reports':
+      case 'finance':
+        return 'Reports & Ledgers';
+      case 'settings':
+        return 'Store Settings';
+      case 'hub':
+        return 'Executive Overview';
+      default:
+        return 'Retail POS';
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full max-w-full border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-md overflow-x-hidden">
-      <div className={`w-full ${adminSubView === 'purchase' ? 'max-w-[98vw]' : 'max-w-full sm:max-w-6xl'} mx-auto px-3.5 py-2 flex items-center justify-between gap-3`}>
-        {/* Left Section: Logo & Branding */}
+      <div className="w-full max-w-full px-3.5 py-2 flex items-center justify-between gap-3">
+        {/* Left Section: Logo & POS Branding */}
         <div
           onClick={handleLogoClick}
           className="flex items-center gap-2.5 min-w-0 cursor-pointer group select-none"
-          title="Navigate to Store Hub"
+          title="Go to POS Dashboard"
         >
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0 group-hover:scale-105 transition-transform">
             <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-pulse" />
@@ -38,8 +58,8 @@ export default function Navbar({
               <span className="font-black text-sm sm:text-base tracking-tight text-white group-hover:text-emerald-300 transition-colors shrink-0">
                 JAL-JIVAN
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-emerald-500/15 text-emerald-300 border-emerald-500/30 truncate max-w-[200px]">
-                {isAdminLoggedIn ? (storeName || (adminSubView === 'hub' ? 'Store Hub' : 'Store Portal')) : 'Retail OS'}
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border shrink-0 bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                {getSubViewLabel(adminSubView)}
               </span>
             </div>
           </div>
@@ -72,20 +92,20 @@ export default function Navbar({
                 />
               </span>
               <span className="hidden sm:inline">
-                {isSupabaseConfigured ? 'System Online' : 'Local Mode'}
+                {isSupabaseConfigured ? 'Online' : 'Local Mode'}
               </span>
             </button>
           )}
 
-          {/* ADMIN / ENTERPRISE VIEW: Logout or Login Indicator */}
+          {/* Logout or Login Indicator */}
           {isAdminLoggedIn ? (
             <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
               <button
                 type="button"
                 id="admin-navbar-logout-btn"
                 onClick={onAdminLogout}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 hover:shadow-rose-600/50 active:scale-95 transition-all shrink-0"
-                title="Logout from Admin Panel"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 active:scale-95 transition-all shrink-0"
+                title="Sign out of POS"
               >
                 <LogOut className="w-3.5 h-3.5 shrink-0" />
                 <span>Logout</span>
@@ -99,7 +119,7 @@ export default function Navbar({
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-bold transition shadow-sm active:scale-95"
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Admin Sign In</span>
+                <span>Sign In</span>
               </button>
             </div>
           )}
