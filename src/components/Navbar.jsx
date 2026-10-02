@@ -1,13 +1,11 @@
 import React from 'react';
-import { Droplets, LogOut, ShieldCheck, LayoutGrid } from 'lucide-react';
+import { Droplets, ShieldCheck, Zap } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 export default function Navbar({
   adminSubView = 'pos',
   onNavigateToAdminHub,
-  onOpenDbInfo,
-  isAdminLoggedIn = false,
-  onAdminLogout
+  onOpenDbInfo
 }) {
   const handleLogoClick = () => {
     if (onNavigateToAdminHub) {
@@ -48,7 +46,7 @@ export default function Navbar({
         <div
           onClick={handleLogoClick}
           className="flex items-center gap-2.5 min-w-0 cursor-pointer group select-none"
-          title="Go to POS Dashboard"
+          title="Go to POS Billing"
         >
           <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-bold shrink-0 group-hover:scale-105 transition-transform">
             <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-white animate-pulse" />
@@ -65,7 +63,7 @@ export default function Navbar({
           </div>
         </div>
 
-        {/* Right Section: Cloud status & auth controls */}
+        {/* Right Section: Cloud status & Direct Access Badge */}
         <div className="flex items-center gap-2.5 shrink-0 justify-end">
           {/* Operational Cloud Sync Status Pill */}
           {onOpenDbInfo && (
@@ -97,32 +95,12 @@ export default function Navbar({
             </button>
           )}
 
-          {/* Logout or Login Indicator */}
-          {isAdminLoggedIn ? (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
-              <button
-                type="button"
-                id="admin-navbar-logout-btn"
-                onClick={onAdminLogout}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white text-xs font-bold shadow-md shadow-rose-600/30 active:scale-95 transition-all shrink-0"
-                title="Sign out of POS"
-              >
-                <LogOut className="w-3.5 h-3.5 shrink-0" />
-                <span>Logout</span>
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-800 shrink-0">
-              <button
-                type="button"
-                onClick={handleLogoClick}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-bold transition shadow-sm active:scale-95"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Sign In</span>
-              </button>
-            </div>
-          )}
+          {/* Direct Unrestricted POS Badge */}
+          <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 rounded-xl">
+            <Zap className="w-3.5 h-3.5 text-emerald-400 fill-emerald-400" />
+            <span className="hidden sm:inline">POS Terminal Active</span>
+            <span className="sm:hidden">Active</span>
+          </div>
         </div>
       </div>
     </header>

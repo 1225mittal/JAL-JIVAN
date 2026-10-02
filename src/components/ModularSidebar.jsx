@@ -10,15 +10,13 @@ import {
   LayoutDashboard,
   ChevronLeft,
   ChevronRight,
-  LogOut,
-  Sparkles,
   Droplets
 } from 'lucide-react';
 
-export default function ModularSidebar({ currentModule, onNavigate, onLogout }) {
+export default function ModularSidebar({ currentModule, onNavigate }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // The 7 Core Modules requested by user + Hub Overview
+  // The 7 Core Modules requested by user
   const navItems = [
     {
       id: 'pos',
@@ -151,7 +149,7 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
         })}
       </nav>
 
-      {/* Footer Actions */}
+      {/* Footer Navigation */}
       <div className="p-2 border-t border-slate-800/80 space-y-1">
         <button
           type="button"
@@ -164,18 +162,6 @@ export default function ModularSidebar({ currentModule, onNavigate, onLogout }) 
           <LayoutDashboard className="w-4 h-4 shrink-0 text-indigo-400" />
           {!isCollapsed && <span className="truncate">Modules Overview</span>}
         </button>
-
-        {onLogout && (
-          <button
-            type="button"
-            onClick={onLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition"
-            title="Sign Out"
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-            {!isCollapsed && <span className="truncate">Sign Out</span>}
-          </button>
-        )}
       </div>
     </aside>
   );

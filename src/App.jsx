@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import AdminHub from './components/AdminHub';
 import DamageReturnHub from './components/damage/DamageReturnHub';
 import DistributorMaster from './components/damage/DistributorMaster';
 import { AdminDashboard } from './components/AdminPanel';
-import Login from './pages/Login';
 import PurchaseInwardHub from './components/PurchaseInwardHub';
 import ItemsInventoryHub from './components/items/ItemsInventoryHub';
 import PlannedModuleView from './components/PlannedModuleView';
@@ -12,7 +11,6 @@ import SalesBillingHub from './pages/SalesBillingHub';
 import DriverPortal from './components/DriverPortal';
 import MobileInwardCapture from './components/purchase/MobileInwardCapture';
 import ModularSidebar from './components/ModularSidebar';
-import { useAuth, DEFAULT_STORE } from './context/AuthContext';
 import AddDriverModal from './components/AddDriverModal';
 import CreateTaskModal from './components/CreateTaskModal';
 import SupabaseInfoModal from './components/SupabaseInfoModal';
@@ -40,17 +38,14 @@ import {
   updateSavedAddress,
   deleteSavedAddress,
   fetchProductDamages,
-  fetchDistributors,
-  supabase,
-  isSupabaseConfigured
+  fetchDistributors
 } from './lib/supabase';
 
 const LOGGED_IN_DRIVER_KEY = 'jal_jivan_current_driver';
-const ADMIN_SESSION_KEY = 'admin_session';
 
 // ==========================================
 // 1. CLEAN URL ROUTE & MODULE PARSER
-// Root ('/') directly opens the POS app dashboard
+// Root ('/') and /admin completely bypassed into direct POS
 // ==========================================
 export const getInitialModule = () => {
   if (typeof window === 'undefined') return 'pos';
@@ -74,8 +69,17 @@ export function parseRoute() {
     pathname = '/' + hash;
   }
 
-  // 1. ROOT (/) or /pos or /sales -> Directly main POS Billing module
-  if (pathname === '/' || pathname === '' || pathname === '/pos' || pathname === '/sales') {
+  // 1. ROOT (/), /pos, /sales, /admin, /login -> Directly main POS Billing module without any auth barriers
+  if (
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/pos' ||
+    pathname === '/sales' ||
+    pathname === '/admin' ||
+    pathname === '/admin/login' ||
+    pathname === '/login' ||
+    pathname === '/admin/hub'
+  ) {
     return { type: 'pos', module: 'pos', pathname: '/pos' };
   }
 
@@ -90,52 +94,47 @@ export function parseRoute() {
     return { type: 'driver', module: null, pathname: '/rider' };
   }
 
-  // 4. Dedicated Login Screen (/login or /admin/login)
-  if (pathname === '/admin/login' || pathname === '/login') {
-    return { type: 'admin-login', module: null, pathname: '/login' };
-  }
-
-  // 5. Purchase Invoices (/purchase, /inward, /invoices)
+  // 4. Purchase Invoices (/purchase, /inward, /invoices)
   if (pathname === '/purchase' || pathname === '/inward' || pathname === '/invoices' || pathname.startsWith('/purchase')) {
     return { type: 'purchase', module: 'purchase', pathname: '/purchase' };
   }
 
-  // 6. Inventory & Stock (/inventory, /items)
+  // 5. Inventory & Stock (/inventory, /items)
   if (pathname === '/inventory' || pathname === '/items' || pathname.startsWith('/inventory') || pathname.startsWith('/items')) {
     return { type: 'items', module: 'items', pathname: '/inventory' };
   }
 
-  // 7. Damage & Expiry (/damage, /expiry)
+  // 6. Damage & Expiry (/damage, /expiry)
   if (pathname === '/damage' || pathname === '/expiry' || pathname.startsWith('/damage')) {
     return { type: 'damage', module: 'damage', pathname: '/damage' };
   }
 
-  // 8. Distributors Directory (/distributors, /vendors)
+  // 7. Distributors Directory (/distributors, /vendors)
   if (pathname === '/distributors' || pathname === '/vendors' || pathname.startsWith('/distributors')) {
     return { type: 'distributors', module: 'distributors', pathname: '/distributors' };
   }
 
-  // 9. Reports & Ledgers (/reports, /finance, /ledger)
+  // 8. Reports & Ledgers (/reports, /finance, /ledger)
   if (pathname === '/reports' || pathname === '/finance' || pathname === '/ledger' || pathname.startsWith('/reports')) {
     return { type: 'reports', module: 'reports', pathname: '/reports' };
   }
 
-  // 10. Store Settings & Config (/settings, /config)
+  // 9. Store Settings & Config (/settings, /config)
   if (pathname === '/settings' || pathname === '/config' || pathname.startsWith('/settings')) {
     return { type: 'settings', module: 'settings', pathname: '/settings' };
   }
 
-  // 11. Delivery Dispatch (/delivery)
+  // 10. Delivery Dispatch (/delivery)
   if (pathname === '/delivery' || pathname.startsWith('/delivery')) {
     return { type: 'delivery', module: 'delivery', pathname: '/delivery' };
   }
 
-  // 12. Modules Overview Hub (/hub, /dashboard, /admin)
-  if (pathname === '/hub' || pathname === '/dashboard' || pathname === '/admin' || pathname === '/admin/hub') {
+  // 11. Modules Overview Hub (/hub, /dashboard)
+  if (pathname === '/hub' || pathname === '/dashboard') {
     return { type: 'hub', module: 'hub', pathname: '/hub' };
   }
 
-  // 13. Backward-compatible mapping for any legacy multi-tenant URLs
+  // 12. Backward-compatible mapping for any legacy multi-tenant URLs
   const segments = pathname.replace(/^\//, '').split('/');
   const subRoute = segments[1] || '';
   if (subRoute === 'purchase' || subRoute === 'inward') {
@@ -165,26 +164,11 @@ export function parseRoute() {
 }
 
 export default function App() {
-  const { logoutUser } = useAuth();
-
   // Current Active Module State
   const [currentModule, setCurrentModule] = useState(getInitialModule);
 
   // Current Route State
   const [routeState, setRouteState] = useState(() => parseRoute());
-
-  // Admin Authentication State
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
-    try {
-      const session =
-        localStorage.getItem(ADMIN_SESSION_KEY) ||
-        localStorage.getItem('jal_jivan_admin_logged_in') ||
-        localStorage.getItem('jaljivan_store_session');
-      return Boolean(session);
-    } catch {
-      return false;
-    }
-  });
 
   // Authenticated Driver State
   const [currentDriver, setCurrentDriver] = useState(() => {
@@ -232,13 +216,6 @@ export default function App() {
       localStorage.setItem('active_module', currentModule);
     } catch (e) {}
   }, [currentModule]);
-
-  // Clean auto-redirect away from /login if already logged in -> straight into /pos
-  useEffect(() => {
-    if (routeState.type === 'admin-login' && isAdminLoggedIn) {
-      navigate('/pos', true);
-    }
-  }, [routeState.type, isAdminLoggedIn, navigate]);
 
   // Listen to browser navigation (back/forward)
   useEffect(() => {
@@ -294,18 +271,6 @@ export default function App() {
     }
   }, []);
 
-  const fetchOrders = useCallback(async () => {
-    try {
-      const data = await fetchOrdersFromApi();
-      if (Array.isArray(data)) {
-        setOrders(data);
-      }
-      return data;
-    } catch (err) {
-      console.error('Error fetching orders:', err);
-    }
-  }, []);
-
   const loadInitialData = useCallback(async () => {
     try {
       setLoading(true);
@@ -343,32 +308,7 @@ export default function App() {
     }
   });
 
-  // ==========================================
-  // AUTHENTICATION & NAVIGATION HANDLERS
-  // ==========================================
-
-  // Admin Login Success: Immediately redirect directly into /pos
-  const handleAdminLoginSuccess = (redirectPath) => {
-    setIsAdminLoggedIn(true);
-    const target = typeof redirectPath === 'string' && redirectPath ? redirectPath : '/pos';
-    navigate(target);
-    showToast('Welcome to JAL-JIVAN POS!', 'success');
-  };
-
-  // Admin Logout (navigates to /login)
-  const handleAdminLogout = () => {
-    setIsAdminLoggedIn(false);
-    logoutUser?.();
-    try {
-      localStorage.removeItem(ADMIN_SESSION_KEY);
-      localStorage.removeItem('jal_jivan_admin_logged_in');
-      localStorage.removeItem('jaljivan_store_session');
-    } catch (e) {}
-    navigate('/login');
-    showToast('Signed out of POS', 'info');
-  };
-
-  // Back to POS or Hub
+  // Back to POS Billing
   const handleBackToHub = () => {
     navigate('/pos');
   };
@@ -661,36 +601,6 @@ export default function App() {
     );
   }
 
-  // If user is not logged in: Show clean, standard email/password login
-  if (!isAdminLoggedIn) {
-    return (
-      <div className="min-h-screen w-full bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white flex flex-col justify-center">
-        <Navbar
-          isAdminLoggedIn={false}
-          onOpenDbInfo={() => setIsDbInfoOpen(true)}
-        />
-        <main className="flex-1 flex items-center justify-center">
-          <Login onLoginSuccess={handleAdminLoginSuccess} />
-        </main>
-        <SupabaseInfoModal
-          isOpen={isDbInfoOpen}
-          onClose={() => setIsDbInfoOpen(false)}
-        />
-        <Toast toast={toast} onClose={() => setToast(null)} />
-      </div>
-    );
-  }
-
-  // Already logged in at /login -> Immediate redirect to /pos
-  if (routeState.type === 'admin-login') {
-    return (
-      <div className="min-h-screen w-full bg-[#0b1329] flex flex-col items-center justify-center gap-3">
-        <div className="w-9 h-9 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-        <span className="text-xs text-slate-400 font-mono">Opening POS Terminal...</span>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#0b1329] text-slate-100 selection:bg-emerald-500 selection:text-white">
       {/* Top Navbar */}
@@ -698,8 +608,6 @@ export default function App() {
         adminSubView={currentModule}
         onNavigateToAdminHub={() => navigate('/pos')}
         onOpenDbInfo={() => setIsDbInfoOpen(true)}
-        isAdminLoggedIn={isAdminLoggedIn}
-        onAdminLogout={handleAdminLogout}
       />
 
       <div className="flex flex-1 w-full overflow-hidden">
@@ -707,7 +615,6 @@ export default function App() {
         <ModularSidebar
           currentModule={currentModule}
           onNavigate={(path) => navigate(path)}
-          onLogout={handleAdminLogout}
         />
 
         {/* Main Application Container */}
@@ -798,7 +705,7 @@ export default function App() {
                 onUpdateAddress={handleUpdateAddress}
                 onDeleteAddress={handleDeleteAddress}
                 onRefresh={loadInitialData}
-                onLogout={handleAdminLogout}
+                onLogout={() => navigate('/pos')}
                 onBackToHub={handleBackToHub}
               />
             </ErrorBoundary>
