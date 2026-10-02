@@ -256,15 +256,15 @@ CREATE TABLE IF NOT EXISTS public.damage_expiry_items (
     current_status TEXT DEFAULT 'in_godown'
 );
 
--- 16. RLS Permissions for directory and damage items
-ALTER TABLE public.distributors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.damage_expiry_items ENABLE ROW LEVEL SECURITY;
+-- 16. Disable RLS and drop policies for directory and damage items
+ALTER TABLE public.distributors DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.damage_expiry_items DISABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access distributors" ON public.distributors;
-CREATE POLICY "Public access distributors" ON public.distributors FOR ALL USING (true) WITH CHECK (true);
-
+DROP POLICY IF EXISTS "Public access" ON public.distributors;
 DROP POLICY IF EXISTS "Public access damage_expiry_items" ON public.damage_expiry_items;
-CREATE POLICY "Public access damage_expiry_items" ON public.damage_expiry_items FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public access" ON public.damage_expiry_items;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.damage_expiry_items;
 
 -- 17. Multi-Division & FMCG Monthly Claim Cycle Schema Migration
 ALTER TABLE public.distributors ADD COLUMN IF NOT EXISTS divisions JSONB DEFAULT '[]'::jsonb;
@@ -341,14 +341,13 @@ CREATE TABLE IF NOT EXISTS public.purchase_items (
     margin_percentage NUMERIC(5, 2) DEFAULT 0.00
 );
 
-ALTER TABLE public.purchase_invoices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.purchase_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_invoices DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_items DISABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public access purchase_invoices" ON public.purchase_invoices;
-CREATE POLICY "Public access purchase_invoices" ON public.purchase_invoices FOR ALL USING (true) WITH CHECK (true);
-
+DROP POLICY IF EXISTS "Public access" ON public.purchase_invoices;
 DROP POLICY IF EXISTS "Public access purchase_items" ON public.purchase_items;
-CREATE POLICY "Public access purchase_items" ON public.purchase_items FOR ALL USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Public access" ON public.purchase_items;
 
 -- 20. Purchase Vendors (Automated Archiving & Vendor Profiles)
 CREATE TABLE IF NOT EXISTS public.purchase_vendors (
@@ -519,6 +518,60 @@ DROP POLICY IF EXISTS "Public access sales_invoice_items" ON public.sales_invoic
 CREATE POLICY "Public access sales_invoice_items" ON public.sales_invoice_items FOR ALL USING (true) WITH CHECK (true);
 
 ALTER PUBLICATION supabase_realtime ADD TABLE public.sales_invoices;
+
+-- =========================================================================
+-- 25. Core Retail RLS Bypass & Paywall / Subscription Stripping Migration
+-- =========================================================================
+
+-- 1. Drop the specific blocking policy causing the cascade error
+DROP POLICY IF EXISTS "Public reads store slug for delivery app routing" ON public.stores;
+
+-- 2. Drop all policies directly on core retail tables
+DROP POLICY IF EXISTS "Public access" ON public.damage_expiry_items;
+DROP POLICY IF EXISTS "Enable read access for all users" ON public.damage_expiry_items;
+DROP POLICY IF EXISTS "Public access damage_expiry_items" ON public.damage_expiry_items;
+
+DROP POLICY IF EXISTS "Public access" ON public.distributors;
+DROP POLICY IF EXISTS "Public access distributors" ON public.distributors;
+
+DROP POLICY IF EXISTS "Public access" ON public.purchase_invoices;
+DROP POLICY IF EXISTS "Public access purchase_invoices" ON public.purchase_invoices;
+
+DROP POLICY IF EXISTS "Public access" ON public.purchase_items;
+DROP POLICY IF EXISTS "Public access purchase_items" ON public.purchase_items;
+
+-- 3. Directly disable RLS on the 4 core retail tables
+ALTER TABLE IF EXISTS public.damage_expiry_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.distributors DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.purchase_invoices DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.purchase_items DISABLE ROW LEVEL SECURITY;
+
+-- 4. Disable RLS on stores, profiles, and user_profiles if present
+ALTER TABLE IF EXISTS public.stores DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.user_profiles DISABLE ROW LEVEL SECURITY;
+
+-- 5. Strip the trial, subscription, paywall, and super-admin fields with CASCADE
+ALTER TABLE IF EXISTS public.stores 
+  DROP COLUMN IF EXISTS trial_ends_at CASCADE,
+  DROP COLUMN IF EXISTS subscription_status CASCADE,
+  DROP COLUMN IF EXISTS is_active_subscription CASCADE;
+
+ALTER TABLE IF EXISTS public.profiles 
+  DROP COLUMN IF EXISTS trial_ends_at CASCADE,
+  DROP COLUMN IF EXISTS trial_start_date CASCADE,
+  DROP COLUMN IF EXISTS subscription_status CASCADE,
+  DROP COLUMN IF EXISTS plan_type CASCADE,
+  DROP COLUMN IF EXISTS is_super_admin CASCADE,
+  DROP COLUMN IF EXISTS payment_status CASCADE;
+
+ALTER TABLE IF EXISTS public.user_profiles 
+  DROP COLUMN IF EXISTS trial_ends_at CASCADE,
+  DROP COLUMN IF EXISTS trial_start_date CASCADE,
+  DROP COLUMN IF EXISTS subscription_status CASCADE,
+  DROP COLUMN IF EXISTS plan_type CASCADE,
+  DROP COLUMN IF EXISTS is_super_admin CASCADE,
+  DROP COLUMN IF EXISTS payment_status CASCADE;
 
 
 

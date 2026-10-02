@@ -281,8 +281,7 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         }
       }
 
-      // 4. Automated 7-Day All-Access Free Trial
-      const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      // 4. Store Record Deployment (Free / Unrestricted All-Access)
       const newStoreId = `store_${generatedSlug}_${Date.now()}`;
       const newStoreRecord = {
         id: newStoreId,
@@ -291,7 +290,6 @@ export default function PublicLandingPage({ onLoginSuccess, onNavigate }) {
         phone: formattedMobile,
         contact_phone: formattedMobile,
         status: 'active',
-        trial_ends_at: trialEndsAt,
         enabled_modules: {
           pos: true,
           inward_ocr: true,
